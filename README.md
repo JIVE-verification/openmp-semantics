@@ -1,7 +1,38 @@
-# openmp-semantics
+![Verified Software Toolchain](chain.jpg)
 
-**Than** 
+with contributions from
 
-1. I created a new branch for the VST code called OpenMP that works with Open-semantics. Anyone working on the project can clone it (https://github.com/PrincetonUniversity/VST/tree/OpenMP) and work locally.
-2. I fixed some errors caused by outdated libraries.
-3. I'm currently focusing on `HybridMachine.v`, working with the `spawn` rule.
+[Andrew W. Appel](http://www.cs.princeton.edu/~appel/),
+[Lennart Beringer](http://www.cs.princeton.edu/~eberinge/),
+[Robert Dockins](http://rwd.rdockins.name/),
+[Josiah Dodds](http://www.cs.princeton.edu/~jdodds/),
+[Aquinas Hobor](http://www.comp.nus.edu.sg/~hobor/),
+[Jean-Marie Madiot](https://madiot.fr/),
+[Gordon Stewart](http://www.cs.princeton.edu/~jsseven/),
+[Qinxiang Cao](http://jhc.sjtu.edu.cn/people/members/faculty/qinxiang-cao.html),
+Qinshi Wang,
+and others.
+
+The [LICENSE](LICENSE) file has information about copyright, licensing, and permissions.
+
+## How to install:
+
+[See here for instructions](./ivst.md).
+
+## Documentation:
+
+[Our webpage](https://vst.cs.princeton.edu) describes the goals of the project
+and has links to many related publications.
+
+For an introduction to how to use Verifiable C,
+[read the manual](doc/VC.pdf),
+or consult [Software Foundations Volume 5: Verifiable C](https://softwarefoundations.cis.upenn.edu/vc-current/index.html)
+for a tutorial with exercises.
+
+[Program Logics for Certified Compilers](https://www.cs.princeton.edu/~appel/papers/plcc.pdf), by Andrew W. Appel et al.,
+Cambridge University Press, 2014.
+Available in [hardcover](https://www.barnesandnoble.com/w/program-logics-for-certified-compilers-andrew-w-appel/1126363773).
+
+
+
+
