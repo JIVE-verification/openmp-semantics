@@ -491,12 +491,8 @@ Definition is_call_cont (k: cont) : Prop :=
 
 
 (** States *)
-
-(* Inductive meta_label: Type :=
-  | OMPParallel (num_threads: int) : meta_label
-  | OMPFor (num_threads: int) : meta_label
-  . *)
 Variable meta_label: Type.
+
 (* 
 Example: 
 #omp parallel num_threads(4)
@@ -582,9 +578,9 @@ with find_label_ls (lbl: label) (sl: labeled_statements) (k: cont)
   parameter binding semantics, then instantiate it later to give the two
   semantics described above. *)
 
+Variable run_meta_label: meta_label -> state -> state -> Prop.
 Variable function_entry: function -> list val -> mem -> env -> temp_env -> mem -> Prop.
 
-Variable run_meta_label: meta_label ->  state -> state -> Prop.
 (** Transition relation *)
 
 Inductive step: state -> trace -> state -> Prop :=
@@ -733,6 +729,12 @@ Inductive final_state: state -> int -> Prop :=
 
 End SEMANTICS.
 
+Record meta_label_mixin : Type := {
+  meta_label : Type;
+  run_meta_label: meta_label -> state meta_label -> state meta_label -> Prop
+}.
+
+Section FunctionParameterSemantics.
 (** The two semantics for function parameters.  First, parameters as local variables. *)
 
 Inductive function_entry1 (ge: genv) (f: function) (vargs: list val) (m: mem) (e: env) (le: temp_env) (m': mem) : Prop :=
@@ -743,30 +745,34 @@ Inductive function_entry1 (ge: genv) (f: function) (vargs: list val) (m: mem) (e
       le = create_undef_temps f.(fn_temps) ->
       function_entry1 ge f vargs m e le m'.
 
-Definition step1 (ge: genv) (meta_label: Type) := step ge meta_label (function_entry1 ge).
+Parameter (ml_mixin : meta_label_mixin).
+
+Definition step1 (ge: genv) 
+  := step ge ml_mixin.(meta_label) ml_mixin.(run_meta_label) (function_entry1 ge).
 
 (** Second, parameters as temporaries. *)
 
-Inductive function_entry2 (ge: genv) (meta_label: Type) (f: function) (vargs: list val) (m: mem) (e: env) (le: temp_env) (m': mem) : Prop :=
+Inductive function_entry2 (ge: genv) (f: function) (vargs: list val) (m: mem) (e: env) (le: temp_env) (m': mem) : Prop :=
   | function_entry2_intro:
       list_norepet (var_names f.(fn_vars)) ->
       list_norepet (var_names f.(fn_params)) ->
       list_disjoint (var_names f.(fn_params)) (var_names f.(fn_temps)) ->
       alloc_variables ge empty_env m f.(fn_vars) e m' ->
       bind_parameter_temps f.(fn_params) vargs (create_undef_temps f.(fn_temps)) = Some le ->
-      function_entry2 ge meta_label f vargs m e le m'.
+      function_entry2 ge f vargs m e le m'.
 
-Definition step2 (ge: genv) (meta_label: Type) := step ge meta_label (function_entry2 ge meta_label).
+Definition step2 (ge: genv) := 
+  step ge ml_mixin.(meta_label) ml_mixin.(run_meta_label) (function_entry2 ge).
 
 (** Wrapping up these definitions in two small-step semantics. *)
 (* FIXME *)
 Definition semantics1 (p: program) :=
   let ge := globalenv p in
-  Semantics_gen step1 (initial_state p) final_state ge ge.
+  Semantics_gen step1 (initial_state ml_mixin.(meta_label) p) (final_state ml_mixin.(meta_label)) ge ge.
 
 Definition semantics2 (p: program) :=
   let ge := globalenv p in
-  Semantics_gen step2 (initial_state p) final_state ge ge.
+  Semantics_gen step2 (initial_state ml_mixin.(meta_label) p) (final_state ml_mixin.(meta_label)) ge ge.
 
 (** This semantics is receptive to changes in events. *)
 
@@ -784,9 +790,12 @@ Proof.
   econstructor; econstructor; eauto.
   (* external *)
   exploit external_call_receptive; eauto. intros [vres2 [m2 EC2]].
-  exists (Returnstate vres2 k m2). econstructor; eauto.
+  exists (Returnstate _ vres2 k m2). econstructor; eauto.
+  (* meta *)
+  admit.
 (* trace length *)
   red; simpl; intros. inv H; simpl; try lia.
   eapply external_call_trace_length; eauto.
   eapply external_call_trace_length; eauto.
-Qed.
+  admit. (* run_meta_label creates events of length <= 1*)
+Admitted.
