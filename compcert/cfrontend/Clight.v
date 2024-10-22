@@ -485,7 +485,30 @@ Definition is_call_cont (k: cont) : Prop :=
   | _ => False
   end.
 
+
+(* state1 -clight_step-> state2 -clight_step-> call_state acquire  -hybridMachine step-> ... *)
+(* state1 -clight_step-> state2 -clight_step-> omp_state (omp_for) for_stmt   -??? step->  state modified_for_stmt *)
+
+
 (** States *)
+
+(* Inductive meta_label: Type :=
+  | OMPParallel (num_threads: int) : meta_label
+  | OMPFor (num_threads: int) : meta_label
+  . *)
+Variable meta_label: Type.
+(* 
+Example: 
+#omp parallel num_threads(4)
+  clight_stmt
+
+OMPStmt (OMPParallel 4) (Cstmt clight_stmt)
+*)
+
+Inductive meta_statement : Type :=
+  | OMPStmt (ml: meta_label) (ms: meta_statement) : meta_statement
+  | CStmt (s: statement) : meta_statement.
+(* TODO need to change definition of functions? *)
 
 Inductive state: Type :=
   | State
@@ -503,7 +526,14 @@ Inductive state: Type :=
   | Returnstate
       (res: val)
       (k: cont)
-      (m: mem) : state.
+      (m: mem) : state
+  | Metastate 
+      (ml: meta_label)
+      (st: state) : state.
+
+(** ** Auxiliary functions for the semantics *)
+
+(** Find the block and offset of a variable in the local environment *)
 
 (** Find the statement and manufacture the continuation
   corresponding to a label *)
@@ -554,6 +584,7 @@ with find_label_ls (lbl: label) (sl: labeled_statements) (k: cont)
 
 Variable function_entry: function -> list val -> mem -> env -> temp_env -> mem -> Prop.
 
+Variable run_meta_label: meta_label ->  state -> state -> Prop.
 (** Transition relation *)
 
 Inductive step: state -> trace -> state -> Prop :=
@@ -672,7 +703,11 @@ Inductive step: state -> trace -> state -> Prop :=
 
   | step_returnstate: forall v optid f e le k m,
       step (Returnstate v (Kcall optid f e le k) m)
-        E0 (State f Sskip k e (set_opttemp optid v le) m).
+        E0 (State f Sskip k e (set_opttemp optid v le) m)
+  | step_metastate: forall ml st st' t,
+      run_meta_label ml st st' ->
+      step (Metastate ml st)
+         t st'.
 
 (** ** Whole-program semantics *)
 
@@ -708,23 +743,23 @@ Inductive function_entry1 (ge: genv) (f: function) (vargs: list val) (m: mem) (e
       le = create_undef_temps f.(fn_temps) ->
       function_entry1 ge f vargs m e le m'.
 
-Definition step1 (ge: genv) := step ge (function_entry1 ge).
+Definition step1 (ge: genv) (meta_label: Type) := step ge meta_label (function_entry1 ge).
 
 (** Second, parameters as temporaries. *)
 
-Inductive function_entry2 (ge: genv)  (f: function) (vargs: list val) (m: mem) (e: env) (le: temp_env) (m': mem) : Prop :=
+Inductive function_entry2 (ge: genv) (meta_label: Type) (f: function) (vargs: list val) (m: mem) (e: env) (le: temp_env) (m': mem) : Prop :=
   | function_entry2_intro:
       list_norepet (var_names f.(fn_vars)) ->
       list_norepet (var_names f.(fn_params)) ->
       list_disjoint (var_names f.(fn_params)) (var_names f.(fn_temps)) ->
       alloc_variables ge empty_env m f.(fn_vars) e m' ->
       bind_parameter_temps f.(fn_params) vargs (create_undef_temps f.(fn_temps)) = Some le ->
-      function_entry2 ge f vargs m e le m'.
+      function_entry2 ge meta_label f vargs m e le m'.
 
-Definition step2 (ge: genv) := step ge (function_entry2 ge).
+Definition step2 (ge: genv) (meta_label: Type) := step ge meta_label (function_entry2 ge meta_label).
 
 (** Wrapping up these definitions in two small-step semantics. *)
-
+(* FIXME *)
 Definition semantics1 (p: program) :=
   let ge := globalenv p in
   Semantics_gen step1 (initial_state p) final_state ge ge.
