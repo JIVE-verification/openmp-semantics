@@ -799,3 +799,4 @@ Proof.
   eapply external_call_trace_length; eauto.
   admit. (* run_meta_label creates events of length <= 1*)
 Admitted.
+End FunctionParameterSemantics.
