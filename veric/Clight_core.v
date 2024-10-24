@@ -41,19 +41,32 @@ Axiom inline_external_call_mem_events:
    external_call ef ge vargs m t vres m' ->
    {trace | ev_elim m trace m'}.
 
+Section Clight_core.
+
+Definition state_params : Type := (function * statement * cont * env * temp_env).
+Variable run_meta_label' : meta_label -> state_params -> mem -> state_params -> mem -> Prop.
+
 Inductive state : Type :=
     State : function ->
             statement -> cont -> env -> temp_env -> state
   | Callstate : fundef -> list val -> cont -> state
-  | Returnstate : val -> cont -> state.
+  | Returnstate : val -> cont -> state
+  | Metastate : meta_label -> state_params -> state.
 
 Definition CC_core := state.
+
+Definition core_state_params_to_state_params (c:state_params) (m: mem): Clight.state_params :=
+  (c, m).
+
+Definition state_params_to_core_state_params (c:Clight.state_params): state_params * mem :=
+  (fst c, snd c).
 
 Definition CC_core_to_CC_state (c:state) (m:mem) : Clight.state :=
   match c with
      State f st k e te => Clight.State f st k e te m
   |  Callstate fd args k => Clight.Callstate fd args k m
   | Returnstate v k => Clight.Returnstate v k m
+  | Metastate ml sp => Clight.Metastate ml (sp, m)
  end.
 
 Definition CC_state_to_CC_core (c:Clight.state): state * mem :=
@@ -61,6 +74,7 @@ Definition CC_state_to_CC_core (c:Clight.state): state * mem :=
      Clight.State f st k e te m => (State f st k e te, m)
   |  Clight.Callstate fd args k m => (Callstate fd args k, m)
   | Clight.Returnstate v k m => (Returnstate v k, m)
+  | Clight.Metastate ml sp => (Metastate ml (fst sp), snd sp)
  end.
 
 Lemma  CC_core_CC_state_1: forall c m,
@@ -73,6 +87,7 @@ Lemma  CC_core_CC_state_2: forall s c m,
       destruct c; simpl in *; inv H; trivial.
       destruct c; simpl in *; inv H; trivial.
       destruct c; simpl in *; inv H; trivial.
+      destruct c; destruct sp; simpl in *; inv H; trivial.
   Qed.
 
 Lemma  CC_core_CC_state_3: forall s c m,
@@ -84,6 +99,7 @@ Lemma  CC_core_CC_state_4: forall s, exists c, exists m, s =  CC_core_to_CC_stat
              exists (State f s k e le). exists m; reflexivity.
              exists (Callstate fd args k). exists m; reflexivity.
              exists (Returnstate res k). exists m; reflexivity.
+             destruct sp as [sp m]. exists (Metastate ml sp). exists m; reflexivity.
   Qed.
 
 Lemma CC_core_to_CC_state_inj: forall c m c' m',
@@ -293,13 +309,17 @@ Inductive step: genv -> state -> mem -> state -> mem -> Prop :=
 
   | step_returnstate: forall ge v optid f e le k m,
       step ge (Returnstate v (Kcall optid f e le k)) m
-           (State f Sskip k e (set_opttemp optid v le)) m.
+           (State f Sskip k e (set_opttemp optid v le)) m
+  | step_to_metastate: forall ge ml f s k e le m,
+     step ge (State f (Smeta ml s) k e le) m
+        (Metastate ml (f, s, k, e, le)) m
+  .
 
 Definition cl_step: genv -> CC_core -> mem -> CC_core -> mem -> Prop := step.
 
-Lemma cl_step_equiv: forall ge (q: CC_core) (m: mem) q' m',
+Lemma cl_step_equiv: forall ge run_meta_label (q: CC_core) (m: mem) q' m',
   cl_at_external q = None ->
-  step ge q m q' m' -> exists t, Clight.step ge (Clight.function_entry2 ge) 
+  step ge q m q' m' -> exists t, Clight.step ge run_meta_label (Clight.function_entry2 ge) 
       (CC_core_to_CC_state q m) t (CC_core_to_CC_state q' m').
 Proof.
 intros.
@@ -309,6 +329,7 @@ rename H into Hat.
 inv H0; 
 repeat match goal with H: _ = CC_core_to_CC_state ?q _ |- _ => destruct q; inv H end;
 try solve [do 2 econstructor; eassumption].
+Unshelve. constructor.
 Qed.
 
 Lemma cl_corestep_not_at_external:
@@ -494,3 +515,5 @@ eapply mem_step_storebytes; eauto.
 Defined.
 
 Definition at_external c := cl_at_external (fst (CC_state_to_CC_core c)). (* Temporary definition for compatibility between CompCert 3.3 and new-compcert *)
+
+End Clight_core.

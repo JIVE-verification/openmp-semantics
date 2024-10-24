@@ -93,6 +93,11 @@ Definition typeof (e: expr) : type :=
 
 Definition label := ident.
 
+Variant meta_label : Type :=
+  | OMPParallel (num_threads: nat)
+  | OMPFor (num_threads: nat)
+.
+
 Inductive statement : Type :=
   | Sskip : statement                   (**r do nothing *)
   | Sassign : expr -> expr -> statement (**r assignment [lvalue = rvalue] *)
@@ -108,6 +113,7 @@ Inductive statement : Type :=
   | Sswitch : expr -> labeled_statements -> statement  (**r [switch] statement *)
   | Slabel : label -> statement -> statement
   | Sgoto : label -> statement
+  | Smeta : meta_label -> statement -> statement
 
 with labeled_statements : Type :=            (**r cases of a [switch] *)
   | LSnil: labeled_statements
@@ -490,21 +496,9 @@ Definition is_call_cont (k: cont) : Prop :=
 (* state1 -clight_step-> state2 -clight_step-> omp_state (omp_for) for_stmt   -??? step->  state modified_for_stmt *)
 
 
-(** States *)
-Variable meta_label: Type.
-
-(* 
-Example: 
-#omp parallel num_threads(4)
-  clight_stmt
-
-OMPStmt (OMPParallel 4) (Cstmt clight_stmt)
-*)
-
-Inductive meta_statement : Type :=
-  | OMPStmt (ml: meta_label) (ms: meta_statement) : meta_statement
-  | CStmt (s: statement) : meta_statement.
 (* TODO need to change definition of functions? *)
+
+Definition state_params : Type := (function * statement * cont * env * temp_env * mem).
 
 Inductive state: Type :=
   | State
@@ -525,7 +519,15 @@ Inductive state: Type :=
       (m: mem) : state
   | Metastate 
       (ml: meta_label)
-      (st: state) : state.
+      (* resumes to some State, if the metalabel does not do anything *)
+      (sp: state_params) : state.
+
+Variable run_meta_label: meta_label -> state_params -> state_params -> Prop.
+
+Definition state_of (p: state_params) :=
+  let '(f, s, k, e, le, m) := p in
+  State f s k e le m.
+
 
 (** ** Auxiliary functions for the semantics *)
 
@@ -578,7 +580,6 @@ with find_label_ls (lbl: label) (sl: labeled_statements) (k: cont)
   parameter binding semantics, then instantiate it later to give the two
   semantics described above. *)
 
-Variable run_meta_label: meta_label -> state -> state -> Prop.
 Variable function_entry: function -> list val -> mem -> env -> temp_env -> mem -> Prop.
 
 (** Transition relation *)
@@ -700,10 +701,13 @@ Inductive step: state -> trace -> state -> Prop :=
   | step_returnstate: forall v optid f e le k m,
       step (Returnstate v (Kcall optid f e le k) m)
         E0 (State f Sskip k e (set_opttemp optid v le) m)
-  | step_metastate: forall ml st st' t,
-      run_meta_label ml st st' ->
-      step (Metastate ml st)
-         t st'.
+  | step_to_metastate: forall ml f s k e le m t,
+     step (State f (Smeta ml s) k e le m)
+        t (Metastate ml (f, s, k, e, le, m))
+  | step_from_metastate: forall ml sp sp' t,
+      run_meta_label ml sp sp' ->
+      step (Metastate ml sp)
+         t (state_of sp').
 
 (** ** Whole-program semantics *)
 
@@ -730,8 +734,8 @@ Inductive final_state: state -> int -> Prop :=
 End SEMANTICS.
 
 Record meta_label_mixin : Type := {
-  meta_label : Type;
-  run_meta_label: meta_label -> state meta_label -> state meta_label -> Prop
+  run_meta_label: meta_label -> state_params -> state_params -> Prop
+  (* properties of meta_label? *)
 }.
 
 Section FunctionParameterSemantics.
@@ -748,7 +752,7 @@ Inductive function_entry1 (ge: genv) (f: function) (vargs: list val) (m: mem) (e
 Parameter (ml_mixin : meta_label_mixin).
 
 Definition step1 (ge: genv) 
-  := step ge ml_mixin.(meta_label) ml_mixin.(run_meta_label) (function_entry1 ge).
+  := step ge ml_mixin.(run_meta_label) (function_entry1 ge).
 
 (** Second, parameters as temporaries. *)
 
@@ -762,17 +766,17 @@ Inductive function_entry2 (ge: genv) (f: function) (vargs: list val) (m: mem) (e
       function_entry2 ge f vargs m e le m'.
 
 Definition step2 (ge: genv) := 
-  step ge ml_mixin.(meta_label) ml_mixin.(run_meta_label) (function_entry2 ge).
+  step ge ml_mixin.(run_meta_label) (function_entry2 ge).
 
 (** Wrapping up these definitions in two small-step semantics. *)
 (* FIXME *)
 Definition semantics1 (p: program) :=
   let ge := globalenv p in
-  Semantics_gen step1 (initial_state ml_mixin.(meta_label) p) (final_state ml_mixin.(meta_label)) ge ge.
+  Semantics_gen step1 (initial_state p) final_state ge ge.
 
 Definition semantics2 (p: program) :=
   let ge := globalenv p in
-  Semantics_gen step2 (initial_state ml_mixin.(meta_label) p) (final_state ml_mixin.(meta_label)) ge ge.
+  Semantics_gen step2 (initial_state p) final_state ge ge.
 
 (** This semantics is receptive to changes in events. *)
 
@@ -790,8 +794,10 @@ Proof.
   econstructor; econstructor; eauto.
   (* external *)
   exploit external_call_receptive; eauto. intros [vres2 [m2 EC2]].
-  exists (Returnstate _ vres2 k m2). econstructor; eauto.
-  (* meta *)
+  exists (Returnstate vres2 k m2). econstructor; eauto.
+  (* intometa *)
+  admit.
+  (* frommeta *)
   admit.
 (* trace length *)
   red; simpl; intros. inv H; simpl; try lia.
