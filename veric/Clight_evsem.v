@@ -586,7 +586,11 @@ le ->
 
   | evstep_returnstate: forall v optid f e le k m,
       cl_evstep ge (Returnstate v (Kcall optid f e le k)) m nil
-           (State f Sskip k e (set_opttemp optid v le)) m.
+           (State f Sskip k e (set_opttemp optid v le)) m
+  | evstep_to_metastate: forall ml f s k e le m,
+      cl_evstep ge (State f (Smeta ml s) k e le) m nil
+           (Metastate ml (f, s, k, e, le)) m        
+           .
 
   Lemma CLC_evstep_ax1 ge : forall c m T c' m' (H: cl_evstep ge c m T c' m' ),
     corestep (CLC_memsem ge) c m c' m'.
