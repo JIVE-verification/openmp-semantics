@@ -1,4 +1,4 @@
-(* adapted from the CPM thread pool concurrency/common/threadPool.v *)
+
 From mathcomp.ssreflect Require Import ssreflect ssrbool ssrnat ssrfun eqtype seq fintype finfun.
 
 Require Import Lia.
@@ -20,7 +20,7 @@ Require Import VST.concurrency.common.lksize.
 Import Address.
 
 Set Implicit Arguments.
-
+Require Import List. Import List.ListNotations.
 
 Inductive ctl {cT:Type} : Type :=
 | Krun : cT -> ctl
@@ -56,7 +56,7 @@ Module ThreadPool.
         lockSet : t -> access_map;         (* Gets the permissions for the lock set *)
         lockRes : t -> address -> option lock_info;
 (*         extraRes : t -> res; (* extra resources not held by any thread or lock *) *)
-        addThread : t -> val -> val -> res -> t;
+        addThread : t -> semC -> res -> t;
         updThreadC : forall {tid tp}, containsThread tp tid -> ctl -> t;
         updThreadR : forall {tid tp}, containsThread tp tid -> res -> t;
         updThread : forall {tid tp}, containsThread tp tid -> ctl -> res -> t;
@@ -80,17 +80,17 @@ Module ThreadPool.
 
         (* Add Thread properties*)
         ;  cntAdd:
-             forall {j tp} vf arg p,
+             forall {j tp} c p,
                containsThread tp j ->
-               containsThread (addThread tp vf arg p) j
+               containsThread (addThread tp c p) j
 
         ;  cntAddLatest:
-             forall {tp} vf arg p,
-               containsThread (addThread tp vf arg p) (latestThread tp)
+             forall {tp} c p,
+               containsThread (addThread tp c p) (latestThread tp)
 
         ;  cntAdd':
-             forall {j tp} vf arg p,
-               containsThread (addThread tp vf arg p) j ->
+             forall {j tp} c p,
+               containsThread (addThread tp c p) j ->
                (containsThread tp j /\ j <> latestThread tp) \/ j = latestThread tp
 
         (* Update properties*)
@@ -166,13 +166,13 @@ Module ThreadPool.
                lockSet (updThreadR cnti p) = lockSet tp
 
         ;  gsoAddLock :
-             forall tp vf arg p,
-               lockSet (addThread tp vf arg p) = lockSet tp
+             forall tp c p,
+               lockSet (addThread tp c p) = lockSet tp
 
         ;  gssAddRes :
-             forall {tp} vf arg pmap j
+             forall {tp} c pmap j
                (Heq: j = latestThread tp)
-               (cnt': containsThread (addThread tp vf arg pmap) j),
+               (cnt': containsThread (addThread tp c pmap) j),
                getThreadR cnt' = pmap
 
         (*Get thread Properties*)
@@ -247,8 +247,8 @@ Module ThreadPool.
                lockRes (updThread cnti c p) addr = lockRes tp addr
 
         ;  gsoAddLPool :
-             forall tp vf arg p (addr : address),
-               lockRes (addThread tp vf arg p) addr = lockRes tp addr
+             forall tp c p (addr : address),
+               lockRes (addThread tp c p) addr = lockRes tp addr
 
         ;  gLockSetRes :
              forall {i tp} addr (res : lock_info) (cnti: containsThread tp i)
@@ -309,10 +309,10 @@ Module ThreadPool.
                (cntj': containsThread (updThread cnti c pmap) j),
                updThread cnti' c pmap = updThread cntj' c' pmap'
 
-        ;  add_updateC_comm :
-             forall tp i vf arg pmap c'
+        (* ;  add_updateC_comm :
+             forall tp i c pmap c'
                (cnti: containsThread tp i)
-               (cnti': containsThread (addThread tp vf arg pmap) i),
+               (cnti': containsThread (addThread tp c pmap) i),
                addThread (updThreadC cnti c') vf arg pmap =
                updThreadC cnti' c'
 
@@ -321,7 +321,7 @@ Module ThreadPool.
                (cnti: containsThread tp i)
                (cnti': containsThread (addThread tp vf arg pmap) i),
                addThread (updThread cnti c' pmap') vf arg pmap =
-               updThread cnti' c' pmap'
+               updThread cnti' c' pmap' *)
 
         ;  updThread_lr_valid :
              forall tp i (cnti: containsThread tp i) c' m',
@@ -413,20 +413,20 @@ Module ThreadPool.
                getThreadR cnti' = getThreadR cnti
 
         ;  gsoAddCode :
-             forall {tp} vf arg pmap j
+             forall {tp} c pmap j
                (cntj: containsThread tp j)
-               (cntj': containsThread (addThread tp vf arg pmap) j),
+               (cntj': containsThread (addThread tp c pmap) j),
                getThreadC cntj' = getThreadC cntj
 
         ;  gssAddCode :
-             forall {tp} vf arg pmap j
+             forall {tp} c pmap j
                (Heq: j = latestThread tp)
-               (cnt': containsThread (addThread tp vf arg pmap) j),
-               getThreadC cnt' = Kinit vf arg
+               (cnt': containsThread (addThread tp c pmap) j),
+               getThreadC cnt' = Kresume c Vundef
 
         ;  gsoAddRes :
-             forall {tp} vf arg pmap j
-               (cntj: containsThread tp j) (cntj': containsThread (addThread tp vf arg pmap) j),
+             forall {tp} c pmap j
+               (cntj: containsThread tp j) (cntj': containsThread (addThread tp c pmap) j),
                getThreadR cntj' = getThreadR cntj
 
         ;  updLock_updThread_comm :
@@ -658,13 +658,13 @@ Module OrdinalPool.
 
     Definition latestThread tp := n (num_threads tp).
 
-    Definition addThread (tp : t) cont (pmap : res) : t :=
+    Definition addThread' (tp : t) (c : semC) (pmap : res) :=
       let: new_num_threads := pos_incr (num_threads tp) in
       let: new_tid := ordinal_pos_incr (num_threads tp) in
-      mk new_num_threads
+      let tp' := mk new_num_threads
          (fun (n : 'I_new_num_threads) =>
             match unlift new_tid n with
-            | None => Krun cont
+            | None => Kresume c Vundef
             | Some n' => tp n'
             end)
          (fun (n : 'I_new_num_threads) =>
@@ -672,7 +672,20 @@ Module OrdinalPool.
             | None => pmap
             | Some n' => (perm_maps tp) n'
             end)
-         (lset tp) (* (extra tp) *).
+         (lset tp) (* (extra tp) *) in
+      (new_num_threads, tp').
+
+    Definition addThread (tp : t) (c : semC) (pmap : res) : t :=
+      (addThread' tp c pmap).2.
+
+    (* spawn to_spawn threads, return the new tids and the new tp *)
+    Definition addThreads (tp : t) (c : semC) (pmap : res) (to_spawn: nat) :=
+      let init := (@nil pos, tp) in
+      Z.iter (Z.of_nat to_spawn) 
+             (fun x =>
+              let (new_tid, tp') := addThread' x.2 c pmap in
+              (new_tid::x.1, tp'))
+             ([], tp).
 
     Definition updLockSet tp (add:address) (lf:lock_info) : t :=
       mk (num_threads tp)
@@ -845,9 +858,9 @@ Module OrdinalPool.
     Qed. *)
 
     Lemma cntAdd:
-      forall {j tp} vf arg p,
+      forall {j tp} c p,
         containsThread tp j ->
-        containsThread (addThread tp vf arg p) j.
+        containsThread (addThread tp c p) j.
     Proof.
       intros;
         unfold addThread, containsThread in *;
@@ -856,8 +869,8 @@ Module OrdinalPool.
     Qed.
 
     Lemma cntAddLatest:
-      forall {tp} vf arg p,
-        containsThread (addThread tp vf arg p) (latestThread tp).
+      forall {tp} c p,
+        containsThread (addThread tp c p) (latestThread tp).
     Proof.
       intros;
         unfold addThread, containsThread, latestThread;
@@ -866,8 +879,8 @@ Module OrdinalPool.
     Qed.
 
     Lemma cntAdd':
-      forall {j tp} vf arg p,
-        containsThread (addThread tp vf arg p) j ->
+      forall {j tp} c p,
+        containsThread (addThread tp c p) j ->
         (containsThread tp j /\ j <> num_threads tp) \/ j = num_threads tp.
     Proof.
       intros.
@@ -886,8 +899,8 @@ Module OrdinalPool.
         by ssrlia.
     Qed.
 
-    Lemma contains_add_latest: forall ds p a r,
-        containsThread (addThread ds p a r)
+    Lemma contains_add_latest: forall ds c r,
+        containsThread (addThread ds c r)
                        (latestThread ds).
     Proof. intros.
            simpl. unfold containsThread, latestThread.
@@ -1059,8 +1072,8 @@ Module OrdinalPool.
     Qed.
 
     Lemma gsoAddLock:
-      forall tp vf arg p,
-        lockSet (addThread tp vf arg p) = lockSet tp.
+      forall tp c p,
+        lockSet (addThread tp c p) = lockSet tp.
     Proof.
       auto.
     Qed.
@@ -1379,9 +1392,9 @@ Module OrdinalPool.
     Defined.
 
     Lemma gssAddRes:
-      forall {tp} vf arg pmap j
+      forall {tp} c pmap j
         (Heq: j = latestThread tp)
-        (cnt': containsThread (addThread tp vf arg pmap) j),
+        (cnt': containsThread (addThread tp c pmap) j),
         getThreadR cnt' = pmap.
     Proof.
       intros. subst.
@@ -1399,8 +1412,8 @@ Module OrdinalPool.
     Qed.
 
     Lemma gsoAddRes:
-      forall {tp} vf arg pmap j
-        (cntj: containsThread tp j) (cntj': containsThread (addThread tp vf arg pmap) j),
+      forall {tp} c pmap j
+        (cntj: containsThread tp j) (cntj': containsThread (addThread tp c pmap) j),
         getThreadR cntj' = getThreadR cntj.
     Proof.
       intros.
@@ -1427,10 +1440,10 @@ Module OrdinalPool.
     Qed.
 
     Lemma gssAddCode:
-      forall {tp} vf arg pmap j
+      forall {tp} c pmap j
         (Heq: j = latestThread tp)
-        (cnt': containsThread (addThread tp vf arg pmap) j),
-        getThreadC cnt' = Kinit vf arg.
+        (cnt': containsThread (addThread tp c pmap) j),
+        getThreadC cnt' = Kresume c Vundef.
     Proof.
       intros. subst.
       simpl.
@@ -1447,9 +1460,9 @@ Module OrdinalPool.
     Qed.
 
     Lemma gsoAddCode:
-      forall {tp} vf arg pmap j
+      forall {tp} c pmap j
         (cntj: containsThread tp j)
-        (cntj': containsThread (addThread tp vf arg pmap) j),
+        (cntj': containsThread (addThread tp c pmap) j),
         getThreadC cntj' = getThreadC cntj.
     Proof.
       intros.
@@ -1478,7 +1491,8 @@ Module OrdinalPool.
         by discriminate.
     Qed.
 
-    Lemma add_update_comm:
+    (* Ke: now addThread is a fork, add and update are not commutative any more *)
+    (* Lemma add_update_comm:
       forall tp i vf arg pmap c' pmap'
         (cnti: containsThread tp i)
         (cnti': containsThread (addThread tp vf arg pmap) i),
@@ -1586,7 +1600,7 @@ Module OrdinalPool.
       unfold addThread, updThreadC in *; simpl in *.
       rewrite H.
         by reflexivity.
-    Qed.
+    Qed. *)
 
     Lemma updThread_comm :
       forall tp  i j c pmap c' pmap'
@@ -1735,8 +1749,8 @@ Module OrdinalPool.
     Qed.
 
     Lemma gsoAddLPool:
-      forall tp vf arg p (addr : address),
-        lockRes (addThread tp vf arg p) addr = lockRes tp addr.
+      forall tp c p (addr : address),
+        lockRes (addThread tp c p) addr = lockRes tp addr.
     Proof.
       intros.
       unfold addThread, lockRes.
@@ -2205,8 +2219,8 @@ Module OrdinalPool.
                                     lockSet_updLockSet
                                     updThread_updThreadC_comm
                                     updThread_comm
-                                    add_updateC_comm
-                                    add_update_comm
+                                    (* add_updateC_comm *)
+                                    (* add_update_comm *)
                                     updThread_lr_valid
 (*                                     gssExtraRes
                                     gsoAddExtra
