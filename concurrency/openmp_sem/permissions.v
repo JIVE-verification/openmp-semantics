@@ -2375,6 +2375,15 @@ Proof.*)
     forall b ofs,
       permjoin ((pmap1 !! b) ofs) ((pmap2 !! b) ofs) ((pmap3 !! b) ofs).
 
+  (* pmap1 * n + pmap2 = pmap3 *)
+  Fixpoint permMapJoin_n_times pmap1 (n:nat) pmap2 :=
+    exists pmap2', (* running total *)
+    permMapJoin pmap1 pmap2' pmap2 /\
+               match n with
+               | O => pmap2' = pmap2
+               | S n' => permMapJoin_n_times pmap1 n' pmap2'
+               end.
+
   Lemma permMapJoin_order:
     forall p1 p2 p3
       (Hjoin: permMapJoin p1 p2 p3),

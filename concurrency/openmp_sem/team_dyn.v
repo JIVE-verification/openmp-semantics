@@ -40,6 +40,7 @@ Section OpenMPThreads.
       | TeamLeaf : ot_info -> team_tree
       (* parent thread and the including itself *)
       | TeamNode : ot_info -> (* parent thread *)
+                   bool -> (* whether this layer of parallel region is blocking *)
                    list team_tree -> (* the team that it spawns, 
                                         first thread is same as parent thread but o_tid=0 *)
                    team_tree.
@@ -51,8 +52,8 @@ Section OpenMPThreads.
       Definition team_init (tid: nat) := TeamLeaf (ot_init tid).
 
       (* ot creates a new team with the other team_mates *)
-      Definition spawn_team' (ot: ot_info) (team_mates: list nat) : team_tree :=
-        TeamNode ot $ (λ tid, TeamLeaf (Build_ot_info tid 0 false)) <$> (cons (ot.(t_tid)) team_mates).
+      Definition spawn_team' (ot: ot_info) (is_blocking: bool) (team_mates: list nat) : team_tree :=
+        TeamNode ot is_blocking $ (λ tid, TeamLeaf (Build_ot_info tid 0 false)) <$> (cons (ot.(t_tid)) team_mates).
 
       Definition is_tid (tid: nat) (ot: ot_info) :=
         ot.(t_tid) = tid.
@@ -63,7 +64,7 @@ Section OpenMPThreads.
       Fixpoint tree_to_list (tree: team_tree) : (list ot_info) :=
         match tree with
         | TeamLeaf ot => nil
-        | TeamNode ot ts => concat (map tree_to_list ts)
+        | TeamNode ot is_blocking ts => concat (map tree_to_list ts)
         end.
 
       Definition has_tid (tid: nat) (tree: team_tree) : Prop :=
@@ -88,16 +89,16 @@ Section OpenMPThreads.
       (** spawns a team at every TeamLeaf that contains tid.
        * should require that tid is unique in tree.
        *)
-      Fixpoint spawn_team (tid: nat) (team_mates: list nat) (tree: team_tree) : team_tree :=
+      Fixpoint spawn_team (tid: nat) (is_blocking: bool) (team_mates: list nat) (tree: team_tree): team_tree :=
         match tree with
-        | TeamLeaf ot => if decide $ is_tid tid ot then spawn_team' ot team_mates else tree
-        | TeamNode p ts => TeamNode p $ map (spawn_team tid team_mates) ts
+        | TeamLeaf ot => if decide $ is_tid tid ot then spawn_team' ot is_blocking team_mates else tree
+        | TeamNode p is_blocking2 ts => TeamNode p is_blocking2 $ map (spawn_team tid is_blocking team_mates) ts
         end.
 
       (* a spawned team is done when all team members are done *)
       Definition team_done (tid: nat) (tree: team_tree) : Prop :=
-        ∃ p ts,
-          tree = TeamNode p ts ∧ 
+        ∃ p is_blocking ts,
+          tree = TeamNode p is_blocking ts ∧ 
           Forall (λ t, ∃ ot, t=TeamLeaf ot ∧ (* all team members must be leaf *)
                              ot.(o_done) = true) ts.
 
@@ -107,7 +108,7 @@ Section OpenMPThreads.
       Fixpoint fire_team (tid: nat) (tree: team_tree) : team_tree :=
         match tree with
         | TeamLeaf _ => tree
-        | TeamNode p ts => if decide $ is_tid tid p then TeamLeaf p else TeamNode p $ map (fire_team tid) ts
+        | TeamNode p is_blocking ts => if decide $ is_tid tid p then TeamLeaf p else TeamNode p is_blocking $ map (fire_team tid) ts
         end.
     End OpenMPTeam.
 

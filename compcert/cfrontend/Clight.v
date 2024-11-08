@@ -94,7 +94,8 @@ Definition typeof (e: expr) : type :=
 Definition label := ident.
 
 Variant meta_label : Type :=
-  | OMPParallel (num_threads: nat)
+  | OMPParallel (num_threads: nat) (is_blocking: bool)
+  | OMPParallelEnd
   | OMPFor (num_threads: nat)
 .
 

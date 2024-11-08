@@ -18,7 +18,7 @@ Require Export VST.concurrency.common.lksize.
 Require Import VST.concurrency.openmp_sem.threadPool.
 
 Require Import VST.concurrency.common.machine_semantics.
-Require Import VST.concurrency.common.permissions.
+Require Import VST.concurrency.openmp_sem.permissions.
 Require Import VST.concurrency.compiler.mem_equiv.
 Require Import VST.concurrency.common.bounded_maps.
 Require Import VST.concurrency.common.addressFiniteMap.
@@ -33,6 +33,7 @@ Require Import VST.concurrency.common.coinductive_safety.*)
 Require Import VST.concurrency.openmp_sem.HybridMachineSig.
 Require Import VST.concurrency.openmp_sem.team_dyn.
 (* Require Import VST.concurrency.CoreSemantics_sum. *)
+Require Import VST.concurrency.openmp_sem.notations.
 Import Maps.
 
 
@@ -55,6 +56,7 @@ Module DryHybridMachine.
     Notation semSem:= (@semSem Sem).
 
     Notation thread_pool := (@t dryResources Sem).
+    Local Open Scope stdpp_scope.
     (** Memories*)
     Definition richMem: Type:= mem.
     Definition dryMem: richMem -> mem:= fun x => x.
@@ -163,13 +165,28 @@ Module DryHybridMachine.
                      | Some _ => Some (ZMap.get ofs (Maps.PMap.get b (Mem.mem_contents m)))
                      end) dm.
 
+    Definition transform_state_parallel_impl (c: Clight_core.state) (is_leader : bool) : option Clight_core.state :=
+      match c with
+      | Clight_core.Metastate (OMPParallel num_threads _) (f,s,k,e,le) =>
+        (* need to bring threads in a `Metastate ParallelEnd` state to implement blocking/barrier for the leader *)
+        let s' := Ssequence s (Smeta OMPParallelEnd Sskip) in
+        let k' := if is_leader then k else Kstop in
+        Some (Clight_core.State f s' k' e le)
+      | _ => None
+      end.
+
+    Parameter transform_state_parallel : C -> bool -> option C.
+
+    Definition computeMap' access delta := computeMap delta access.
+
     Inductive meta_step {isCoarse:bool} {tid0 tp m } {ttree: team_tree}
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
       thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=  
     | step_parallel :
     (* TODO implement multiple threads;
             fix permission machine *)
-        forall (tp_upd tp':thread_pool) c virtue1 virtue2 ttree' num_threads new_tids tp'
+        forall (tp_upd tp':thread_pool) c virtue1 virtue2 ttree' (num_threads:nat) is_blocking new_tids
+          leader_c teammate_c newThreadPermSum
           (Hbounded: if isCoarse then
                        ( sub_map virtue1.1 (getMaxPerm m).2 /\
                          sub_map virtue1.2 (getMaxPerm m).2)
@@ -189,13 +206,18 @@ Module DryHybridMachine.
             (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (* (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg) *)
-            (Hat_meta: at_meta semSem c m = Some (OMPParallel num_threads))
-            (Hangel1: permMapJoin newThreadPerm.1 threadPerm'.1 (getThreadR cnt0).1)
-            (Hangel2: permMapJoin newThreadPerm.2 threadPerm'.2 (getThreadR cnt0).2)
-            (* TODO should `transform c is_leader` before passing it on *)
-            (Htp_upd: tp_upd = updThread cnt0 (Kresume c Vundef) threadPerm')
-            (HaddThreads: (new_tids, tp') = addThreads tp_upd c newThreadPerm (num_threads-1))
-            (Htree': ttree' = spawn_team tid0 (map pos.n new_tids) ttree),
+            (Hat_meta: at_meta semSem c m = Some (OMPParallel num_threads is_blocking))
+            (HnewTreadPermSum :permMapJoin_n_times newThreadPerm.1 (num_threads-1) newThreadPermSum.1) 
+            (HnewTreadPermSum :permMapJoin_n_times newThreadPerm.2 (num_threads-1) newThreadPermSum.2)
+            (Hangel1: permMapJoin newThreadPermSum.1 threadPerm'.1 (getThreadR cnt0).1)
+            (Hangel2: permMapJoin newThreadPermSum.2 threadPerm'.2 (getThreadR cnt0).2)
+            (Hleader_state: Some leader_c = transform_state_parallel c true)
+            (Hteammate_state: Some teammate_c = transform_state_parallel c false)
+            (* set up new thread pool *)
+            (Htp_upd: tp_upd = updThread cnt0 (Kresume leader_c Vundef) threadPerm')
+            (HaddThreads: (new_tids, tp') = addThreads tp_upd teammate_c newThreadPerm (num_threads-1))
+            (* add new team to team_tree *)
+            (Htree': ttree' = spawn_team tid0 is_blocking (map pos.n new_tids) ttree),
             meta_step cnt0 Hcompat tp' m ttree'
     .
 
@@ -240,7 +262,7 @@ Module DryHybridMachine.
             (HisLock: lockRes tp (b, Ptrofs.intval ofs) = Some pmap)
             (Hangel1: permMapJoin pmap.1 (getThreadR cnt0).1 newThreadPerm.1)
             (Hangel2: permMapJoin pmap.2 (getThreadR cnt0).2 newThreadPerm.2)
-            (Htp': tp' = updThread cnt0 (Kresume c Vundef) newThreadPerm)
+            (Htp': tp' = updThread cnt0 (Kresume (transform_state_parallel c true) Vundef) newThreadPerm)
             (** acquiring the lock leaves empty permissions at the resource pool*)
             (Htp'': tp'' = updLockSet tp' (b, Ptrofs.intval ofs) (empty_map, empty_map)),
             ext_step cnt0 Hcompat tp'' m'
