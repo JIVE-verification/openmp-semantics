@@ -1,16 +1,17 @@
-
+(* adapted from concurrency/common/threadPool.v *)
 From mathcomp.ssreflect Require Import ssreflect ssrbool ssrnat ssrfun eqtype seq fintype finfun.
 
 Require Import Lia.
 Require Import compcert.common.Memory.
 Require Import compcert.common.Values. (*for val*)
 Require Import VST.concurrency.common.scheduler.
-Require Import VST.concurrency.common.permissions.
-Require Import VST.concurrency.common.semantics.
+Require Import VST.concurrency.openmp_sem.permissions.
+Require Import VST.concurrency.openmp_sem.semantics.
 Require Import VST.concurrency.common.pos.
 Require Import VST.concurrency.common.threads_lemmas.
 Require Import compcert.lib.Axioms.
-Require Import VST.concurrency.common.addressFiniteMap.
+Require Import VST.concurrency.openmp_sem.addressFiniteMap.
+
 Require Import compcert.lib.Maps.
 Require Import Coq.ZArith.ZArith.
 Require Import VST.msl.Coqlib2.
@@ -57,6 +58,7 @@ Module ThreadPool.
         lockRes : t -> address -> option lock_info;
 (*         extraRes : t -> res; (* extra resources not held by any thread or lock *) *)
         addThread : t -> semC -> res -> t;
+        addThreads : t -> semC -> res -> nat (* num of new threads to fork *) -> list pos (* new threads' tids *) * t;
         updThreadC : forall {tid tp}, containsThread tp tid -> ctl -> t;
         updThreadR : forall {tid tp}, containsThread tp tid -> res -> t;
         updThread : forall {tid tp}, containsThread tp tid -> ctl -> res -> t;
@@ -309,19 +311,19 @@ Module ThreadPool.
                (cntj': containsThread (updThread cnti c pmap) j),
                updThread cnti' c pmap = updThread cntj' c' pmap'
 
-        (* ;  add_updateC_comm :
+        ;  add_updateC_comm :
              forall tp i c pmap c'
                (cnti: containsThread tp i)
                (cnti': containsThread (addThread tp c pmap) i),
-               addThread (updThreadC cnti c') vf arg pmap =
+               addThread (updThreadC cnti c') c pmap =
                updThreadC cnti' c'
 
         ;  add_update_comm :
-             forall tp i vf arg pmap c' pmap'
+             forall tp i c pmap c' pmap'
                (cnti: containsThread tp i)
-               (cnti': containsThread (addThread tp vf arg pmap) i),
-               addThread (updThread cnti c' pmap') vf arg pmap =
-               updThread cnti' c' pmap' *)
+               (cnti': containsThread (addThread tp c pmap) i),
+               addThread (updThread cnti c' pmap') c pmap =
+               updThread cnti' c' pmap'
 
         ;  updThread_lr_valid :
              forall tp i (cnti: containsThread tp i) c' m',
@@ -422,7 +424,7 @@ Module ThreadPool.
              forall {tp} c pmap j
                (Heq: j = latestThread tp)
                (cnt': containsThread (addThread tp c pmap) j),
-               getThreadC cnt' = Kresume c Vundef
+               getThreadC cnt' = Krun c
 
         ;  gsoAddRes :
              forall {tp} c pmap j
@@ -664,7 +666,7 @@ Module OrdinalPool.
       let tp' := mk new_num_threads
          (fun (n : 'I_new_num_threads) =>
             match unlift new_tid n with
-            | None => Kresume c Vundef
+            | None => Krun c
             | Some n' => tp n'
             end)
          (fun (n : 'I_new_num_threads) =>
@@ -679,7 +681,7 @@ Module OrdinalPool.
       (addThread' tp c pmap).2.
 
     (* spawn to_spawn threads, return the new tids and the new tp *)
-    Definition addThreads (tp : t) (c : semC) (pmap : res) (to_spawn: nat) :=
+    Definition addThreads (tp : t) (c : semC) (pmap : res) (to_spawn: nat) : list pos * t :=
       let init := (@nil pos, tp) in
       Z.iter (Z.of_nat to_spawn) 
              (fun x =>
@@ -1443,7 +1445,7 @@ Module OrdinalPool.
       forall {tp} c pmap j
         (Heq: j = latestThread tp)
         (cnt': containsThread (addThread tp c pmap) j),
-        getThreadC cnt' = Kresume c Vundef.
+        getThreadC cnt' = Krun c.
     Proof.
       intros. subst.
       simpl.
@@ -1492,18 +1494,18 @@ Module OrdinalPool.
     Qed.
 
     (* Ke: now addThread is a fork, add and update are not commutative any more *)
-    (* Lemma add_update_comm:
-      forall tp i vf arg pmap c' pmap'
+    Lemma add_update_comm:
+      forall tp i c pmap c' pmap'
         (cnti: containsThread tp i)
-        (cnti': containsThread (addThread tp vf arg pmap) i),
-        addThread (updThread cnti c' pmap') vf arg pmap =
+        (cnti': containsThread (addThread tp c pmap) i),
+        addThread (updThread cnti c' pmap') c pmap =
         updThread cnti' c' pmap'.
     Proof.
       intros.
       (* let's box pool and perm_maps in another
                       function to avoid redoing the same proof *)
       pose (fun tp ord => (pool tp ord, perm_maps tp ord)) as p.
-      assert (H: p (addThread (updThread cnti c' pmap') vf arg pmap)
+      assert (H: p (addThread (updThread cnti c' pmap') c pmap)
                  = p (updThread cnti' c' pmap')).
       { unfold addThread, updThread, p; simpl.
         extensionality ord.
@@ -1547,21 +1549,21 @@ Module OrdinalPool.
       unfold p in H. simpl in H.
       apply prod_fun in H.
       destruct H as [H1 H2].
-      unfold addThread, updThread.
+      unfold addThread, addThread', updThread.
       rewrite H1 H2.
         by reflexivity.
     Qed.
 
     Lemma add_updateC_comm:
-      forall tp i vf arg pmap c'
+      forall tp i c pmap c'
         (cnti: containsThread tp i)
-        (cnti': containsThread (addThread tp vf arg pmap) i),
-        addThread (updThreadC cnti c') vf arg pmap =
+        (cnti': containsThread (addThread tp c pmap) i),
+        addThread (updThreadC cnti c') c pmap =
         updThreadC cnti' c'.
     Proof.
       intros.
       assert (H: pool (addThread (updThreadC cnti c')
-                                 vf arg pmap)
+                                 c pmap)
                  = pool (updThreadC cnti' c')).
       { unfold addThread, updThread; simpl.
         extensionality ord.
@@ -1597,10 +1599,10 @@ Module OrdinalPool.
         }
         apply negb_true_iff in H. rewrite H. auto.
       }
-      unfold addThread, updThreadC in *; simpl in *.
+      unfold addThread, addThread', updThreadC in *; simpl in *.
       rewrite H.
         by reflexivity.
-    Qed. *)
+    Qed.
 
     Lemma updThread_comm :
       forall tp  i j c pmap c' pmap'
@@ -2162,6 +2164,7 @@ Module OrdinalPool.
                                     (@lockRes)
                                     (* extraRes *)
                                     addThread
+                                    addThreads
                                     (@updThreadC)
                                     (@updThreadR)
                                     (@updThread)
@@ -2219,8 +2222,8 @@ Module OrdinalPool.
                                     lockSet_updLockSet
                                     updThread_updThreadC_comm
                                     updThread_comm
-                                    (* add_updateC_comm *)
-                                    (* add_update_comm *)
+                                    add_updateC_comm
+                                    add_update_comm
                                     updThread_lr_valid
 (*                                     gssExtraRes
                                     gsoAddExtra

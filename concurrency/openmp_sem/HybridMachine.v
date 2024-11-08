@@ -12,10 +12,10 @@ Require Import compcert.lib.Integers.
 Require Import VST.msl.Axioms.
 Require Import Coq.ZArith.ZArith.
 (*Require Import VST.concurrency.common.core_semantics.*)
-Require Import VST.sepcomp.event_semantics.
-Require Export VST.concurrency.common.semantics.
+Require Import VST.concurrency.openmp_sem.event_semantics.
+Require Export VST.concurrency.openmp_sem.semantics.
 Require Export VST.concurrency.common.lksize.
-Require Import VST.concurrency.common.threadPool.
+Require Import VST.concurrency.openmp_sem.threadPool.
 
 Require Import VST.concurrency.common.machine_semantics.
 Require Import VST.concurrency.common.permissions.
@@ -30,7 +30,8 @@ Require Import VST.concurrency.common.coinductive_safety.*)
 (* Require Import VST.veric.res_predicates. *)
 (* Require Import VST.veric.Clight_new. *)
 
-Require Import VST.concurrency.common.HybridMachineSig.
+Require Import VST.concurrency.openmp_sem.HybridMachineSig.
+Require Import VST.concurrency.openmp_sem.team_dyn.
 (* Require Import VST.concurrency.CoreSemantics_sum. *)
 Import Maps.
 
@@ -50,6 +51,7 @@ Module DryHybridMachine.
     
     Notation C:= (@semC Sem).
     Notation G:= (@semG Sem).
+
     Notation semSem:= (@semSem Sem).
 
     Notation thread_pool := (@t dryResources Sem).
@@ -160,14 +162,14 @@ Module DryHybridMachine.
                      | Some (Some Nonempty) => None
                      | Some _ => Some (ZMap.get ofs (Maps.PMap.get b (Mem.mem_contents m)))
                      end) dm.
-    
-    Inductive meta_step {isCoarse:bool} {tid0 tp m}
+
+    Inductive meta_step {isCoarse:bool} {tid0 tp m } {ttree: team_tree}
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
-      thread_pool -> mem -> sync_event -> Prop :=  
+      thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=  
     | step_parallel :
     (* TODO implement multiple threads;
             fix permission machine *)
-        forall (tp_upd tp':thread_pool) c marg b ofs arg virtue1 virtue2
+        forall (tp_upd tp':thread_pool) c virtue1 virtue2 ttree' num_threads new_tids tp'
           (Hbounded: if isCoarse then
                        ( sub_map virtue1.1 (getMaxPerm m).2 /\
                          sub_map virtue1.2 (getMaxPerm m).2)
@@ -186,19 +188,15 @@ Module DryHybridMachine.
             (Hinv : invariant tp)
             (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
-            (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg)
-            (Hat_external: semantics.at_meta semSem c marg = Some (OMPParallel num_threads))
-(*            (Harg: Val.inject (Mem.flat_inj (Mem.nextblock m)) arg arg) *)
-            (** we do not need to enforce the almost empty predicate on thread
-           spawn as long as it's considered a synchronizing operation *)
+            (* (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg) *)
+            (Hat_meta: at_meta semSem c m = Some (OMPParallel num_threads))
             (Hangel1: permMapJoin newThreadPerm.1 threadPerm'.1 (getThreadR cnt0).1)
             (Hangel2: permMapJoin newThreadPerm.2 threadPerm'.2 (getThreadR cnt0).2)
+            (* TODO should `transform c is_leader` before passing it on *)
             (Htp_upd: tp_upd = updThread cnt0 (Kresume c Vundef) threadPerm')
-            (Htp': tp' = addThread tp_upd (Kresume c Vundef) newThreadPerm), (* do this for num_threads-1 times *)
-            meta_step cnt0 Hcompat tp' m
-                     (* FIXME (spawn (b, Ptrofs.intval ofs)
-                            (Some (build_delta_content (fst virtue1) m))
-                            (Some (build_delta_content (fst virtue2) m))) *)
+            (HaddThreads: (new_tids, tp') = addThreads tp_upd c newThreadPerm (num_threads-1))
+            (Htree': ttree' = spawn_team tid0 (map pos.n new_tids) ttree),
+            meta_step cnt0 Hcompat tp' m ttree'
     .
 
     Inductive ext_step {isCoarse:bool} {tid0 tp m}
@@ -221,7 +219,7 @@ Module DryHybridMachine.
             (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg)
-            (Hat_external: semantics.at_external semSem c marg = Some (Clight.OMPParallel num_threads))
+            (Hat_external: at_external semSem c marg = Some (LOCK, Vptr b ofs::nil))
             (** install the thread's permissions on lock locations*)
             (Hrestrict_pmap0: restrPermMap (Hcompat tid0 cnt0).2 = m0)
             (** To acquire the lock the thread must have [Readable] permission on it*)
@@ -270,7 +268,7 @@ Module DryHybridMachine.
             (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg)
-            (Hat_external: semantics.at_external semSem c marg =
+            (Hat_external: at_external semSem c marg =
                            Some (UNLOCK, Vptr b ofs::nil))
             (** install the thread's permissions on lock locations *)
             (Hrestrict_pmap0: restrPermMap (Hcompat tid0 cnt0).2 = m0)
@@ -295,7 +293,7 @@ Module DryHybridMachine.
             ext_step cnt0 Hcompat tp'' m'
                      (release (b, Ptrofs.intval ofs)
                               (Some (build_delta_content (fst virtueThread) m')))
-    | step_create :
+    (* | step_create :
         forall (tp_upd tp':thread_pool) c marg b ofs arg virtue1 virtue2
           (Hbounded: if isCoarse then
                        ( sub_map virtue1.1 (getMaxPerm m).2 /\
@@ -316,7 +314,7 @@ Module DryHybridMachine.
             (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg)
-            (Hat_external: semantics.at_external semSem c marg = Some (CREATE, Vptr b ofs::arg::nil))
+            (Hat_external: at_external semSem c marg = Some (CREATE, Vptr b ofs::arg::nil))
 (*            (Harg: Val.inject (Mem.flat_inj (Mem.nextblock m)) arg arg) *)
             (** we do not need to enforce the almost empty predicate on thread
            spawn as long as it's considered a synchronizing operation *)
@@ -327,7 +325,7 @@ Module DryHybridMachine.
             ext_step cnt0 Hcompat tp' m
                      (spawn (b, Ptrofs.intval ofs)
                             (Some (build_delta_content (fst virtue1) m))
-                            (Some (build_delta_content (fst virtue2) m)))
+                            (Some (build_delta_content (fst virtue2) m))) *)
 
 
     | step_mklock :
@@ -338,7 +336,7 @@ Module DryHybridMachine.
             (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg)
-            (Hat_external: semantics.at_external semSem c marg = Some (MKLOCK, Vptr b ofs::nil))
+            (Hat_external: at_external semSem c marg = Some (MKLOCK, Vptr b ofs::nil))
             (** install the thread's data permissions*)
             (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m1)
             (** To create the lock the thread must have [Writable] permission on it*)
@@ -378,7 +376,7 @@ Module DryHybridMachine.
             (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg)
-            (Hat_external: semantics.at_external semSem c marg = Some (FREE_LOCK, Vptr b ofs::nil))
+            (Hat_external: at_external semSem c marg = Some (FREE_LOCK, Vptr b ofs::nil))
             (** If this address is a lock*)
             (His_lock: lockRes tp (b, (Ptrofs.intval ofs)) = Some rmap)
             (** And the lock is taken *)
@@ -415,7 +413,7 @@ Module DryHybridMachine.
            (Hcode: getThreadC cnt0 = Kblocked c)
            (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
            (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg)
-           (Hat_external: semantics.at_external semSem c marg = Some (LOCK, Vptr b ofs::nil))
+           (Hat_external: at_external semSem c marg = Some (LOCK, Vptr b ofs::nil))
            (** Install the thread's lock permissions*)
            (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).2 = m1)
            (** To acquire the lock the thread must have [Readable] permission on it*)
@@ -513,10 +511,10 @@ Module DryHybridMachine.
               now auto.
             intros.
             rewrite gsoThreadCode; assumption.
-          * exists (cntAdd _ _ _
+          (* * exists (cntAdd _ _ _
                       (cntUpdate (Kresume c Vundef) _ _ cntj)), q.
             erewrite gsoAddCode .
-            rewrite gsoThreadCode; assumption.
+            rewrite gsoThreadCode; assumption. *)
           * exists ( (cntUpdateL _ _
                             (cntUpdate (Kresume c Vundef) _ _ cntj))), q.
             rewrite gLockSetCode.
@@ -640,7 +638,7 @@ Module DryHybridMachine.
 
     Definition init_mach (pmap : option res) (m: mem)
                (ms:thread_pool) (m' : mem) (v:val) (args:list val) : Prop :=
-      exists c, semantics.initial_core semSem 0 m c m' v args /\
+      exists c, initial_core semSem 0 m c m' v args /\
            ms = mkPool (Krun c) (getCurPerm m', empty_map) (* (empty_map, empty_map) *).
 
 

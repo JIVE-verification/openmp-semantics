@@ -21,7 +21,6 @@ Require Import VST.concurrency.common.ssromega. (*lia in ssrnat *)
 Require Import Coq.ZArith.ZArith.
 
 Require Import VST.concurrency.common.permissions.
-Require Import VST.concurrency.common.threadPool.
 
 Require Import compcert.common.Memory. (*for Mem.perm_order'' *)
 

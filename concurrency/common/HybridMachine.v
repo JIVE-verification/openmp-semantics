@@ -375,7 +375,8 @@ Module DryHybridMachine.
            (Hcode: getThreadC cnt0 = Kblocked c)
            (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
            (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg)
-           (Hat_external: semantics.at_external semSem c marg = Some (LOCK, Vptr b ofs::nil))
+           (Hat_external: @semantics.at_external C Mem.mem
+           (@csem C (@msem C semSem))   c marg = Some (LOCK, Vptr b ofs::nil))
            (** Install the thread's lock permissions*)
            (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).2 = m1)
            (** To acquire the lock the thread must have [Readable] permission on it*)
@@ -383,7 +384,8 @@ Module DryHybridMachine.
            (** Lock is already acquired.*)
            (Hload: Mem.load Mptr m1 b (Ptrofs.intval ofs) = Some (Vptrofs Ptrofs.zero)),
           ext_step cnt0 Hcompat tp m (failacq (b, Ptrofs.intval ofs)).
-
+          
+Check (semantics.at_external semSem).
     Definition threadStep: forall {tid0 ms m},
         containsThread ms tid0 -> mem_compatible ms m ->
         thread_pool -> mem -> seq.seq mem_event -> Prop:=
