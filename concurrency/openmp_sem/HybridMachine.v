@@ -177,8 +177,6 @@ Module DryHybridMachine.
 
     Parameter transform_state_parallel : C -> bool -> option C.
 
-    Definition computeMap' access delta := computeMap delta access.
-
     Inductive meta_step {isCoarse:bool} {tid0 tp m } {ttree: team_tree}
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
       thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=  
