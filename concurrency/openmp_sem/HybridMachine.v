@@ -223,7 +223,7 @@ Module DryHybridMachine.
        is still in threadpool so we don't have to reason about deleting a thread
        status in team tree set to done *)
     | step_parallel_end_not_leader :
-        forall (tp1 tp2:thread_pool) c ttree' tid_l
+        forall (tp1 tp2:thread_pool) c c' ttree' tid_l
           (Hleader_tid: leader_tid tid0 ttree tid_l)
           (Hnot_leader: tid0 =? tid_l)
           (cnt_l: containsThread tp1 tid_l)
@@ -236,8 +236,9 @@ Module DryHybridMachine.
             (Hinv : invariant tp)
             (Hcode: getThreadC cnt0 = Kblocked c)
             (Hat_meta: at_meta semSem c m = Some OMPParallelEnd)
-            (* FIXME set the thread state to something that represents terminated *)
-            (Htp_upd1: tp1 = updThread(tp:=tp) cnt0 (Krun (Clight_core.Returnstate Vundef Kstop)) threadPerm')
+            (* the state is updated to some halted state *)
+            (Hc' := ∃ ret_v, halted semSem c' ret_v)
+            (Htp_upd1: tp1 = updThread(tp:=tp) cnt0 (Krun c') threadPerm')
             (Hleader_perm'1 : permMapJoin threadPerm.1 leaderPerm.1 leaderPerm'.1)
             (Hleader_perm'2 : permMapJoin threadPerm.2 leaderPerm.2 leaderPerm'.2)
             (Htp_upd2: tp2 = updThread(tp:=tp1) cnt_l (getThreadC cnt_l) leaderPerm')
