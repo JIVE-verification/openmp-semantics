@@ -167,7 +167,7 @@ Module DryHybridMachine.
 
     Definition transform_state_parallel_impl (c: Clight_core.state) (is_leader : bool) : option Clight_core.state :=
       match c with
-      | Clight_core.Metastate (OMPParallel num_threads _) (f,s,k,e,le) =>
+      | Clight_core.Metastate (OMPParallel num_threads) (f,s,k,e,le) =>
         (* need to bring threads in a `Metastate ParallelEnd` state to implement blocking/barrier for the leader *)
         let s' := Ssequence s (Smeta OMPParallelEnd Sskip) in
         let k' := if is_leader then k else Kstop in
@@ -183,9 +183,7 @@ Module DryHybridMachine.
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
       thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=  
     | step_parallel :
-    (* TODO implement multiple threads;
-            fix permission machine *)
-        forall (tp_upd tp':thread_pool) c virtue1 virtue2 ttree' (num_threads:nat) is_blocking new_tids
+        forall (tp_upd tp':thread_pool) c virtue1 virtue2 ttree' (num_threads:nat) new_tids
           leader_c teammate_c newThreadPermSum
           (Hbounded: if isCoarse then
                        ( sub_map virtue1.1 (getMaxPerm m).2 /\
@@ -206,9 +204,9 @@ Module DryHybridMachine.
             (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (* (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg) *)
-            (Hat_meta: at_meta semSem c m = Some (OMPParallel num_threads is_blocking))
-            (HnewTreadPermSum :permMapJoin_n_times newThreadPerm.1 (num_threads-1) newThreadPermSum.1) 
-            (HnewTreadPermSum :permMapJoin_n_times newThreadPerm.2 (num_threads-1) newThreadPermSum.2)
+            (Hat_meta: at_meta semSem c m = Some (OMPParallel num_threads))
+            (HnewThreadPermSum1 :permMapJoin_n_times newThreadPerm.1 (num_threads-1) newThreadPermSum.1) 
+            (HnewThreadPermSum2 :permMapJoin_n_times newThreadPerm.2 (num_threads-1) newThreadPermSum.2)
             (Hangel1: permMapJoin newThreadPermSum.1 threadPerm'.1 (getThreadR cnt0).1)
             (Hangel2: permMapJoin newThreadPermSum.2 threadPerm'.2 (getThreadR cnt0).2)
             (Hleader_state: Some leader_c = transform_state_parallel c true)
@@ -217,8 +215,44 @@ Module DryHybridMachine.
             (Htp_upd: tp_upd = updThread cnt0 (Kresume leader_c Vundef) threadPerm')
             (HaddThreads: (new_tids, tp') = addThreads tp_upd teammate_c newThreadPerm (num_threads-1))
             (* add new team to team_tree *)
-            (Htree': ttree' = spawn_team tid0 is_blocking (map pos.n new_tids) ttree),
+            (Htree': ttree' = spawn_team tid0 (map pos.n new_tids) ttree),
             meta_step cnt0 Hcompat tp' m ttree'
+    (* collect permission for threads at the end of its parallel region, if not leader 
+       gives all its permission to the leader,
+       TODO set thread state to terminated
+       is still in threadpool so we don't have to reason about deleting a thread
+       status in team tree set to done *)
+    | step_parallel_end_not_leader :
+        forall (tp1 tp2:thread_pool) c ttree' tid_l
+          (Hleader_tid: leader_tid tid0 ttree tid_l)
+          (Hnot_leader: tid0 =? tid_l)
+          (cnt_l: containsThread tp1 tid_l)
+          (leaderPerm':res),
+          let threadPerm := getThreadR cnt0 in
+          let threadPerm' : res := (empty_map, empty_map) in
+          (* gives current permission to leader *)
+          let leaderPerm : res := getThreadR cnt_l in
+          forall
+            (Hinv : invariant tp)
+            (Hcode: getThreadC cnt0 = Kblocked c)
+            (Hat_meta: at_meta semSem c m = Some OMPParallelEnd)
+            (* FIXME set the thread state to something that represents terminated *)
+            (Htp_upd1: tp1 = updThread(tp:=tp) cnt0 (Krun (Clight_core.Returnstate Vundef Kstop)) threadPerm')
+            (Hleader_perm'1 : permMapJoin threadPerm.1 leaderPerm.1 leaderPerm'.1)
+            (Hleader_perm'2 : permMapJoin threadPerm.2 leaderPerm.2 leaderPerm'.2)
+            (Htp_upd2: tp2 = updThread(tp:=tp1) cnt_l (getThreadC cnt_l) leaderPerm')
+            (Htree': ttree' = set_tid_done tid0 ttree),
+            meta_step cnt0 Hcompat tp2 m ttree'
+     | step_parallel_end_leader :
+        forall c ttree' ttree''
+          (His_leader: leader_tid tid0 ttree tid0)
+            (Hinv : invariant tp)
+            (Hcode: getThreadC cnt0 = Kblocked c)
+            (Hat_meta: at_meta semSem c m = Some OMPParallelEnd)
+            (Htree' : ttree' = set_tid_done tid0 ttree)
+            (Hteam_done: is_team_done tid0 ttree')
+            (Htree'': ttree''= fire_team tid0 ttree'),
+            meta_step cnt0 Hcompat tp m ttree''
     .
 
     Inductive ext_step {isCoarse:bool} {tid0 tp m}
