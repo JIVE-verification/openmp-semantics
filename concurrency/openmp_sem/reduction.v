@@ -15,9 +15,9 @@ Local Close Scope string_scope.
         match i with
         | RedIdIdent id =>
             if (ident_eq id __max) then
-                (* TODO the maximum number representable in the type *) None
+                (* TODO the minimal number representable in the type *) None
             else if (ident_eq id __min) then
-                (* TODO the minimum number representable in the type *) None    
+                (* TODO the maximal number representable in the type *) None    
             else None
         | RedIdPlus => Some 0
         | RedIdTimes => Some 1
