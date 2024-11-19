@@ -93,8 +93,34 @@ Definition typeof (e: expr) : type :=
 
 Definition label := ident.
 
+(* https://www.openmp.org/wp-content/uploads/OpenMP-RefGuide-6.0-OMP60SC24-web.pdf 
+  pg11, reduction clause *)
+Variant reduction_modifier_type :=
+  | RedModInscan
+  | RedModTask
+  | RedModDefault
+.
+
+(* "Either an identifier or one of the following operators: +, *, &, |, ^, &&, ||" *)
+Variant reduction_identifier_type :=
+ (* probably name of a custom reduction function, or built in combiners "max" or "min" *)
+  | RedIdIdent (id: ident) (* only max and min are supported *)
+  | RedIdPlus
+  | RedIdTimes
+  | RedIdAnd
+  | RedIdOr
+  | RedIdXor
+  | RedIdLogicalAnd
+  | RedIdLogicalOr
+.
+
+Variant reduction_clause_type :=
+  | RedClause (* (redmods: list reduction_modifier_type) *) 
+              (red_ident: reduction_identifier_type)
+              (to_red: list ident).
+
 Variant meta_label : Type :=
-  | OMPParallel (num_threads: nat)
+  | OMPParallel (num_threads: nat) (reduction_clause: list reduction_clause_type)
   | OMPParallelEnd
   | OMPFor (num_threads: nat)
 .
