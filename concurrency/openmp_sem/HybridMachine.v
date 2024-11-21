@@ -165,9 +165,12 @@ Module DryHybridMachine.
                      | Some _ => Some (ZMap.get ofs (Maps.PMap.get b (Mem.mem_contents m)))
                      end) dm.
 
+  (* assuming the original var is shared; is i in genv? env? tenv? *)
+    Definition privatize (i: ident) te :=
+
     Definition transform_state_parallel_impl (c: Clight_core.state) (is_leader : bool) : option Clight_core.state :=
       match c with
-      | Clight_core.Metastate (OMPParallel num_threads) (f,s,k,e,le) =>
+      | Clight_core.Metastate (OMPParallel num_threads red_clause) (f,s,k,e,le) =>
         (* need to bring threads in a `Metastate ParallelEnd` state to implement blocking/barrier for the leader *)
         let s' := Ssequence s (Smeta OMPParallelEnd Sskip) in
         let k' := if is_leader then k else Kstop in
@@ -181,7 +184,7 @@ Module DryHybridMachine.
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
       thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=  
     | step_parallel :
-        forall (tp_upd tp':thread_pool) c virtue1 virtue2 ttree' (num_threads:nat) new_tids
+        forall (tp_upd tp':thread_pool) c virtue1 virtue2 ttree' (num_threads:nat) red_clause new_tids
           leader_c teammate_c newThreadPermSum
           (Hbounded: if isCoarse then
                        ( sub_map virtue1.1 (getMaxPerm m).2 /\
@@ -202,7 +205,7 @@ Module DryHybridMachine.
             (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (* (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg) *)
-            (Hat_meta: at_meta semSem c m = Some (OMPParallel num_threads))
+            (Hat_meta: at_meta semSem c m = Some (OMPParallel num_threads red_clause))
             (HnewThreadPermSum1 :permMapJoin_n_times newThreadPerm.1 (num_threads-1) newThreadPermSum.1) 
             (HnewThreadPermSum2 :permMapJoin_n_times newThreadPerm.2 (num_threads-1) newThreadPermSum.2)
             (Hangel1: permMapJoin newThreadPermSum.1 threadPerm'.1 (getThreadR cnt0).1)
