@@ -30,11 +30,10 @@ Require Import VST.concurrency.common.coinductive_safety.*)
 (* Require Import VST.veric.res_predicates. *)
 (* Require Import VST.veric.Clight_new. *)
 
-Require Import VST.concurrency.openmp_sem.HybridMachineSig.
-Require Import VST.concurrency.openmp_sem.team_dyn.
+From VST.concurrency.openmp_sem Require Import HybridMachineSig team_dyn notations reduction.
+From stdpp Require Import base.
 (* Require Import VST.concurrency.CoreSemantics_sum. *)
-Require Import VST.concurrency.openmp_sem.notations.
-Import Maps.
+Import -(notations) Maps.
 
 
 Module DryHybridMachine.
@@ -165,8 +164,6 @@ Module DryHybridMachine.
                      | Some _ => Some (ZMap.get ofs (Maps.PMap.get b (Mem.mem_contents m)))
                      end) dm.
 
-  (* assuming the original var is shared; is i in genv? env? tenv? *)
-    Definition privatize (i: ident) te :=
 
     Definition transform_state_parallel_impl (c: Clight_core.state) (is_leader : bool) : option Clight_core.state :=
       match c with
@@ -179,13 +176,15 @@ Module DryHybridMachine.
       end.
 
     Parameter transform_state_parallel : C -> bool -> option C.
+    Parameter update_temp_env : C -> C -> temp_env -> temp_env -> Prop.
+    Parameter envs_of_state : C -> genv -> env -> temp_env -> Prop.
 
-    Inductive meta_step {isCoarse:bool} {tid0 tp m } {ttree: team_tree}
+    Inductive meta_step {isCoarse:bool} {tid0 tp m} {ttree: team_tree}
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
       thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=  
     | step_parallel :
-        forall (tp_upd tp':thread_pool) c virtue1 virtue2 ttree' (num_threads:nat) red_clause new_tids
-          leader_c teammate_c newThreadPermSum
+        forall (tp_upd tp':thread_pool) c c' ge e  te te' virtue1 virtue2 ttree' (num_threads:nat) red_clause new_tids
+          leader_c teammate_c newThreadPermSum pv pv' (red_wits: list red_witness)
           (Hbounded: if isCoarse then
                        ( sub_map virtue1.1 (getMaxPerm m).2 /\
                          sub_map virtue1.2 (getMaxPerm m).2)
@@ -210,23 +209,31 @@ Module DryHybridMachine.
             (HnewThreadPermSum2 :permMapJoin_n_times newThreadPerm.2 (num_threads-1) newThreadPermSum.2)
             (Hangel1: permMapJoin newThreadPermSum.1 threadPerm'.1 (getThreadR cnt0).1)
             (Hangel2: permMapJoin newThreadPermSum.2 threadPerm'.2 (getThreadR cnt0).2)
-            (Hleader_state: Some leader_c = transform_state_parallel c true)
-            (Hteammate_state: Some teammate_c = transform_state_parallel c false)
+            (* do reduction first, get a new state *)
+            (Henvs: envs_of_state c ge e te)
+            (Hred: add_red_clause red_wits pv te = Some (pv', te'))
+            (Hred_wits: wits_for_red_clause ge e te m red_clause red_wits)
+            (Hc': update_temp_env c c' te te')
+            (Hleader_state: Some leader_c = transform_state_parallel c' true)
+            (Hteammate_state: Some teammate_c = transform_state_parallel c' false)
             (* set up new thread pool *)
             (Htp_upd: tp_upd = updThread cnt0 (Kresume leader_c Vundef) threadPerm')
             (HaddThreads: (new_tids, tp') = addThreads tp_upd teammate_c newThreadPerm (num_threads-1))
             (* add new team to team_tree *)
-            (Htree': ttree' = spawn_team tid0 (map pos.n new_tids) ttree),
+            (Htree': Some ttree' = spawn_team tid0 (map pos.n new_tids) ttree $ Some pv'),
             meta_step cnt0 Hcompat tp' m ttree'
-    (* collect permission for threads at the end of its parallel region, if not leader 
-       gives all its permission to the leader,
-       TODO set thread state to terminated
-       is still in threadpool so we don't have to reason about deleting a thread
+    (* collect permission for threads at the end of its parallel region, if not leader
+       gives all its permission to the leader.
+       Thread state becomes halted.
        status in team tree set to done *)
+    (* TODO add reduction contribution back *)
     | step_parallel_end_not_leader :
-        forall (tp1 tp2:thread_pool) c c' ttree' tid_l
-          (Hleader_tid: leader_tid tid0 ttree tid_l)
-          (Hnot_leader: tid0 =? tid_l)
+        forall (tp1 tp2:thread_pool) c c'
+          ltree (* leader tree of tid0 *)
+          ttree' tid_l
+          (Hleader_tree: is_leader_tree_of tid0 ltree)
+          (Hleader_tid: (data_of ltree).1.(t_tid) = tid_l)
+          (Hnot_leader: tid0 <> tid_l)
           (cnt_l: containsThread tp1 tid_l)
           (leaderPerm':res),
           let threadPerm := getThreadR cnt0 in
@@ -243,17 +250,21 @@ Module DryHybridMachine.
             (Hleader_perm'1 : permMapJoin threadPerm.1 leaderPerm.1 leaderPerm'.1)
             (Hleader_perm'2 : permMapJoin threadPerm.2 leaderPerm.2 leaderPerm'.2)
             (Htp_upd2: tp2 = updThread(tp:=tp1) cnt_l (getThreadC cnt_l) leaderPerm')
-            (Htree': ttree' = set_tid_done tid0 ttree),
+            (Htree': Some ttree' = set_tid_done tid0 ttree),
             meta_step cnt0 Hcompat tp2 m ttree'
+    (* if leader of this parallel region, collect permission for threads at the end of its parallel region,
+       and accumulate reduction contributions. *)
      | step_parallel_end_leader :
-        forall c ttree' ttree''
-          (His_leader: leader_tid tid0 ttree tid0)
+        forall c ttree' ttree'' ltree tid_l
+        (Hleader_tree: is_leader_tree_of tid0 ltree)
+        (Hleader_tid: (data_of ltree).1.(t_tid) = tid_l)
+        (His_leader: tid0 = tid_l)
             (Hinv : invariant tp)
             (Hcode: getThreadC cnt0 = Kblocked c)
             (Hat_meta: at_meta semSem c m = Some OMPParallelEnd)
-            (Htree' : ttree' = set_tid_done tid0 ttree)
+            (Htree' : Some ttree' = set_tid_done tid0 ttree)
             (Hteam_done: is_team_done tid0 ttree')
-            (Htree'': ttree''= fire_team tid0 ttree'),
+            (Htree'': Some ttree''= fire_team tid0 ttree'),
             meta_step cnt0 Hcompat tp m ttree''
     .
 

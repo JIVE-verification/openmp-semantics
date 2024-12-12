@@ -31,6 +31,9 @@ Require Import Globalenvs.
 Require Import Smallstep.
 Require Import Ctypes.
 Require Import Cop.
+From RecordUpdate Require Import RecordSet.
+Import RecordSetNotations.
+
 
 (** * Abstract syntax *)
 
@@ -114,13 +117,29 @@ Variant reduction_identifier_type :=
   | RedIdLogicalOr
 .
 
+Variant var_scope :=
+  | VarScopeGlobal
+  | VarScopeLocal
+  | VarScopeTemp
+.
+
+Record red_var_type :=
+  { red_var_name: ident;
+    red_var_scope: var_scope;
+    red_var_c_type: type
+  }.
+
+#[export] Instance settable_red_var : Settable _ :=
+  settable! Build_red_var_type <red_var_name; red_var_scope; red_var_c_type>.
+
 Variant reduction_clause_type :=
   | RedClause (* (redmods: list reduction_modifier_type) *) 
               (red_ident: reduction_identifier_type)
-              (to_red: list ident).
+              (* assume that the parser figures out the scope *)
+              (red_vars: list red_var_type).
 
 Variant meta_label : Type :=
-  | OMPParallel (num_threads: nat) (reduction_clause: list reduction_clause_type)
+  | OMPParallel (num_threads: nat) (reduction_clauses: reduction_clause_type) (* TODO this should be a list of red_clause *)
   | OMPParallelEnd
   | OMPFor (num_threads: nat)
 .

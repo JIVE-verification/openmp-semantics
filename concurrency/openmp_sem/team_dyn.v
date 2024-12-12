@@ -1,8 +1,9 @@
-From stdpp Require Import list.
-From mathcomp.ssreflect Require Import ssreflect ssrbool ssrfun.
-Import ListNotations.
-
-Unset Guard Checking.
+From mathcomp.ssreflect Require Import ssreflect ssrbool.
+Require Import Coq.Program.Wf FunInd Recdef.
+From VST.concurrency.openmp_sem Require Import reduction notations.
+From stdpp Require Import base list.
+From RecordUpdate Require Import RecordSet.
+Import RecordSetNotations.
 
 Section SiblingTree.
 
@@ -49,7 +50,14 @@ Section SiblingTree.
   Definition make_list_ref {A: Type} (l: @list A) : list $ @list_ref A :=
     make_list_ref_aux l nil.
 
-  Definition kids_ref_list s (t_cursor: tree_cursor) : list tree_ref :=
+  Definition tree_size (s: stree) :=
+    fold_tree_p s (λ _ _ acc, 1 + acc) 0 None.
+
+  Definition tree_ref_size (ref: tree_ref) :=
+    let '(st, _) := ref in tree_size st.
+
+  Definition kids_ref_list ref : list tree_ref :=
+    let '(s, t_cursor) := ref in
     match s with | SNode d kids =>
       (λ l_ref, 
       let '(kid_st, l_cursor) := l_ref in
@@ -58,15 +66,8 @@ Section SiblingTree.
     end
     .
 
-  Definition tree_size (s: stree) :=
-    fold_tree_p s (λ _ _ acc, 1 + acc) 0 None.
-
-  Definition tree_ref_size (ref: tree_ref) :=
-    let '(st, _) := ref in tree_size st.
-
-
     (* probably needs to measure this; fix *)
-  Fixpoint stree_lookup_aux (is_target: stree -> bool) (ref : tree_ref) (accu: option tree_ref) {struct ref}: option tree_ref :=
+  Program Fixpoint stree_lookup_aux (is_target: stree -> bool) (ref : tree_ref) (accu: option tree_ref) {measure (tree_ref_size ref)}: option tree_ref :=
     match accu with
     | Some _ => accu (* already found *)
     | None =>
@@ -74,9 +75,14 @@ Section SiblingTree.
       | (st, cursor) =>
       if is_target st then Some ref
       else
-        foldr (stree_lookup_aux is_target) accu $ kids_ref_list st cursor
+        foldr (λ ref accu, stree_lookup_aux is_target ref accu) accu
+              $ kids_ref_list ref
       end
     end.
+  Next Obligation.
+    intros. Admitted.
+  Next Obligation.
+    intros. Admitted.
 
   Definition stree_lookup (is_target: stree -> bool) (t: stree) : option tree_ref :=
     stree_lookup_aux is_target (t, id) None.
@@ -107,6 +113,8 @@ Section OpenMPThreads.
                      it has reached the last barrier *)
     }.
 
+    #[export] Instance settable_ot_info : Settable _ := settable! Build_ot_info <t_tid; o_team_id; o_done>.
+
     Section OpenMPTeam.
 
     (* team id -> team_tree *) 
@@ -129,8 +137,14 @@ Section OpenMPThreads.
             
     *)
 
-      (* model of the dynamics of a team. Only the leaf threads are executing, the parents are for bookkeeping. *)
-      Definition team_tree := @stree ot_info.
+      (* model of the dynamics of a team. 
+         Each node is either a thread with no children, which we call a leaf node, that represents an executing thread;
+         or a thread that has children, which are the team that it spawned. This team includes the thread itself, and
+         the parent node data contains bookkeeping info about this team. When the team is done, we can fire the team,
+         and the parent thread recovers its previous state as a leaf node.
+         The bookkeeping data of a team contains `Some privatized_vars` if the parallel region of the team (i.e. the lifetime
+         span of the team) also contains a reduction clause. *)
+      Definition team_tree := @stree (ot_info * option privatized_vars).
 
       (* the first thread in the program *)
       Definition ot_init (tid: nat) := Build_ot_info tid 0 false.
@@ -139,10 +153,10 @@ Section OpenMPThreads.
       Definition team_init (tid: nat) := SNode (ot_init tid) [].
 
       (* ot creates a new team with the other team_mates *)
-      Definition spawn_team' (ot: ot_info) (team_mates: list nat) : team_tree :=
-        SNode ot $ (λ tid, SNode (Build_ot_info tid 0 false) []) <$> (cons (ot.(t_tid)) team_mates).
+      Definition spawn_team' (ot: ot_info) (team_mates: list nat) (pv : option privatized_vars): team_tree :=
+        SNode (ot, pv) $ (λ tid, SNode ((Build_ot_info tid 0 false), None) []) <$> (cons (ot.(t_tid)) team_mates).
 
-      Definition is_tid (tid: nat) (ot: ot_info) :=
+      Definition is_tid (tid: nat) (ot: ot_info) : Prop :=
         ot.(t_tid) = tid.
       #[global] Instance is_tid_dec (tid: nat) (ot: ot_info) : Decision (is_tid tid ot).
       Proof. apply Nat.eq_dec. Qed.
@@ -150,7 +164,7 @@ Section OpenMPThreads.
       (* the list of all leaf threads *)
       Fixpoint tree_to_list (tree: team_tree) : (list ot_info) :=
         match tree with
-        | SNode ot ts =>
+        | SNode (ot, pv) ts =>
           match ts with
           | [] => [ot] (* leaf node*)
           | _ => concat (tree_to_list <$> ts)
@@ -165,10 +179,10 @@ Section OpenMPThreads.
         
       (* ot_info of the (immediate) team led by root of tree; does not include subteams *)
       Definition team_info (tree: team_tree) : list ot_info :=
-        data_of <$> kids_of tree.
+        (fst ∘ data_of) <$> kids_of tree.
 
       Definition has_tid (tid: nat) (tree: team_tree) : bool :=
-        isSome $ stree_lookup (λ st, decide $ is_tid tid $ data_of st) tree.
+        isSome $ stree_lookup (λ st, decide $ is_tid tid $ fst $ data_of st) tree.
 
       Lemma has_tid_correct tid tree :
         has_tid tid tree = true ↔ has_tid' tid tree.
@@ -177,8 +191,8 @@ Section OpenMPThreads.
       Definition tid_unique (tree: team_tree) : Prop :=
         NoDup $ t_tid <$> tree_to_list tree.
 
-      Class team_tree_inv (tree: team_tree) : Prop :=
-        { inv_tid_unique    : tid_unique tree }.
+      Record team_tree_inv (tree: team_tree) : Prop :=
+        { inv_tid_unique : tid_unique tree }.
 
       (** folloing opeartions assume that tids in the trees are NoDup, and the indexing tid exists as a leaf
            node in the tree. *)
@@ -189,22 +203,23 @@ Section OpenMPThreads.
       (* t is a leaf node and represents tid *)
       Definition is_leaf_tid (tid: nat) (t: team_tree) : bool :=
         match t with
-        | SNode ot [] => decide (is_tid tid ot)
+        | SNode (ot, None) [] => decide (is_tid tid ot)
         | _ => false
         end.
 
+      (* find the leaf node that represents tid *)
       Definition lookup_tid (tid: nat) (t: team_tree) : option tree_ref :=
         stree_lookup (is_leaf_tid tid) t.
 
-      Definition spawn_team (tid: nat) (team_mates: list nat) (tree: team_tree): option team_tree :=
-        (λ ref, ref.2 $ spawn_team' (data_of ref.1) team_mates) <$> lookup_tid tid tree.
+      Definition spawn_team (tid: nat) (team_mates: list nat) (tree: team_tree) (pv : option privatized_vars): option team_tree :=
+        (λ ref, ref.2 $ spawn_team' (fst $ data_of ref.1) team_mates pv) <$> lookup_tid tid tree.
 
       (* a spawned team is done when all team members are TeamLeaf (so don't have a working team)
          and are done *)
       Definition is_team_done (tid: nat) (tree: team_tree) : Prop :=
         match tree with
         | SNode p ts => 
-          Forall (λ t, match t with SNode ot kids => (* all team members must be leaf *)
+          Forall (λ t, match t with SNode (ot,_) kids => (* all team members must be leaf *)
                              ot.(o_done) = true ∧ kids = [] end) ts end.
 
       #[global] Instance is_team_done_decidable tid tree : Decision (is_team_done tid tree).
@@ -245,9 +260,9 @@ Section OpenMPThreads.
 
       Definition set_tid_done (tid: nat) (tree: team_tree) : option team_tree :=
         ref ← lookup_tid tid tree;
-        let ot := data_of ref.1 in
+        let '(ot, pv) := data_of ref.1 in
         let kids := kids_of ref.1 in
-        Some (ref.2 $ SNode (Build_ot_info ot.(t_tid) ot.(o_team_id) true) kids).
+        Some (ref.2 $ SNode (ot <|o_done := true|>, pv) kids).
 
     End OpenMPTeam.
     

@@ -1,12 +1,17 @@
-(* notation copied from https://plv.mpi-sws.org/coqdoc/stdpp/stdpp.base.html#lab17;
-   not imported since it conflicts with some of compcert notations *)
+From Coq Require Import String ZArith.
+From compcert Require Import Clightdefs AST.
+From compcert Require Import -(notations) lib.Maps.
 
-Require Export Coq.Unicode.Utf8_core.
-Notation "(→)" := (λ A B, A → B) (only parsing) : stdpp_scope.
-Notation "( A →.)" := (λ B, A → B) (only parsing) : stdpp_scope.
-Notation "(.→ B )" := (λ A, A → B) (only parsing) : stdpp_scope.
+Local Open Scope string_scope.
+Local Open Scope clight_scope.
+(* same as in Clightdefs, just redefine notation *)
+Notation "$$ s" := (ltac:(ClightNotations.ident_of_string s))
+                  (at level 1, only parsing) : clight_scope.
 
-Notation "t $ r" := (t r)
-    (at level 65, right associativity, only parsing) : stdpp_scope.
-Notation "($)" := (λ f x, f x) (only parsing) : stdpp_scope.
-Notation "(.$ x )" := (λ f, f x) (only parsing) : stdpp_scope.
+                  Definition __max : ident := $$"max".
+                  Definition __min : ident := $$"min".
+
+(* redefine compcert map notations since they conflict with stdpp *)
+Notation "a ! b" := (PTree.get b a) (at level 1).
+Notation "a !!!! b" := (PMap.get b a) (at level 1).
+
