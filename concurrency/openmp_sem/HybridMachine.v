@@ -179,6 +179,8 @@ Module DryHybridMachine.
     Parameter update_temp_env : C -> C -> temp_env -> temp_env -> Prop.
     Parameter envs_of_state : C -> genv -> env -> temp_env -> Prop.
 
+    Notation " x '.data_of' " := (data_of x) (at level 20).
+
     Inductive meta_step {isCoarse:bool} {tid0 tp m} {ttree: team_tree}
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
       thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=  
@@ -229,13 +231,17 @@ Module DryHybridMachine.
     (* TODO add reduction contribution back *)
     | step_parallel_end_not_leader :
         forall (tp1 tp2:thread_pool) c c'
-          ltree (* leader tree of tid0 *)
-          ttree' tid_l
-          (Hleader_tree: is_leader_tree_of tid0 ltree)
-          (Hleader_tid: (data_of ltree).1.(t_tid) = tid_l)
+          lref (* leader tree of tid0 *)
+          ttree ttree' tid_l
+          (Hleader_tree: leader_tree_of tid0 ttree = Some lref)
+          (Htree: ttree = lref.1)
+          (Hleader_tid: ttree.data_of.1.(t_tid) = tid_l)
           (Hnot_leader: tid0 <> tid_l)
           (cnt_l: containsThread tp1 tid_l)
-          (leaderPerm':res),
+          (leaderPerm':res)
+          (pv : option privatized_vars)
+          (Hpv: pv = ttree.data_of.2)
+        ,
           let threadPerm := getThreadR cnt0 in
           let threadPerm' : res := (empty_map, empty_map) in
           (* gives current permission to leader *)
@@ -244,7 +250,10 @@ Module DryHybridMachine.
             (Hinv : invariant tp)
             (Hcode: getThreadC cnt0 = Kblocked c)
             (Hat_meta: at_meta semSem c m = Some OMPParallelEnd)
-            (* the state is updated to some halted state *)
+            (* add reduction contribution *)
+            (Hpv': add_red_contrib pv c = Some pv')
+            (* the state is updated to some halted state.
+               TODO do we need to know what c' exactly is? *)
             (Hc' := ∃ ret_v, halted semSem c' ret_v)
             (Htp_upd1: tp1 = updThread(tp:=tp) cnt0 (Krun c') threadPerm')
             (Hleader_perm'1 : permMapJoin threadPerm.1 leaderPerm.1 leaderPerm'.1)

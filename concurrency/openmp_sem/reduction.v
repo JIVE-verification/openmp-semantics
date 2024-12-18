@@ -1,7 +1,7 @@
 From Coq Require Import String ZArith.
 From compcert Require Import Clight Cop Clightdefs AST Integers Ctypes Values.
 From compcert Require Import -(notations) lib.Maps.
-From VST.concurrency.openmp_sem Require Import notations.
+From VST.concurrency.openmp_sem Require Import notations clight_fun.
 From RecordUpdate Require Import RecordSet.
 Import RecordSetNotations.
 
@@ -90,19 +90,21 @@ From stdpp Require Import base list.
 *)
 
     
-    (* maps of ident -> original val, list of a thread's final contribution to the privatized var,
+    (* map of ident -> original val * reduction operation * list of a thread's final contribution to the privatized var,
        where i is originated from the global / local / temporal env. *)
+    Definition contrib_map := PTree.t $ (val * reduction_identifier_type * list val)%type.
+    
     Record privatized_vars :=
-      { in_ge: PTree.t $ (val * list val)%type;
+      { in_ge: contrib_map;
      (* in_le: PTree.t $ (val * list val)%type; *)
-        in_te: PTree.t $ (val * list val)%type }.
+        in_te: contrib_map }.
 
     #[export] Instance settable_ot_info : Settable _ := settable! Build_privatized_vars <in_ge; in_te>.
 
     (* assume that the ident is not already in pv *)
-    Definition add_privatized_te (i: ident) (orig: val) (pv: privatized_vars) : option privatized_vars :=
+    Definition add_privatized_te (i: ident) (orig: val) (red_id: reduction_identifier_type) (pv: privatized_vars) : option privatized_vars :=
         match pv.(in_te) ! i with
-        | None => Some $ pv <| in_te ::= PTree.set i (orig, nil) |>
+        | None => Some $ pv <| in_te ::= PTree.set i (orig, red_id, nil) |>
         | _ => None
         end.
 
@@ -114,7 +116,7 @@ From stdpp Require Import base list.
         eval_expr ge e te m init_expr v ->
         init_val_rel ge e te m red_id_type ty v.
 
-    (* information about one variable being reduced *)
+    (* information about some variable being reduced *)
     Record red_witness :=
         {
             red_ident: reduction_identifier_type;
@@ -128,11 +130,12 @@ From stdpp Require Import base list.
                            : option (privatized_vars * temp_env) :=
         let red_name := wit.(red_var).(red_var_name) in
         let init_val := wit.(init_val) in
+        let red_id := wit.(red_ident) in
         match wit.(red_var).(red_var_scope) with
         | VarScopeGlobal => None (* TODO *)
         | VarScopeLocal  => None (* with the builtin reduction operators, reducing for lvalues are unsupported *)
         | VarScopeTemp   => v ← (te ! red_name);
-                            pv' ← add_privatized_te red_name v pv;
+                            pv' ← add_privatized_te red_name v red_id pv;
                             Some (pv', PTree.set red_name init_val te)
         end.
 
@@ -151,4 +154,14 @@ From stdpp Require Import base list.
         end ->
         wits_for_red_clause ge e te m rc wits.
 
-    (* the reduction clause is a list of reduction variables, each with an initializer expression *)
+    (* append contribution map with the contributions in the thread's temp_env;
+       a var could originally belong to either ge or te *)
+    Definition append_contrib_map (te: temp_env) (cm: contrib_map) : contrib_map :=
+        foldr (λ '(i, (orig, l)) maybe_cm,
+                match te ! i with
+                | None => cm
+                | Some v => PTree.set i (orig, v::l) cm
+                end) cm (PTree.elements $ cm).
+
+    Definition add_red_contribs (te: temp_env) (pv: privatized_vars) : privatized_vars :=
+        pv <| in_te ::= append_contrib_map te |> <| in_ge ::= append_contrib_map te |>.
