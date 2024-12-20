@@ -14,7 +14,7 @@ Section SiblingTree.
 
   Definition data_of (st: stree) : B :=
     match st with | SNode b _ => b end.
-  
+
   Definition kids_of (st: stree) : list stree :=
     match st with | SNode _ kids => kids end.
 
@@ -99,7 +99,8 @@ Section SiblingTree.
 
 End SiblingTree.
 
-Set Guard Checking.
+Notation " x '.data_of' " := (data_of x) (at level 20).
+Notation " x '.kids_of' " := (kids_of x) (at level 20).
 
 Section OpenMPThreads.
 
@@ -182,7 +183,7 @@ Section OpenMPThreads.
         (fst ∘ data_of) <$> kids_of tree.
 
       Definition has_tid (tid: nat) (tree: team_tree) : bool :=
-        isSome $ stree_lookup (λ st, decide $ is_tid tid $ fst $ data_of st) tree.
+        isSome $ stree_lookup (λ st, decide $ is_tid tid $ st.data_of.1) tree.
 
       Lemma has_tid_correct tid tree :
         has_tid tid tree = true ↔ has_tid' tid tree.
@@ -212,7 +213,7 @@ Section OpenMPThreads.
         stree_lookup (is_leaf_tid tid) t.
 
       Definition spawn_team (tid: nat) (team_mates: list nat) (tree: team_tree) (pv : option privatized_vars): option team_tree :=
-        (λ ref, ref.2 $ spawn_team' (fst $ data_of ref.1) team_mates pv) <$> lookup_tid tid tree.
+        (λ ref, ref.2 $ spawn_team' (ref.1.data_of.1) team_mates pv) <$> lookup_tid tid tree.
 
       (* a spawned team is done when all team members are TeamLeaf (so don't have a working team)
          and are done *)
@@ -229,11 +230,12 @@ Section OpenMPThreads.
         tc_solve.
       Qed.
       
-      (** assume tid is the primary thread of some team, turn that TeamNode to TeamLeaf.
+      (** assume tid is the primary thread of some team, turn that TeamNode to TeamLeaf,
+          set pv to None (since reduction is finished)
        * Happens when all threads, including primary, are done in this team.
       *)
       Definition fire_team (tid: nat) (tree: team_tree) : option team_tree :=
-        (λ ref, ref.2 $ SNode (data_of ref.1) []) <$> lookup_tid tid tree.
+        (λ ref, ref.2 $ SNode (ref.1.data_of.1, None) []) <$> lookup_tid tid tree.
 
       (* whether the root of the tree is the leader of tid.
          this requires that they are in the same team.  *)
@@ -254,14 +256,14 @@ Section OpenMPThreads.
 
       Lemma has_leader_or_no_kid (tid: nat) (tree: team_tree) :
         has_tid tid tree ->
-        ¬(kids_of tree = []) ->
+        tree.kids_of <> [] ->
         ∃ leader_tree,  leader_tree_of tid tree = Some leader_tree.
       Proof. Admitted.
 
       Definition set_tid_done (tid: nat) (tree: team_tree) : option team_tree :=
         ref ← lookup_tid tid tree;
-        let '(ot, pv) := data_of ref.1 in
-        let kids := kids_of ref.1 in
+        let '(ot, pv) := ref.1.data_of in
+        let kids := ref.1.kids_of in
         Some (ref.2 $ SNode (ot <|o_done := true|>, pv) kids).
 
     End OpenMPTeam.

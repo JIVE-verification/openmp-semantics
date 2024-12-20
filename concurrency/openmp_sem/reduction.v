@@ -166,7 +166,7 @@ From stdpp Require Import base list.
         end
     .
 
-    Definition append_red_var_contribs (rv_contribs: red_var_ledger) (v: val) : red_var_ledger :=
+    Definition append_red_contribs (rv_contribs: red_var_ledger) (v: val) : red_var_ledger :=
         rv_contribs <| contribs ::= cons v |>.
 
     (* for all the variables recorded in cm, find the thread's contribution in the thread's te,
@@ -175,13 +175,13 @@ From stdpp Require Import base list.
         foldr (λ '(i, rv_contribs) maybe_cm,
                 cm ← maybe_cm;
                 v ← te ! i;
-                let rv_contribs' := append_red_var_contribs rv_contribs v in
+                let rv_contribs' := append_red_contribs rv_contribs v in
                 Some $ PTree.set i rv_contribs' cm)
               (Some cm) (PTree.elements $ cm).
 
     (* a var could originally belong to either ge or te, so need to try appending
        both in_te and in_ge *)
-    Definition add_red_contribs (te: temp_env) (pv: privatized_vars) : option privatized_vars :=
+    Definition collect_red_contribs (te: temp_env) (pv: privatized_vars) : option privatized_vars :=
         in_te' ← append_contrib_map te pv.(in_te);
         in_ge' ← append_contrib_map te pv.(in_ge);
         Some $ pv <| in_te := in_te' |> <| in_ge := in_ge' |>.
@@ -205,3 +205,9 @@ From stdpp Require Import base list.
                let '(i, rvl) := contrib_pair in
                final_v ← combine_contrib ge e te m rvl;
                Some $ PTree.set i final_v te) (Some te) (PTree.elements $ pv.(in_te)).
+
+    (* TODO for reduction variables that comes from global environment, 
+        at the beginning of reduction: make a local version of that var,
+        and all accesses to the ge will become accessing the local copy;
+        at the end of the reduction, needs to update the original one with
+        the combined contribution *)

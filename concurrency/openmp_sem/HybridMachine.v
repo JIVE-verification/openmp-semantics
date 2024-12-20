@@ -175,18 +175,19 @@ Module DryHybridMachine.
       | _ => None
       end.
 
+    (* TODO implement these after instantiating C with the actual state *)
     Parameter transform_state_parallel : C -> bool -> option C.
-    Parameter update_temp_env : C -> C -> temp_env -> temp_env -> Prop.
+    Parameter update_temp_env : C -> temp_env -> C.
     Parameter envs_of_state : C -> genv -> env -> temp_env -> Prop.
-
-    Notation " x '.data_of' " := (data_of x) (at level 20).
+    Parameter make_halted : C -> C.
+      (* (make_halted_spec c := ∃ ret_v, halted semSem (make_halted c) ret_v) *)
 
     Inductive meta_step {isCoarse:bool} {tid0 tp m} {ttree: team_tree}
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
       thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=  
     | step_parallel :
         forall (tp_upd tp':thread_pool) c c' ge e  te te' virtue1 virtue2 ttree' (num_threads:nat) red_clause new_tids
-          leader_c teammate_c newThreadPermSum pv pv' (red_wits: list red_witness)
+          leader_c teammate_c newThreadPermSum pv pv'
           (Hbounded: if isCoarse then
                        ( sub_map virtue1.1 (getMaxPerm m).2 /\
                          sub_map virtue1.2 (getMaxPerm m).2)
@@ -213,9 +214,8 @@ Module DryHybridMachine.
             (Hangel2: permMapJoin newThreadPermSum.2 threadPerm'.2 (getThreadR cnt0).2)
             (* do reduction first, get a new state *)
             (Henvs: envs_of_state c ge e te)
-            (Hred: add_red_clause red_wits pv te = Some (pv', te'))
-            (Hred_wits: wits_for_red_clause ge e te m red_clause red_wits)
-            (Hc': update_temp_env c c' te te')
+            (Hred: add_red_clause_to_pv ge e te m red_clause pv te = Some (pv', te'))
+            (Hc': update_temp_env c te' = c')
             (Hleader_state: Some leader_c = transform_state_parallel c' true)
             (Hteammate_state: Some teammate_c = transform_state_parallel c' false)
             (* set up new thread pool *)
@@ -228,19 +228,20 @@ Module DryHybridMachine.
        gives all its permission to the leader.
        Thread state becomes halted.
        status in team tree set to done *)
-    (* TODO add reduction contribution back *)
     | step_parallel_end_not_leader :
         forall (tp1 tp2:thread_pool) c c'
-          lref (* leader tree of tid0 *)
+          ge e te
+          lref (ltree ltree' ltree'': team_tree) (* leader tree of tid0 *) 
+          leader_ot maybe_pv pv pv'
           ttree ttree' tid_l
           (Hleader_tree: leader_tree_of tid0 ttree = Some lref)
-          (Htree: ttree = lref.1)
-          (Hleader_tid: ttree.data_of.1.(t_tid) = tid_l)
+          (Htree: ltree = lref.1)
+          (Hot_info: leader_ot = ttree.data_of.1)
+          (Hmaybe_pv: maybe_pv = ttree.data_of.2)
+          (Hleader_tid: leader_ot.(t_tid) = tid_l)
           (Hnot_leader: tid0 <> tid_l)
           (cnt_l: containsThread tp1 tid_l)
           (leaderPerm':res)
-          (pv : option privatized_vars)
-          (Hpv: pv = ttree.data_of.2)
         ,
           let threadPerm := getThreadR cnt0 in
           let threadPerm' : res := (empty_map, empty_map) in
@@ -250,31 +251,62 @@ Module DryHybridMachine.
             (Hinv : invariant tp)
             (Hcode: getThreadC cnt0 = Kblocked c)
             (Hat_meta: at_meta semSem c m = Some OMPParallelEnd)
-            (* add reduction contribution *)
-            (Hpv': add_red_contrib pv c = Some pv')
+            (Henvs: envs_of_state c ge e te)
+            (* add reduction contribution to the pv in ltree *)
+            (Hreduction: match maybe_pv with
+                         | Some pv => (* needs to do reduction *)
+                            collect_red_contribs te pv = Some pv' ∧
+                            ltree' = update_data ltree (leader_ot, Some pv')
+                         | None =>
+                            pv' = pv ∧
+                            ltree' = ltree
+                         end)
             (* the state is updated to some halted state.
                TODO do we need to know what c' exactly is? *)
-            (Hc' := ∃ ret_v, halted semSem c' ret_v)
+            (Hc':= make_halted c)
             (Htp_upd1: tp1 = updThread(tp:=tp) cnt0 (Krun c') threadPerm')
             (Hleader_perm'1 : permMapJoin threadPerm.1 leaderPerm.1 leaderPerm'.1)
             (Hleader_perm'2 : permMapJoin threadPerm.2 leaderPerm.2 leaderPerm'.2)
             (Htp_upd2: tp2 = updThread(tp:=tp1) cnt_l (getThreadC cnt_l) leaderPerm')
-            (Htree': Some ttree' = set_tid_done tid0 ttree),
+            (Hset_done: Some ltree'' = set_tid_done tid0 ltree')
+            (Htree': ttree' = lref.2 ltree''),
             meta_step cnt0 Hcompat tp2 m ttree'
     (* if leader of this parallel region, collect permission for threads at the end of its parallel region,
        and accumulate reduction contributions. *)
      | step_parallel_end_leader :
-        forall c ttree' ttree'' ltree tid_l
-        (Hleader_tree: is_leader_tree_of tid0 ltree)
-        (Hleader_tid: (data_of ltree).1.(t_tid) = tid_l)
+        forall c c' ge e te te' m
+        lref ttree ttree' ttree'' ltree ltree' ltree'' tid_l
+        maybe_pv pv pv'
+        tp'
+        (Hleader_tree: leader_tree_of tid0 ttree = Some lref)
+        (Hleader_tid: ltree.data_of.1.(t_tid) = tid_l)
         (His_leader: tid0 = tid_l)
-            (Hinv : invariant tp)
-            (Hcode: getThreadC cnt0 = Kblocked c)
-            (Hat_meta: at_meta semSem c m = Some OMPParallelEnd)
-            (Htree' : Some ttree' = set_tid_done tid0 ttree)
-            (Hteam_done: is_team_done tid0 ttree')
-            (Htree'': Some ttree''= fire_team tid0 ttree'),
-            meta_step cnt0 Hcompat tp m ttree''
+        (Hinv: invariant tp)
+        (Hcode: getThreadC cnt0 = Kblocked c)
+        (Hat_meta: at_meta semSem c m = Some OMPParallelEnd)
+        (* the whole team must be done after setting myself to done *)
+        (Hset_done: Some ltree' = set_tid_done tid0 ltree)
+        (Hteam_done: is_team_done tid0 ltree')
+        (Hreduction: match maybe_pv with
+                     | Some pv => (* needs to do reduction *)
+                        collect_red_contribs te pv = Some pv' ∧
+                        ltree'' = update_data ltree' (ltree'.data_of.1, Some pv') ∧
+                        (* combine reduction results *)
+                        combine_contribs_te ge e te m pv' = Some te' ∧
+                        (* update tid0's te with the combined values *)
+                        c' = update_temp_env c te'
+                     | None =>
+                        pv' = pv ∧
+                        ltree'' = ltree' ∧
+                        c' = c ∧
+                        te' = te
+                     end)
+        (Htree': ttree' = lref.2 ltree'')
+        ,
+        let threadPerm := getThreadR cnt0 in
+        forall (Htp_upd2: tp' = updThread cnt0 (Krun c') threadPerm)
+                (Htree'': Some ttree''= fire_team tid0 ttree'),
+          meta_step cnt0 Hcompat tp' m ttree''
     .
 
     Inductive ext_step {isCoarse:bool} {tid0 tp m}
