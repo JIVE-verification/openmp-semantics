@@ -10,13 +10,27 @@ Import RecordSetNotations.
 From stdpp Require Import base list.
 
 
+(* Steps:
 
-    
-    
-    (* a chunk (a,b) specifies a portion of the loop boundary [a,b), where a<b *)
-    Definition chunk : Type := nat * nat.
+    0. (TODO) Determine if the for loop conforms to the syntax for canonical loop nest: 
+        for (init; test; incr) { body }
+
+    is_a_canonical_loop_nest (s:statement) : option CanonicalLoopNest
+
+    where body is unspecified for now. it should not contain any jump to the outside of body
+
+    1. determine whether a loop is a canonical loop nest
+       this includes instantiating a chunk split module
+
+    2. invoke transform_chunks, assgin workload to threads
+    3. insert barrier at the end
+*)
+
+(* a chunk (a,b) specifies a portion of the loop boundary [a,b), where a<b *)
+Definition chunk : Type := nat * nat.
 Definition sum_list (l: list nat) := fold_right plus 0 l.
 Definition sum_firstn (n: nat) (l: list nat) := sum_list (firstn n l).
+
 (* split the index into segments. *)
 Module Type ChunkSplit.
 
@@ -62,13 +76,37 @@ End ChunkSplit.
 
 Module ExampleSplit : ChunkSplit.
     (*
-        for(int i=3; i<12; i+=2){
+        step = 2
+        lb = 3
+        (10-3) / 2 = 3
+        [3, 5, 7, 9]
+
+        for(int i=3; i<10; i+=2){
             // do something
         }
     *)
+
+(*  An example of a loop split:
+    
+    for(int i=3; i<10; i+=2){
+            // do something
+    }
+
+
+    1st thread: 
+    for(int i=9; i!=11; i+=2){
+            // do something
+    }
+    for(int i=3; i!=5; i+=2){
+            // do something
+    }
+    (barrier)
+    
+*)
+
     Definition lb := 3.
     Definition incr := 2.
-    Definition iter_num := 4.
+    Definition iter_num := 3.
     Definition thread_num := 5.
 
     Lemma thread_num_positive : 0 < thread_num. Proof. unfold thread_num. lia. Qed.
@@ -92,7 +130,9 @@ Module ExampleSplit : ChunkSplit.
         simpl in *. congruence.
     Qed.
 
-    Definition team_workloads := [[(9, 11); (3, 5)]; [(5, 9)]; []; []; []].
+    Definition team_workloads := [[(9, 11); (3, 5)];
+                                  [(5, 9)];
+                                  []; []; []].
     Lemma team_workloads_length : length team_workloads = thread_num. Proof. reflexivity. Qed.
     Lemma team_workloads_is_a_division : Permutation (concat team_workloads) chunks.
     Proof. simpl concat. unfold chunks. rewrite Permutation_swap. 
