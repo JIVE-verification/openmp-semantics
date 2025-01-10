@@ -123,11 +123,11 @@ Section LoopNest.
         end.
 
     Inductive CanonicalLoopNest :=
-    | CanonicalLoopNestCons (init_stmt: InitStmt) (lb: expr) (test_expr: TestExpr) (incr_expr: IncrExpr) (loop_body: statement). 
+    | CanonicalLoopNestCons (init_stmt: InitStmt)  (test_expr: TestExpr) (incr_expr: IncrExpr) (loop_body: statement). 
 
-    Definition elaborate_canonical_loop_nest (canonical_loop_nest: CanonicalLoopNest) :=
+    Definition elaborate_canonical_loop_nest (canonical_loop_nest: CanonicalLoopNest) : statement :=
     match canonical_loop_nest with
-    | CanonicalLoopNestCons init_stmt lb test_expr incr_expr loop_body =>
+    | CanonicalLoopNestCons init_stmt test_expr incr_expr loop_body =>
         match init_stmt with
         | InitStmtCons var_id _ =>
         Sfor
