@@ -3,7 +3,7 @@
 From Coq Require Import String ZArith.
 From compcert Require Import Clight Cop Clightdefs AST Integers Ctypes Values.
 From compcert Require Import -(notations) lib.Maps.
-From VST.concurrency.openmp_sem Require Import notations canonical_loop_nest.
+From VST.concurrency.openmp_sem Require Import notations canonical_loop_nest clight_fun.
 From RecordUpdate Require Import RecordSet.
 Import RecordSetNotations.
 
@@ -25,6 +25,85 @@ From stdpp Require Import base list.
     2. invoke transform_chunks, assgin workload to threads
     3. insert barrier at the end
 *)
+
+Definition val_to_Z (v: val) : option Z :=
+    match v with
+    | Vint i => Some $ Int.intval i
+    | _ => None
+    end.
+
+Definition expr_to_Z ge e le m (exp: expr) : option Z :=
+    match @eval_expr_fun ge e le m exp with
+    | Some v => val_to_Z v
+    | None => None
+    end.
+    
+(* take a CanonicalLoopNest, return the lb, incr and iter_num. *)
+Definition lb_of_loop (loop: CanonicalLoopNest) ge e le m : option Z :=
+    match loop with
+    | CanonicalLoopNestCons init_stmt test_expr incr_expr loop_body =>
+        match init_stmt with
+        | InitStmtCons var_id lb => expr_to_Z ge e le m lb
+        end
+    end.
+
+Definition incr_of_loop (loop: CanonicalLoopNest) ge e le m : option Z :=
+    match loop with
+    | CanonicalLoopNestCons init_stmt test_expr incr_expr loop_body =>
+        match incr_expr with
+        | VarPlusIncr _ incr => expr_to_Z ge e le m incr.(canonical_loop_nest.e)
+        | VarMinusIncr _ incr => z ← expr_to_Z ge e le m incr.(canonical_loop_nest.e);
+                                 Some $ Z.opp z
+        | _ => None (* assume other cases are converted to the above ones *)
+        end
+    end.
+
+(* take a CanonicalLoopNest, return the number of iterations *)
+Definition iter_num_of_loop (loop: CanonicalLoopNest) ge e le m : option nat :=
+    lb ← lb_of_loop loop ge e le m;
+    incr ← incr_of_loop loop ge e le m;
+    match loop with
+    | CanonicalLoopNestCons init_stmt test_expr incr_expr loop_body =>
+        (* ub here is the value in the test_expr, whether it is inclusive or not
+           depends on the kind of test_expr *)
+        match test_expr with
+        | TestExpr1 _ rel_op ub =>
+            match expr_to_Z ge e le m ub with
+            | None => None
+            | Some ub =>
+                match rel_op with
+                | ROP_le =>
+                    if decide (incr <= 0)%Z then None else (* standard p.201, 13 *)
+                    if decide ((ub - lb) / incr < 0)%Z
+                    then Some 0 (* this is what gcc does *)
+                    else Some $ 1 + Z.to_nat ((ub - lb) / incr)%Z
+                | ROP_lt =>
+                    if decide (incr <= 0)%Z then None else
+                    (* [var < ub] same as [var <= ub-1], and the arithmetics are in Z so no risk of overflow *)
+                    if decide (((ub-1) - lb) / incr < 0)%Z
+                    then Some 0
+                    else Some $ 1 + Z.to_nat (((ub-1) - lb) / incr)%Z
+                | ROP_ge => 
+                    if decide (incr >= 0)%Z then None else
+                    if decide ((ub - lb) / incr < 0)%Z
+                    then Some 0
+                    else Some $ 1 + Z.to_nat ((ub - lb) / incr)%Z
+                | ROP_gt =>
+                    if decide (incr >= 0)%Z then None else
+                    (* [var > ub] same as [var >= ub+1], and the arithmetics are in Z so no risk of overflow *)
+                    if decide ((lb - (ub-1)) / incr < 0)%Z
+                    then Some 0
+                    else Some $ 1 + Z.to_nat (((ub+1) - lb) / incr)%Z
+                | ROP_ne =>
+                    (* standard p.201, 21 *)
+                    if decide ((incr <> 1) ∨ incr <> -1)%Z then None else
+                    Some $ Z.to_nat ((ub - lb) / incr)%Z
+                end
+            end
+        | _ => None (* assume TestExpr2 has been converted to TestExpr1 *)
+        end
+    end.
+
 
 (* a chunk (a,b) specifies a portion of the loop boundary [a,b), where a<b *)
 Definition chunk : Type := nat * nat.
@@ -92,7 +171,6 @@ Module ExampleSplit : ChunkSplit.
             // do something
     }
 
-
     1st thread: 
     for(int i=9; i!=11; i+=2){
             // do something
@@ -132,7 +210,9 @@ Module ExampleSplit : ChunkSplit.
 
     Definition team_workloads := [[(9, 11); (3, 5)];
                                   [(5, 9)];
-                                  []; []; []].
+                                  [];
+                                  [];
+                                  []].
     Lemma team_workloads_length : length team_workloads = thread_num. Proof. reflexivity. Qed.
     Lemma team_workloads_is_a_division : Permutation (concat team_workloads) chunks.
     Proof. simpl concat. unfold chunks. rewrite Permutation_swap. 
@@ -144,20 +224,23 @@ Section For.
     (* transform the rage of the original loop to the range of the chunk.
        result is a segment of the original loop if chunk is a sgement of the iterations *)
     Definition transform_chunk
-        (loop: CanonicalLoopNest) (ty: type) (var_id: AST.ident) (var_ty: type)
-        (Hty: integer_expr (Evar var_id ty)) (chk: chunk) : CanonicalLoopNest :=
+        (loop: CanonicalLoopNest) (chk: chunk) : CanonicalLoopNest :=
     match loop with
-    | CanonicalLoopNestCons _ test_expr incr_expr loop_body =>
-        CanonicalLoopNestCons 
-            (InitStmtCons var_id (Econst_int (Int.repr (Z.of_nat chk.1)) ty))
-            (TestExpr1 (VarInt (Evar var_id ty) Hty) ROP_ne (Econst_int (Int.repr (Z.of_nat chk.2)) ty))
-            incr_expr
-            loop_body
+    | CanonicalLoopNestCons init_stmt test_expr incr_expr loop_body =>
+        match init_stmt with
+        | InitStmtCons var_id init_expr =>
+            let ty := typeof init_expr in
+            CanonicalLoopNestCons 
+                (InitStmtCons var_id (Econst_int (Int.repr (Z.of_nat chk.1)) ty))
+                (TestExpr1 (VarInt (Evar var_id ty)) ROP_ne (Econst_int (Int.repr (Z.of_nat chk.2)) ty))
+                incr_expr
+                loop_body
+        end
     end.
 
     (* a sequence of loop segments *)
-    Definition transform_chunks (chks: list chunk) (loop: CanonicalLoopNest)  (ty: type) (var_id: AST.ident) (var_ty: type)
-        (Hty: integer_expr (Evar var_id ty)) : statement :=
+    Definition transform_chunks (chks: list chunk) (loop: CanonicalLoopNest) : statement :=
     foldr (λ loop_seg accu, Ssequence accu $ elaborate_canonical_loop_nest loop_seg)
-          Sskip (map (transform_chunk loop ty var_id var_ty Hty) chks).
+          Sskip (map (transform_chunk loop) chks).
+
 End For.

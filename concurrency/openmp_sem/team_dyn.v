@@ -1,6 +1,6 @@
 From mathcomp.ssreflect Require Import ssreflect ssrbool.
 Require Import Coq.Program.Wf FunInd Recdef.
-From VST.concurrency.openmp_sem Require Import reduction notations.
+From VST.concurrency.openmp_sem Require Import reduction notations for_construct.
 From stdpp Require Import base list.
 From RecordUpdate Require Import RecordSet.
 Import RecordSetNotations.
@@ -20,6 +20,9 @@ Section SiblingTree.
 
   Definition update_data (st: stree) (b: B) : stree :=
     match st with | SNode _ kids => SNode b kids end.
+
+  Definition update_kids (st: stree) (kids: list stree) : stree :=
+    match st with | SNode b _ => SNode b kids end.
 
   (* stree eliminator, with the ability of knowing a node's parent
      f (parent: option B) (current_node_info: B) (previously accumulated results: A) *)
@@ -101,6 +104,8 @@ End SiblingTree.
 
 Notation " x '.data_of' " := (data_of x) (at level 20).
 Notation " x '.kids_of' " := (kids_of x) (at level 20).
+Notation " x '.update_data' b " := (update_data x b) (at level 20).
+Notation " x '.update_kids' kids " := (update_kids x kids) (at level 20).
 
 Section OpenMPThreads.
 
@@ -110,11 +115,23 @@ Section OpenMPThreads.
       o_team_id : nat; (* each of new team should get a different number *)
       (* o_tid : nat; thread id in the current team, NOT tid *)
       (* o_level : nat; nesting level *)
-      o_done : bool (* if it is spawned by some primary thread, set to true when 
+      o_done : bool; (* if it is spawned by some primary thread, set to true when 
                      it has reached the last barrier *)
+      o_work_sharing : bool; (* is in work-sharing region; can only enter once *)
+      (* work loads of the team that is this thread spawns, i.e. the children of this node.
+         now chunk split is decided the first time a thread hits the for pragma; if need to
+         allow more flexible scheduling, when thread i hits the for pragma, maybe only
+         instantiate that thread's workload and quantify over the uninstantiated part
+         [ team_workloads[i]=something ∧ ∃ rest workloads, s.t. the workloads are still
+           consistent ] *)
+      (* if it can pass the barrier; issued by a thread to all its teammmates when it does
+         not have a ticket and sees that all its team mates are at a barrier *)
+      o_barrier_ticket : bool;
+      o_team_workloads : option $ list $ list chunk 
     }.
 
-    #[export] Instance settable_ot_info : Settable _ := settable! Build_ot_info <t_tid; o_team_id; o_done>.
+    #[export] Instance settable_ot_info : Settable _ :=
+      settable! Build_ot_info <t_tid; o_team_id; o_done; o_work_sharing; o_barrier_ticket; o_team_workloads>.
 
     Section OpenMPTeam.
 
@@ -153,9 +170,9 @@ Section OpenMPThreads.
       (* a team starts with just the main thread *)
       Definition team_init (tid: nat) := SNode (ot_init tid) [].
 
-      (* ot creates a new team with the other team_mates *)
+      (* ot creates a new team with the other team_mates and starts a new parallel region, which is not work-sharing. *)
       Definition spawn_team' (ot: ot_info) (team_mates: list nat) (pv : option privatized_vars): team_tree :=
-        SNode (ot, pv) $ (λ tid, SNode ((Build_ot_info tid 0 false), None) []) <$> (cons (ot.(t_tid)) team_mates).
+        SNode (ot, pv) $ (λ tid, SNode ((Build_ot_info tid 0 false false false None), None) []) <$> (cons (ot.(t_tid)) team_mates).
 
       Definition is_tid (tid: nat) (ot: ot_info) : Prop :=
         ot.(t_tid) = tid.

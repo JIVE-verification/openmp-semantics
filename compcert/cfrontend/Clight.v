@@ -141,7 +141,9 @@ Variant reduction_clause_type :=
 Variant meta_label : Type :=
   | OMPParallel (num_threads: nat) (reduction_clauses: reduction_clause_type) (* TODO this should be a list of red_clause *)
   | OMPParallelEnd
-  | OMPFor (num_threads: nat)
+  | OMPFor
+  | OMPForEnd
+  | OMPBarrier
 .
 
 Inductive statement : Type :=

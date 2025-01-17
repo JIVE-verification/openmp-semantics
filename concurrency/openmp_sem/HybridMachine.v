@@ -30,11 +30,12 @@ Require Import VST.concurrency.common.coinductive_safety.*)
 (* Require Import VST.veric.res_predicates. *)
 (* Require Import VST.veric.Clight_new. *)
 
-From VST.concurrency.openmp_sem Require Import HybridMachineSig team_dyn notations reduction.
+From VST.concurrency.openmp_sem Require Import HybridMachineSig team_dyn notations reduction canonical_loop_nest for_construct.
 From stdpp Require Import base.
 (* Require Import VST.concurrency.CoreSemantics_sum. *)
 Import -(notations) Maps.
-
+From RecordUpdate Require Import RecordSet.
+Import RecordSetNotations.
 
 Module DryHybridMachine.
   Import Events ThreadPool.
@@ -175,16 +176,32 @@ Module DryHybridMachine.
       | _ => None
       end.
 
+    Definition transform_state_for_impl (c: Clight_core.state) (my_workload: list chunk) (cln: CanonicalLoopNest) : option Clight_core.state :=
+      match c with
+      | Clight_core.Metastate (OMPFor) (f,s,k,e,le) =>
+        (* need to bring threads in a `Metastate ParallelEnd` state to implement blocking/barrier for the leader *)
+         let s' := Ssequence (Ssequence (transform_chunks my_workload cln)
+                                        (Smeta OMPForEnd Sskip))
+                             (Smeta OMPBarrier Sskip) in
+        Some (Clight_core.State f s' k e le)
+      | _ => None
+      end.
+
     (* TODO implement these after instantiating C with the actual state *)
     Parameter transform_state_parallel : C -> bool -> option C.
+    Parameter transform_state_for : C -> list chunk -> CanonicalLoopNest -> option C.
     Parameter update_temp_env : C -> temp_env -> C.
+    Parameter update_statement : C -> statement -> C.
     Parameter envs_of_state : C -> genv -> env -> temp_env -> Prop.
+    Parameter statement_of_state : C -> statement.
     Parameter make_halted : C -> C.
+    Parameter is_a_canonical_loop_nest : statement -> option CanonicalLoopNest.
+
       (* (make_halted_spec c := ∃ ret_v, halted semSem (make_halted c) ret_v) *)
 
     Inductive meta_step {isCoarse:bool} {tid0 tp m} {ttree: team_tree}
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
-      thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=  
+      thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=
     | step_parallel :
         forall (tp_upd tp':thread_pool) c c' ge e  te te' virtue1 virtue2 ttree' (num_threads:nat) red_clause new_tids
           leader_c teammate_c newThreadPermSum pv pv'
@@ -228,6 +245,7 @@ Module DryHybridMachine.
        gives all its permission to the leader.
        Thread state becomes halted.
        status in team tree set to done *)
+    (* TODO maybe use OMPBarrier for the implicit barrier in parallel construct? *)
     | step_parallel_end_not_leader :
         forall (tp1 tp2:thread_pool) c c'
           ge e te
@@ -256,7 +274,7 @@ Module DryHybridMachine.
             (Hreduction: match maybe_pv with
                          | Some pv => (* needs to do reduction *)
                             collect_red_contribs te pv = Some pv' ∧
-                            ltree' = update_data ltree (leader_ot, Some pv')
+                            ltree' = ltree.update_data (leader_ot, Some pv')
                          | None =>
                             pv' = pv ∧
                             ltree' = ltree
@@ -273,8 +291,8 @@ Module DryHybridMachine.
             meta_step cnt0 Hcompat tp2 m ttree'
     (* if leader of this parallel region, collect permission for threads at the end of its parallel region,
        and accumulate reduction contributions. *)
-     | step_parallel_end_leader :
-        forall c c' ge e te te' m
+    | step_parallel_end_leader :
+        forall c c' ge e te te'
         lref ttree ttree' ttree'' ltree ltree' ltree'' tid_l
         maybe_pv pv pv'
         tp'
@@ -290,7 +308,7 @@ Module DryHybridMachine.
         (Hreduction: match maybe_pv with
                      | Some pv => (* needs to do reduction *)
                         collect_red_contribs te pv = Some pv' ∧
-                        ltree'' = update_data ltree' (ltree'.data_of.1, Some pv') ∧
+                        ltree'' = ltree'.update_data (ltree'.data_of.1, Some pv') ∧
                         (* combine reduction results *)
                         combine_contribs_te ge e te m pv' = Some te' ∧
                         (* update tid0's te with the combined values *)
@@ -307,6 +325,95 @@ Module DryHybridMachine.
         forall (Htp_upd2: tp' = updThread cnt0 (Krun c') threadPerm)
                 (Htree'': Some ttree''= fire_team tid0 ttree'),
           meta_step cnt0 Hcompat tp' m ttree''
+    | step_for :
+      forall c c' ge e te num_threads stmt cln lb incr 
+       (team_workloads : list $ list chunk) my_workload
+       leader_ref (my_ref: tree_ref) (leader_tree'  my_tree' ttree' ttree'': team_tree)
+       tp'  team_id
+      (Hcode: getThreadC cnt0 = Kblocked c)
+      (Hat_meta: at_meta semSem c m = Some $ OMPFor)
+      (* next statement is a canonical loop nest *)
+      (Hstmt: statement_of_state c = stmt)
+      (Henvs_of_state: envs_of_state c ge e te)
+      (* exists a chunk split of the iterations *)
+      (His_cln: is_a_canonical_loop_nest stmt = Some cln)
+      (Hlb_of_loop: lb_of_loop cln ge e te m = Some lb)
+      (Hincr_of_loop: incr_of_loop cln ge e te m = Some incr),
+      (* TODO chunk_split has parameters lb, incr, iter_num *)
+      let my_tree := my_ref.1 in
+      let my_ot_info := my_tree.data_of.1 in
+      let ltree := leader_ref.1 in
+      let threadPerm := getThreadR cnt0 in
+      forall 
+      (Hleader_ref: leader_tree_of tid0 ttree = Some leader_ref)
+      (Hnum_threads: num_threads = length (ltree.kids_of))
+      (Hleader_tree': match ltree.data_of.1.(o_team_workloads) with
+                | Some _team_workloads => leader_tree' = ltree ∧ _team_workloads = team_workloads
+                (* if not already set, set team_workloads *)
+                | None => leader_tree' = ltree.update_data ((ltree.data_of.1 <| o_team_workloads := Some team_workloads |>) , leader_ref.1.data_of.2 )
+                end)
+      (Httree': ttree' = leader_ref.2 leader_tree')
+      (Hmy_tree: Some my_ref = lookup_tid tid0 ttree')
+      (Hteam_id: team_id = my_ot_info.(o_team_id))
+      (Hchunks: Some my_workload = nth_error team_workloads team_id)
+      (* sets up new state *)
+      (Hc': Some c' = transform_state_for c my_workload cln)
+      (* set work-sharing to true *)
+      (Hnot_work_sharing:  my_ot_info.(o_work_sharing) = false)
+      (Hmy_tree'': my_tree' = my_tree.update_data (my_ot_info <| o_work_sharing := true |>, my_tree.data_of.2))
+      (Htree'': ttree'' = my_ref.2 my_tree')
+      (Htp': tp' = updThread cnt0 (Krun c') threadPerm),
+      meta_step cnt0 Hcompat tp' m ttree''
+    | step_for_end :
+      (* ends work-sharing region, insert a barrier (if nowait clause is absent) *)
+      forall c c' my_ref my_tree my_tree' ttree'
+      tp'
+      (Hcode: getThreadC cnt0 = Kblocked c)
+      (Hat_meta: at_meta semSem c m = Some $ OMPForEnd),
+      let threadPerm := getThreadR cnt0 in
+      forall 
+      (Hmy_ref:Some my_ref = lookup_tid tid0 ttree)
+      (Hmy_tree: my_tree = my_ref.1)
+      (Hmy_ref': my_tree' = my_tree.update_data (my_tree.data_of.1 <| o_work_sharing := false |>, my_tree.data_of.2))
+      (Httree': ttree' = my_ref.2 my_tree')
+      (Hc': c' = update_statement c (Smeta OMPBarrier Sskip))
+      (Htp': tp' = updThread cnt0 (Kblocked c') threadPerm),
+      meta_step cnt0 Hcompat tp' m ttree'
+    | step_barrier_issue_ticket :
+      forall c m my_ref my_tree lref ltree ltree' ttree' team_mates team_mates' team_mates_tids
+      (Hcode: getThreadC cnt0 = Kblocked c)
+      (Hat_meta: at_meta semSem c m = Some $ OMPBarrier)
+      (* if I don't have a ticket *)
+      (Hmy_ref: Some my_ref = lookup_tid tid0 ttree)
+      (Hmy_tree: my_tree = my_ref.1)
+      (HI_dont_have_ticket: my_tree.data_of.1.(o_barrier_ticket) = false)
+      (* and all team mates are at a barrier *)
+      (Hleader_ref: Some lref = leader_tree_of tid0 ttree)
+      (Hleader_tree: ltree = lref.1)
+      (Hteam_mates: team_mates = ltree.kids_of)
+      (Hteam_mates_tids: team_mates_tids = map (fun m => m.data_of.1.(t_tid)) team_mates)
+      (* TODO (Hteam_mates_waiting: forall tid, In tid team_mates_tids -> at_meta c_team_mate m = Some $ OMPBarrier) *)
+      (* then issue ticket to all teammates *)
+      (Hteam_mates': team_mates' = map (fun m => m.update_data (m.data_of.1 <| o_barrier_ticket := true |>, m.data_of.2)) team_mates)
+      (* update ttree with team_mates' *)
+      (Hleader_tree': ltree' =  ltree.update_kids team_mates')
+      (Httree': ttree' = lref.2 ltree'),
+      meta_step cnt0 Hcompat tp m ttree'
+    | step_barrier :
+      (* go pass a barrier if has a barrier ticket *)
+      forall c c' m my_ref my_tree my_tree' ttree' tp'
+      (Hcode: getThreadC cnt0 = Kblocked c)
+      (Hat_meta: at_meta semSem c m = Some $ OMPBarrier)
+      (* if I have a ticket *)
+      (Hmy_ref: Some my_ref = lookup_tid tid0 ttree)
+      (Hmy_tree: my_tree = my_ref.1)
+      (HI_have_ticket: my_tree.data_of.1.(o_barrier_ticket) = true)
+      (* then pass the barrier *)
+      (Hc': c' = update_statement c Sskip)
+      (Hmy_tree': my_tree' = my_tree.update_data (my_tree.data_of.1 <| o_barrier_ticket := false |>, my_tree.data_of.2))
+      (Httree': ttree' = my_ref.2 my_tree')
+      (Htp': tp' = updThread cnt0 (Krun c') (getThreadR cnt0)),
+      meta_step cnt0 Hcompat tp' m ttree'
     .
 
     Inductive ext_step {isCoarse:bool} {tid0 tp m}

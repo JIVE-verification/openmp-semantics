@@ -23,13 +23,13 @@ Section LoopNest.
     (* an expr that gives the result of loading the loop variable.
         p.199,23 var holds either an integer type or a pointer *)
     Inductive Var :=
-    | VarInt (var: expr) : integer_expr var -> Var
+    | VarInt (var: expr) : (* integer_expr var  -> *) Var
     (* | VarPtr (var: expr) : pointer_expr var -> Var *)
     .
     
     Definition get_var_expr (var: Var) :=
     match var with
-    | VarInt e _ => e
+    | VarInt e => e
     (* | VarPtr e _ => e *)
     end.
  
@@ -46,7 +46,8 @@ Section LoopNest.
     (* p.198, 24 init-expr
        initialization is a statement in clight instead of expr  *)
     Variant InitStmt :=
-    | InitStmtCons (var_id: AST.ident) (lb: expr).
+    | InitStmtCons (var_id: AST.ident) (lb: expr) (* var_id = lb *).
+    (* TODO support new var initialization stmt: type var_id = lb *)
     
     Definition elaborate_init_stmt (init_stmt: InitStmt) :=
     match init_stmt with
