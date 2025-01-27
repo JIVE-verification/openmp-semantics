@@ -167,17 +167,41 @@ Module ExampleSplit : ChunkSplit.
 
 (*  An example of a loop split:
     
+    #pragma omp for
+    for(i=3; i<10; i+=2){
+            // do something
+    }
     for(int i=3; i<10; i+=2){
             // do something
     }
 
-    1st thread: 
-    for(int i=9; i!=11; i+=2){
-            // do something
-    }
     for(int i=3; i!=5; i+=2){
             // do something
     }
+    for(int i=5; i!=9; i+=2){
+            // do something
+    }
+    for(int i=9; i!=11; i+=2){
+            // do something
+    }
+    
+    -> example assignment of the workload:
+        1st thread:
+        for(int i=9; i!=11; i+=2){
+            // do something
+        }
+        for(int i=3; i!=5; i+=2){
+            // do something
+        }
+        
+        2nd thread:
+        for(int i=5; i!=9; i+=2){
+            // do something
+        }
+
+        3-5rd thread:
+        // do nothing
+
     (barrier)
     
 *)

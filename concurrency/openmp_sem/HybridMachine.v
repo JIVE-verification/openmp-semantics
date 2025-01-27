@@ -224,6 +224,7 @@ Module DryHybridMachine.
             (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (* (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg) *)
+            (* FIXME OMPParallel should have a list of red_clauses? *)
             (Hat_meta: at_meta semSem c m = Some (OMPParallel num_threads red_clause))
             (HnewThreadPermSum1 :permMapJoin_n_times newThreadPerm.1 (num_threads-1) newThreadPermSum.1) 
             (HnewThreadPermSum2 :permMapJoin_n_times newThreadPerm.2 (num_threads-1) newThreadPermSum.2)
@@ -231,11 +232,13 @@ Module DryHybridMachine.
             (Hangel2: permMapJoin newThreadPermSum.2 threadPerm'.2 (getThreadR cnt0).2)
             (* do reduction first, get a new state *)
             (Henvs: envs_of_state c ge e te)
+            (* TODO pv should be somehting like nil*)
             (Hred: add_red_clause_to_pv ge e te m red_clause pv te = Some (pv', te'))
             (Hc': update_temp_env c te' = c')
             (Hleader_state: Some leader_c = transform_state_parallel c' true)
             (Hteammate_state: Some teammate_c = transform_state_parallel c' false)
             (* set up new thread pool *)
+            (* TODO this should be Krun? *)
             (Htp_upd: tp_upd = updThread cnt0 (Kresume leader_c Vundef) threadPerm')
             (HaddThreads: (new_tids, tp') = addThreads tp_upd teammate_c newThreadPerm (num_threads-1))
             (* add new team to team_tree *)
@@ -326,6 +329,7 @@ Module DryHybridMachine.
                 (Htree'': Some ttree''= fire_team tid0 ttree'),
           meta_step cnt0 Hcompat tp' m ttree''
     | step_for :
+    (* TODO reduction *)
       forall c c' ge e te num_threads stmt cln lb incr 
        (team_workloads : list $ list chunk) my_workload
        leader_ref (my_ref: tree_ref) (leader_tree'  my_tree' ttree' ttree'': team_tree)
