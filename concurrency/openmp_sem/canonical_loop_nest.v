@@ -1,4 +1,4 @@
-From compcert Require Import Clight Cop Ctypes.
+From compcert Require Import Clight Cop Ctypes Ctypesdefs.
 From compcert Require Import -(notations) lib.Maps.
 From VST.concurrency.openmp_sem Require Import notations.
 From RecordUpdate Require Import RecordSet.
@@ -49,6 +49,12 @@ Section LoopNest.
     | InitStmtCons (var_id: AST.ident) (lb: expr) (* var_id = lb *).
     (* TODO support new var initialization stmt: type var_id = lb *)
     
+    Definition make_init_stmt (s:statement) : option InitStmt :=
+    match s with
+    | Sset i lb_expr => Some (InitStmtCons i lb_expr)
+    | _ => None
+    end.
+
     Definition elaborate_init_stmt (init_stmt: InitStmt) :=
     match init_stmt with
     | InitStmtCons var_id lb =>
@@ -142,5 +148,36 @@ Section LoopNest.
 (* TODO what do we want to assume about loop_body?
    Can we have a simpler version of structured-blocks?
    maybe no breaks/continues to the outer part?  *)
+
+   Definition _in : AST.ident := __max.
+   Definition _out : AST.ident := __max.
+   Definition _t'1 : AST.ident := __max.
+
+   (*
+    for (int i=0; i!=2; i++) {
+        // short cuircuiting a loop
+        if (i==0) {
+            i=1;
+        }
+        count+=1;
+    }
+ *)
+
+    Definition eg_loop : statement :=
+    Ssequence
+        (Sifthenelse (Ebinop Ogt (Etempvar _in tint) (Etempvar _out tint) tint)
+        (Sset _t'1 (Ecast (Etempvar _in tint) tint))
+        (Sset _t'1 (Ecast (Etempvar _out tint) tint)))
+        (Sset _out (Etempvar _t'1 tint))
+    .
+
+   Definition make_canonical_loop_nest (s: statement) : option CanonicalLoopNest :=
+   match s with
+   | Ssequence s1 (Sloop (Ssequence (Sifthenelse e2 Sskip Sbreak) s3) s4) => None
+   | _ => None
+   end.
+
+   Lemma eg_loop_is_canonical_loop_nest : ∃ cnl, make_canonical_loop_nest eg_loop = Some cnl.
+   Proof. Admitted.
 
 End LoopNest.
