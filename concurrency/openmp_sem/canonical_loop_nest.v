@@ -1,4 +1,4 @@
-From compcert Require Import Clight Cop Ctypes Ctypesdefs.
+From compcert Require Import Clight Cop Ctypes Ctypesdefs Integers.
 From compcert Require Import -(notations) lib.Maps.
 From VST.concurrency.openmp_sem Require Import notations.
 From RecordUpdate Require Import RecordSet.
@@ -78,10 +78,20 @@ Section LoopNest.
     | ROP_ne => One
     end.
 
+    Definition binary_op_to_relational_op (bop: Cop.binary_operation) : option relational_op :=
+    match bop with 
+    |  Olt => Some ROP_lt
+    | Ole => Some ROP_le
+    |  Ogt => Some ROP_gt
+    | Oge => Some ROP_ge
+    | One => Some ROP_ne
+    | _ => None
+    end.
+
     Record Incr :=
     {
        e:expr;
-       Hinteger_expr: integer_expr e
+       integer: int;
     }.
 
     (* incr-expr, p199, 2
@@ -110,7 +120,15 @@ Section LoopNest.
     | IncrPlusVar    var incr => Ebinop Oadd incr.(e) var (typeof var)
     | VarMinusIncr   var incr => Ebinop Osub var incr.(e) (typeof var)
     end.
-    
+    Check elaborate_incr_expr.
+    Definition make_incr_expr (s: statement) : option IncrExpr :=
+    match s with 
+        | Sset i lb_expr => match lb_expr with 
+            | Econst_int a b => Some (VarPlusEqIncr lb_expr {|e:= lb_expr; integer:=a|})
+            | _ => None 
+        end
+        | _ => None
+    end.
 
     (* p199,2 test-expr *)
     Inductive TestExpr :=
@@ -118,6 +136,14 @@ Section LoopNest.
     | TestExpr2 (var:Var) (rel_op:relational_op) (ub: expr)
     .
 
+    Definition make_test_expr (e: expr) : option TestExpr :=
+    match e with
+                | Ebinop a b c d=> match (binary_op_to_relational_op a) with 
+                    | Some rop => (Some (TestExpr1 (VarInt b) rop c))
+                    |None => None
+                end
+                | _ => None
+    end.
 
     Definition elaborate_test_expr (test_expr: TestExpr) :=
         match test_expr with
@@ -163,21 +189,66 @@ Section LoopNest.
     }
  *)
 
+Definition not_eg_loop : statement :=
+Ssequence
+    (Sifthenelse (Ebinop Ogt (Etempvar _in tint) (Etempvar _out tint) tint)
+    (Sset _t'1 (Ecast (Etempvar _in tint) tint))
+    (Sset _t'1 (Ecast (Etempvar _out tint) tint)))
+    (Sset _out (Etempvar _t'1 tint))
+.
+Definition not_eg_loop_2 : statement := Scontinue .
+
     Definition eg_loop : statement :=
-    Ssequence
-        (Sifthenelse (Ebinop Ogt (Etempvar _in tint) (Etempvar _out tint) tint)
-        (Sset _t'1 (Ecast (Etempvar _in tint) tint))
-        (Sset _t'1 (Ecast (Etempvar _out tint) tint)))
-        (Sset _out (Etempvar _t'1 tint))
-    .
+(Ssequence
+(Sset _t'1 (Econst_int (Int.repr 0) tint))
+(Sloop
+(Ssequence
+    (Sifthenelse (Ebinop Olt (Etempvar _t'1 tint)
+                    (Econst_int (Int.repr 2) tint) tint)
+    Sskip
+    Sbreak)
+    (Sset _t'1 (Econst_int (Int.repr 0) tint)))
+(Sset _t'1
+    (Ebinop Oadd (Etempvar _t'1 tint) (Econst_int (Int.repr 1) tint) tint)))).
 
-   Definition make_canonical_loop_nest (s: statement) : option CanonicalLoopNest :=
-   match s with
-   | Ssequence s1 (Sloop (Ssequence (Sifthenelse e2 Sskip Sbreak) s3) s4) => None
-   | _ => None
-   end.
+Definition make_canonical_loop_nest (s: statement) : option CanonicalLoopNest :=
+match s with
+|  Ssequence s1 (Sloop (Ssequence (Sifthenelse e2 Sskip Sbreak) s3) s4) => 
+match make_init_stmt s1 with 
+    | Some init_stmt => 
+    match make_test_expr e2 with 
+        | Some test_expr => 
+            match make_incr_expr s3 with 
+            | Some incr_expr => Some (CanonicalLoopNestCons init_stmt test_expr incr_expr s4)
+            | None => None
+            end
+    | None => None
+    end
+| None => None
+end
+| _ => None
+end.
 
-   Lemma eg_loop_is_canonical_loop_nest : ∃ cnl, make_canonical_loop_nest eg_loop = Some cnl.
-   Proof. Admitted.
+Example eg_loop_is_canonical_loop_nest : ∃ cnl, make_canonical_loop_nest eg_loop = Some cnl.
+Proof. simpl.  exists (CanonicalLoopNestCons
+(InitStmtCons _t'1
+(Econst_int (Int.repr 0) tint))
+(TestExpr1 (VarInt (Etempvar _t'1 tint))
+ROP_lt (Econst_int (Int.repr 2)
+tint))
+(VarPlusEqIncr
+(Econst_int (Int.repr 0) tint)
+{|
+e := Econst_int (Int.repr 0) tint;
+integer := Int.repr 0
+|})
+(Sset _t'1
+(Ebinop Oadd (Etempvar _t'1 tint)
+(Econst_int (Int.repr 1) tint)
+tint))). reflexivity. Qed.
+Example not_eg_loop_is_not_canonical_loop_nest : ∀ cnl: CanonicalLoopNest, make_canonical_loop_nest not_eg_loop = None.
+Proof. simpl. reflexivity. Qed.
+Example not_eg_loop_2_is_not_canonical_loop_nest : ∀ cnl: CanonicalLoopNest, make_canonical_loop_nest not_eg_loop_2= None.
+Proof. simpl. reflexivity. Qed.
 
 End LoopNest.
