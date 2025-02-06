@@ -1,6 +1,6 @@
 (* function version of a part of clight semantics *)
 
-From compcert Require Import Clight Cop Clightdefs AST Integers Ctypes Values.
+From compcert Require Import Clight Cop Clightdefs AST Integers Ctypes Values Memory.
 
 From VST.concurrency.openmp_sem Require Import notations.
 
@@ -248,4 +248,32 @@ Section EvalExprFun.
     inv H1.
     eapply eval_Efield_union; eauto.
     Qed.
+
+
+    (* TODO only the assign_loc_value is defined, so struct/union/array not supported. *)
+    Definition assign_loc_fun (ce: composite_env) (ty: type) m b (ofs: ptrofs) (bf: bitfield) v : option mem :=
+        match access_mode ty with
+        | By_value chunk => 
+            match bf with
+            | Bits _ _ _ _ => None (* if by value, bf=Full*)
+            | Full =>
+                match Mem.storev chunk m (Vptr b ofs) v with
+                | Some m' => Some m'
+                | None => None
+                end
+            end
+        | _ => None
+        end.
+
+    Lemma assign_loc_fun_correct1:
+        ∀ ce ty m b ofs bf v m', assign_loc_fun ce ty m b ofs bf v = Some m' -> assign_loc ce ty m b ofs bf v m'.
+    Proof.
+        intros; unfold assign_loc_fun in *.
+        destruct_match.
+        destruct_match.
+        destruct_match.
+        inv H.
+        eapply assign_loc_value; done.
+    Qed.
+
 End EvalExprFun.

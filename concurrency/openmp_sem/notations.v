@@ -1,6 +1,6 @@
 From Coq Require Import String ZArith.
 From compcert Require Import Clightdefs AST.
-From compcert Require Import -(notations) lib.Maps.
+From compcert Require Export -(notations) lib.Maps.
 
 Local Open Scope string_scope.
 Local Open Scope clight_scope.

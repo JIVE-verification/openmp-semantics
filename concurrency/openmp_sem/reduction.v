@@ -1,5 +1,5 @@
 From Coq Require Import String ZArith.
-From compcert Require Import Clight Cop Clightdefs AST Integers Ctypes Values.
+From compcert Require Import Clight Cop Clightdefs AST Integers Ctypes Values Memory Globalenvs.
 From compcert Require Import -(notations) lib.Maps.
 From VST.concurrency.openmp_sem Require Import notations clight_fun.
 From RecordUpdate Require Import RecordSet.
@@ -45,169 +45,236 @@ From stdpp Require Import base list.
         end
     .
 
-    Definition combine_vals (ge:genv) op v1 ty1 v2 ty2 m: option val :=
-        sem_binary_operation ge op v1 ty1 v2 ty2 m.
+    Section PRIVATIZATION.
 
-    Definition c_true := Econst_int (Int.repr 1%Z) tint.
-    Definition c_false := Econst_int (Int.repr 0%Z) tint.
-
-    (* the expression corresponding to `reduction_function omp_in omp_out` that combines
-        omp_in and omp_out (v1 and v2 below). ty is the type v1 (the values being combined).
-        v2 is the output of a single combine, and the type of v2 is: 
-            - ty, if red_id specifies a non-logical operation
-            - tint (represents _Bool), if red_id specifies a logical operation (&&, ||)
-
-    [Standard 6.0, Table 7.1: (Initializer for) Implicitly Declared C/C++ Reduction Identifiers]
-       assume omp_in, omp_out and the output (new omp_out) have the same type *)
-    Definition combiner_sem (ge:genv) m v1 v2 ty (red_id: reduction_identifier_type) : option val :=
-        match red_id with
-        | RedIdPlus => combine_vals ge Oadd v1 ty v2 ty m
-        | RedIdTimes => combine_vals ge Omul v1 ty v2 ty m
-        | RedIdAnd => combine_vals ge Oand v1 ty v2 ty m
-        | RedIdOr => combine_vals ge Oor v1 ty v2 ty m
-        | RedIdXor => combine_vals ge Oxor v1 ty v2 ty m
-        | RedIdLogicalAnd =>
-            b1 ← bool_val v1 tint m;
-            b2 ← bool_val v2 tint m;
-            (* && returns Vtrue or Vfalse *)
-            Some $ if (b1:bool) && (b2:bool) then Vtrue else Vfalse
-         | RedIdLogicalOr =>
-            b1 ← bool_val v1 tint m;
-            b2 ← bool_val v2 tint m;
-            Some $ if (b1:bool) || (b2:bool) then Vtrue else Vfalse
-        (* Standard 7.6.6: For a max or min reduction, the type of the list item must be an allowed arithmetic data type:
-        char, int, float, double, or _Bool, possibly modified with long, short, signed,
-        or unsigned. *)
-        | RedIdIdent i =>
-            if (ident_eq i __max) then
-                (* vb should be either Vtrue or Vfalse, so has type Tint *)
-                vb ← sem_binary_operation ge Olt v1 ty v2 ty m;
-                b ← bool_val vb tint m;
-                Some $ if (b:bool) then v2 else v1
-            else if (ident_eq i __min) then
-                vb ← sem_binary_operation ge Ogt v1 ty v2 ty m;
-                b ← bool_val v1 tint m;
-                Some $ if (b:bool) then v2 else v1
-            else
-                None
+        Fixpoint alloc_variables_fun (ge:genv) (e: env) (m: mem) (vs: list (ident * type)) : env * mem :=
+        match vs with
+        | nil => (e, m)
+        |  (id, ty) :: vs' =>
+            let (m1, b1) := Mem.alloc m 0 (sizeof ge ty) in
+            alloc_variables_fun ge (PTree.set id (b1, ty) e) m1 vs'
         end.
 
-(* Standard 6.0, 7.6.2.1: "The number of times that the combiner expression is executed and the
-   order of these executions for any reduction clause are unspecified."
-*)
-
-    (* information about some variable being reduced *)
-    Record red_var_data :=
-    {
-        red_ident: reduction_identifier_type;
-        red_var: red_var_type;
-    }.
-    #[export] Instance settable_red_var_data : Settable _ := settable! Build_red_var_data <red_ident; red_var>.
-
-    Record red_var_ledger :=
-    {
-        orig_val: val; (* original value before reduction *)
-        rv_data: red_var_data; (* data about the reduction variable *)
-        contribs: list val; (* list of final vals in threads *)
-    }.
-    #[export] Instance settable_red_var_ledger : Settable _ := settable! Build_red_var_ledger <orig_val; rv_data; contribs>.
-
-    Definition contrib_map := PTree.t red_var_ledger.
-    
-    (* privatized_vars contains the privatized variables in the global and temporal environment *)
-    Record privatized_vars :=
-      { in_ge: contrib_map;
-     (* in_le: PTree.t $ (val * list val)%type; *)
-        in_te: contrib_map }.
-    #[export] Instance settable_ot_info : Settable _ := settable! Build_privatized_vars <in_ge; in_te>.
-
-    (* assume that the ident is not already in pv *)
-    Definition add_privatized_te (i: ident) (orig: val) (rv_data: red_var_data) (pv: privatized_vars) : option privatized_vars :=
-        match pv.(in_te) ! i with
-        | None => let init_contribs := Build_red_var_ledger orig rv_data [] in
-                  Some $ pv <| in_te ::= PTree.set i init_contribs |>
-        | _ => None
-        end.
-
-    (* the initial value for reduction operation `red_id_type` and ctype `ty` is `v` *)
-    Definition init_val ge e le m red_id_type ty : option val :=   
-        exp ← initializer_expr red_id_type ty;
-        @eval_expr_fun ge e le m exp.
-
-    #[export] Instance settable_red_witness : Settable _ := settable! Build_red_var_data <red_ident; red_var>.
+        Lemma alloc_variables_fun_equiv : forall ge e m vs e' m',
+            alloc_variables_fun ge e m vs = (e', m') -> alloc_variables ge e m vs e' m'.
+        Proof.
+        intros ge e m vs. revert ge e m. induction vs; intros.
+        - inversion H. subst. apply alloc_variables_nil.
+        - simpl in H. destruct a. destruct (Mem.alloc m 0 (sizeof ge t)) eqn:Heq.
+        eapply alloc_variables_cons. done.
+        eapply IHvs. done.
+        Qed.
         
-    (* add data about a reduction variable to the privatized_vars, change its value in temp_env to be
-        the init_val for reduction.  *)
-    Definition add_red_var ge e le m (rv_data: red_var_data) pv te
-                           : option (privatized_vars * temp_env) :=
-        let red_name := rv_data.(red_var).(red_var_name) in
-        let red_id := rv_data.(red_ident) in
-        let ty := rv_data.(red_var).(red_var_c_type) in
-        match init_val ge e le m red_id ty with
-        Some init_v => 
-            match rv_data.(red_var).(red_var_scope) with
-            | VarScopeGlobal => None (* TODO *)
-            | VarScopeLocal  => None (* with the builtin reduction operators, reducing for lvalues are unsupported *)
-            | VarScopeTemp   => v ← (te ! red_name);
-                                pv' ← add_privatized_te red_name v rv_data pv;
-                                Some (pv', PTree.set red_name init_v te)
-            end
-        | None => None
-        end.
 
-    (* add the reduction variables from the reduction clause to pv and update temp_env *)
-    Definition add_red_clause_to_pv ge e le m (rc: reduction_clause_type) pv te : option (privatized_vars * temp_env) :=
-        match rc with
-        | RedClause red_id_type red_vars =>
-            foldr (λ rv acc, pv_te ← acc;
-                                  let '(pv, te) := pv_te in
-                                  let rv_data := Build_red_var_data red_id_type rv in
-                                  add_red_var ge e le m rv_data pv te) (Some (pv, te)) red_vars
-        end
-    .
+        (* add entries in e1 to e2 *)
+        Definition merge (e1 e2: env) : env :=
+            PTree.fold (λ e id b, PTree.set id b e) e1 e2.
 
-    Definition append_red_contribs (rv_contribs: red_var_ledger) (v: val) : red_var_ledger :=
-        rv_contribs <| contribs ::= cons v |>.
+        (*  alloc_pvs allocate 
+            all privatization happens when a thread is spawned by a parallel construct.
+            for each variable that comes from local env, for each spawned thread, allocate a new variable with the same ident and type in memory,
+            overwrite the original local env. *)
+        Definition alloc_pvs (ge: genv) (le: env) (m: mem) (pvs: list (ident * type)) : env * mem :=
+                let (pve, m') := @alloc_variables_fun ge empty_env m pvs in
+                (merge pve le, m').
 
-    (* for all the variables recorded in cm, find the thread's contribution in the thread's te,
-       and append it to the list of contributions in cm. Fails if not found in te. *)
-    Definition append_contrib_map (te: temp_env) (cm: contrib_map) : option contrib_map :=
-        foldr (λ '(i, rv_contribs) maybe_cm,
-                cm ← maybe_cm;
-                v ← te ! i;
-                let rv_contribs' := append_red_contribs rv_contribs v in
-                Some $ PTree.set i rv_contribs' cm)
-              (Some cm) (PTree.elements $ cm).
-
-    (* a var could originally belong to either ge or te, so need to try appending
-       both in_te and in_ge *)
-    Definition collect_red_contribs (te: temp_env) (pv: privatized_vars) : option privatized_vars :=
-        in_te' ← append_contrib_map te pv.(in_te);
-        in_ge' ← append_contrib_map te pv.(in_ge);
-        Some $ pv <| in_te := in_te' |> <| in_ge := in_ge' |>.
-
+    End PRIVATIZATION.
     
-    Definition combine_contrib (ge: genv) (e:env) (te:temp_env) (m:Memory.mem)
-                               (rvl: red_var_ledger) : option val :=
-        let rv_data := rvl.(rv_data) in
-        let contribs := rvl.(contribs) in
-        let orig_val := rvl.(orig_val) in
-        let ty := rv_data.(red_var).(red_var_c_type) in
-        let red_id := rv_data.(red_ident) in
-        foldr (λ v accu, accu ← accu;
-                         combiner_sem ge m v accu ty red_id)
-              (Some orig_val)
-              contribs.
-    
-    Definition combine_contribs_te (ge: genv) (e:env) (te:temp_env) (m:Memory.mem)
-                                   (pv: privatized_vars) : option temp_env :=
-        foldr (λ contrib_pair maybe_te,
-               let '(i, rvl) := contrib_pair in
-               final_v ← combine_contrib ge e te m rvl;
-               Some $ PTree.set i final_v te) (Some te) (PTree.elements $ pv.(in_te)).
+    Section REDUCTION.
+        Implicit Types (ge: genv) (ce: composite_env) (op: Cop.binary_operation) (le: env) (m: mem)
+                       (b: Values.block) (ty: type).
+        (* combine the reduction contributions in the reduction clause *)
+        Definition combine_vals ce op v1 ty1 v2 ty2 m: option val :=
+            sem_binary_operation ce op v1 ty1 v2 ty2 m.
 
-    (* TODO for reduction variables that comes from global environment, 
-        at the beginning of reduction: make a local version of that var,
-        and all accesses to the ge will become accessing the local copy;
-        at the end of the reduction, needs to update the original one with
-        the combined contribution *)
+        Definition c_true := Econst_int (Int.repr 1%Z) tint.
+        Definition c_false := Econst_int (Int.repr 0%Z) tint.
+
+        (* the expression corresponding to `reduction_function omp_in omp_out` that combines
+            omp_in and omp_out (v1 and v2 below). ty is the type v1 (the values being combined).
+            v2 is the output of a single combine, and the type of v2 is: 
+                - ty, if red_id specifies a non-logical operation
+                - tint (represents _Bool), if red_id specifies a logical operation (&&, ||)
+
+        [Standard 6.0, Table 7.1: (Initializer for) Implicitly Declared C/C++ Reduction Identifiers]
+        assume omp_in, omp_out and the output (new omp_out) have the same type *)
+        Definition combiner_sem ce m v1 v2 ty (red_id: reduction_identifier_type) : option val :=
+            match red_id with
+            | RedIdPlus => combine_vals ce Oadd v1 ty v2 ty m
+            | RedIdTimes => combine_vals ce Omul v1 ty v2 ty m
+            | RedIdAnd => combine_vals ce Oand v1 ty v2 ty m
+            | RedIdOr => combine_vals ce Oor v1 ty v2 ty m
+            | RedIdXor => combine_vals ce Oxor v1 ty v2 ty m
+            | RedIdLogicalAnd =>
+                b1 ← bool_val v1 tint m;
+                b2 ← bool_val v2 tint m;
+                (* && returns Vtrue or Vfalse *)
+                Some $ if (b1:bool) && (b2:bool) then Vtrue else Vfalse
+            | RedIdLogicalOr =>
+                b1 ← bool_val v1 tint m;
+                b2 ← bool_val v2 tint m;
+                Some $ if (b1:bool) || (b2:bool) then Vtrue else Vfalse
+            (* Standard 7.6.6: For a max or min reduction, the type of the list item must be an allowed arithmetic data type:
+            char, int, float, double, or _Bool, possibly modified with long, short, signed,
+            or unsigned. *)
+            | RedIdIdent i =>
+                if (ident_eq i __max) then
+                    (* vb should be either Vtrue or Vfalse, so has type Tint *)
+                    vb ← sem_binary_operation ce Olt v1 ty v2 ty m;
+                    b ← bool_val vb tint m;
+                    Some $ if (b:bool) then v2 else v1
+                else if (ident_eq i __min) then
+                    vb ← sem_binary_operation ce Ogt v1 ty v2 ty m;
+                    b ← bool_val v1 tint m;
+                    Some $ if (b:bool) then v2 else v1
+                else
+                    None
+            end.
+
+    (* Standard 6.0, 7.6.2.1: "The number of times that the combiner expression is executed and the
+    order of these executions for any reduction clause are unspecified."
+    *)
+
+        (* information about a variable being reduced *)
+        Record red_var_data :=
+        {
+            red_ident: reduction_identifier_type; (* reduction operator *)
+            red_var: red_var_type;
+        }.
+        #[export] Instance settable_red_var_data : Settable _ := settable! Build_red_var_data <red_ident; red_var>.
+
+        Record red_var_ledger :=
+        {
+            orig_val: val; (* original value before reduction *)
+            rv_data: red_var_data; (* data about the reduction variable *)
+            contribs: list val; (* list of final vals in threads *)
+        }.
+        #[export] Instance settable_red_var_ledger : Settable _ := settable! Build_red_var_ledger <orig_val; rv_data; contribs>.
+
+        
+        (* the initial value for reduction operation `red_id_type` and ctype `ty` is `v` *)
+        Definition init_val ge le te m red_id_type ty : option val :=   
+            exp ← initializer_expr red_id_type ty;
+            @eval_expr_fun ge le te m exp.
+    End REDUCTION.
+    
+    Section PR_MAP.
+        (* original scope of a variable for privatization/reduction.
+        We assume the parser decides that a local variable to be privatized is in the local env,
+        so we don't handle privatization of vars in temporal env. *)
+        Variant scope :=
+        | VarGlobal 
+        | VarLocal
+        .
+
+        (* privatization and reduction data structures *)
+        Record pr_data :=
+            {
+                orig_scope : scope;
+                (* privatization data *)
+                p_data : Values.block * type; (* original entry *)
+                (* reduction data *)
+                r_data : option red_var_ledger 
+            }
+        .
+        #[export] Instance settable_pr_data : Settable _ := settable! Build_pr_data <orig_scope; p_data; r_data>.
+
+        (* privatization and reduction map. 
+        ident -> (original address, reduction information) *)
+        Definition pr_map := PTree.t pr_data.
+
+        Implicit Types (prm : pr_map) (rvl: red_var_ledger) 
+                       (i: ident) (ge: genv) (le: env) (m: mem) (b:Values.block) (ty:type).
+
+        Definition prm_init : pr_map := PTree.empty pr_data.
+
+        Definition prm_get prm (i: ident)  :=
+            prm ! i.
+
+
+        (* privatize vars in ge, register them to prm, allocate copies in le *)
+        Definition prm_register_p_ge_list prm (priv_ge_clause : privatization_clause_type) ge : option pr_map :=
+            foldr (λ i_ty maybe_prm, 
+                        prm ← maybe_prm;
+                        let i := i_ty.1 in
+                        let ty := i_ty.2 in
+                        b ← Genv.find_symbol ge i;
+                        Some $ PTree.set i (Build_pr_data VarGlobal (b, ty) None) prm)
+                   (Some prm) priv_ge_clause.
+        
+        
+        Definition prm_register_p_le_list prm (priv_le_clause : privatization_clause_type) le : option pr_map :=
+            foldr (λ i_ty maybe_prm, 
+                        prm ← maybe_prm;
+                        let i := i_ty.1 in
+                        (* i_ty.2 (from the priv_le_clause) given by the parser must equal to b_ty.2, the one stored in le *)
+                        b_ty ← (le!i);
+                        Some $ PTree.set i (Build_pr_data VarLocal b_ty None) prm) 
+                  (Some prm) priv_le_clause.
+
+        Definition prm_register_p prm (priv_ge_clause priv_le_clause: privatization_clause_type) ge le: option pr_map :=
+            prm' ← prm_register_p_ge_list prm priv_ge_clause ge;
+            prm' ← prm_register_p_le_list prm' priv_le_clause le;
+            Some prm.
+
+        (* register a variable for reduction *)
+        Definition prm_register_r prm (i: ident) (orig: val) (rv_data: red_var_data)  : option pr_map :=
+            let init_contribs := Build_red_var_ledger orig rv_data [] in
+            prd ← prm ! i;
+            Some $ PTree.set i (prd <| r_data := Some init_contribs |>) prm
+            .
+        
+        Definition r_contribs_append (rv_contribs: red_var_ledger) (v: val) : red_var_ledger :=
+            rv_contribs <| contribs ::= cons v |>.
+
+        (* returns v if i↦v ∧ i∈le. *)
+        Definition deref_le (le: env) (i: ident) m : option val :=
+            b_ty ← le ! i;
+            let b := b_ty.1 in
+            let ty := b_ty.2 in
+            deref_loc_fun ty m b Ptrofs.zero Full.
+
+        (* for all the variables recorded in prm, find the thread's contribution by dereferencing the location,
+           and append it to the list of contributions in prm. Fails if not found in te. *)
+        Definition prm_r_append_contribs prm le m : option pr_map :=
+            PTree.fold (λ maybe_prm' i prd,
+                    prm' ← maybe_prm';
+                    r_ledger ← prd.(r_data);
+                    v ← deref_le le i m;
+                    let r_ledger' := r_contribs_append r_ledger v in
+                    Some $ PTree.set i (prd <| r_data := Some r_ledger' |>) prm') 
+                prm (Some prm).
+
+        Definition combine_contrib ce m (rvl: red_var_ledger) : option val :=
+            let rv_data := rvl.(rv_data) in
+            let contribs := rvl.(contribs) in
+            let orig_val := rvl.(orig_val) in
+            let ty := rv_data.(red_var).(red_var_c_type) in
+            let red_id := rv_data.(red_ident) in
+            foldr (λ v accu, accu ← accu;
+                             combiner_sem ce m v accu ty red_id)
+                (Some orig_val)
+                contribs.
+
+        (* write v to (Vptr b Ptrofs.zero) of type ty. *)
+        Definition write_v (ce:composite_env) b ty m v : option mem :=
+            assign_loc_fun ce ty m b Ptrofs.zero Full v.
+
+        (* for every entry in prm, if it has a reduction ledger, write combined_v to the address of the original copy. *)
+        Definition prm_write_red_result prm ce (m:mem) : option mem :=
+            PTree.fold (λ maybe_m i prd,
+                            m ← maybe_m;
+                            rvl ← prd.(r_data);
+                            combined_v ← combine_contrib ce m rvl;
+                            (* block&type of the original copy *)
+                            let b_ty := prd.(p_data) in
+                            let '(b, ty) := b_ty in
+                            write_v ce b ty m combined_v)
+                        prm (Some m).
+
+        (* TODO for every name i∈prm, free private copy of i, restore ge[i] to prm[i].p_data *)
+        (* TODO rename p_data to orig_b and orig_ty *)
+    End PR_MAP.
+
+
+
