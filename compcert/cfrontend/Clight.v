@@ -96,6 +96,8 @@ Definition typeof (e: expr) : type :=
 
 Definition label := ident.
 
+Definition privatization_clause_type : Type := list (ident * type).
+
 (* https://www.openmp.org/wp-content/uploads/OpenMP-RefGuide-6.0-OMP60SC24-web.pdf 
   pg11, reduction clause *)
 Variant reduction_modifier_type :=
@@ -117,29 +119,25 @@ Variant reduction_identifier_type :=
   | RedIdLogicalOr
 .
 
-Variant var_scope :=
-  | VarScopeGlobal
-  | VarScopeLocal
-  | VarScopeTemp
-.
-
 Record red_var_type :=
   { red_var_name: ident;
-    red_var_scope: var_scope;
     red_var_c_type: type
   }.
 
 #[export] Instance settable_red_var : Settable _ :=
-  settable! Build_red_var_type <red_var_name; red_var_scope; red_var_c_type>.
+  settable! Build_red_var_type <red_var_name; red_var_c_type>.
 
 Variant reduction_clause_type :=
   | RedClause (* (redmods: list reduction_modifier_type) *) 
-              (red_ident: reduction_identifier_type)
+              (red_ident: reduction_identifier_type) (* the ident of the reduction operator *)
               (* assume that the parser figures out the scope *)
               (red_vars: list red_var_type).
 
 Variant meta_label : Type :=
-  | OMPParallel (num_threads: nat) (reduction_clauses: reduction_clause_type) (* TODO this should be a list of red_clause *)
+  | OMPParallel (num_threads: nat)
+                (privatization_clauses_le: privatization_clause_type)
+                (privatization_clauses_ge: privatization_clause_type)
+                (reduction_clauses: reduction_clause_type) (* TODO this should be a list of red_clause *)
   | OMPParallelEnd
   | OMPFor
   | OMPForEnd
