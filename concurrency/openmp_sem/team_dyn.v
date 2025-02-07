@@ -1,5 +1,6 @@
 From mathcomp.ssreflect Require Import ssreflect ssrbool.
 Require Import Coq.Program.Wf FunInd Recdef.
+From compcert Require Import Values Clight.
 From VST.concurrency.openmp_sem Require Import reduction notations for_construct.
 From stdpp Require Import base list.
 From RecordUpdate Require Import RecordSet.
@@ -162,7 +163,7 @@ Section OpenMPThreads.
          and the parent thread recovers its previous state as a leaf node.
          The bookkeeping data of a team contains `Some privatized_vars` if the parallel region of the team (i.e. the lifetime
          span of the team) also contains a reduction clause. *)
-      Definition team_tree := @stree (ot_info * option privatized_vars).
+      Definition team_tree := @stree (ot_info * option contrib_maps).
 
       (* the first thread in the program *)
       Definition ot_init (tid: nat) := Build_ot_info tid 0 false.
@@ -171,7 +172,7 @@ Section OpenMPThreads.
       Definition team_init (tid: nat) := SNode (ot_init tid) [].
 
       (* ot creates a new team with the other team_mates and starts a new parallel region, which is not work-sharing. *)
-      Definition spawn_team' (ot: ot_info) (team_mates: list nat) (pv : option privatized_vars): team_tree :=
+      Definition spawn_team' (ot: ot_info) (team_mates: list nat) (pv : option contrib_maps): team_tree :=
         SNode (ot, pv) $ (λ tid, SNode ((Build_ot_info tid 0 false false false None), None) []) <$> (cons (ot.(t_tid)) team_mates).
 
       Definition is_tid (tid: nat) (ot: ot_info) : Prop :=
@@ -229,8 +230,8 @@ Section OpenMPThreads.
       Definition lookup_tid (tid: nat) (t: team_tree) : option tree_ref :=
         stree_lookup (is_leaf_tid tid) t.
 
-      Definition spawn_team (tid: nat) (team_mates: list nat) (tree: team_tree) (pv : option privatized_vars): option team_tree :=
-        (λ ref, ref.2 $ spawn_team' (ref.1.data_of.1) team_mates pv) <$> lookup_tid tid tree.
+      Definition spawn_team (tid: nat) (team_mates: list nat) (tree: team_tree) (cms : option contrib_maps): option team_tree :=
+        (λ ref, ref.2 $ spawn_team' (ref.1.data_of.1) team_mates cms) <$> lookup_tid tid tree.
 
       (* a spawned team is done when all team members are TeamLeaf (so don't have a working team)
          and are done *)

@@ -250,7 +250,7 @@ Section EvalExprFun.
     Qed.
 
 
-    (* TODO only the assign_loc_value is defined, so struct/union/array not supported. *)
+    (* TODO only the assign_loc_value is defined, so struct/union/array not supported yet. *)
     Definition assign_loc_fun (ce: composite_env) (ty: type) m b (ofs: ptrofs) (bf: bitfield) v : option mem :=
         match access_mode ty with
         | By_value chunk => 

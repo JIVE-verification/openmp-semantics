@@ -340,7 +340,7 @@ Module DryHybridMachine.
       (Hstmt: statement_of_state c = stmt)
       (Henvs_of_state: envs_of_state c ge e te)
       (* exists a chunk split of the iterations *)
-      (His_cln: is_a_canonical_loop_nest stmt = Some cln)
+      (His_cln: stmt = Some cln)
       (Hlb_of_loop: lb_of_loop cln ge e te m = Some lb)
       (Hincr_of_loop: incr_of_loop cln ge e te m = Some incr),
       (* TODO chunk_split has parameters lb, incr, iter_num *)
@@ -368,6 +368,7 @@ Module DryHybridMachine.
       (Htree'': ttree'' = my_ref.2 my_tree')
       (Htp': tp' = updThread cnt0 (Krun c') threadPerm),
       meta_step cnt0 Hcompat tp' m ttree''
+    (* TODO move barrier to step_for *)
     | step_for_end :
       (* ends work-sharing region, insert a barrier (if nowait clause is absent) *)
       forall c c' my_ref my_tree my_tree' ttree'
