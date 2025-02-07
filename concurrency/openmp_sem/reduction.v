@@ -171,13 +171,11 @@ From stdpp Require Import base list.
         Record pr_data :=
             {
                 orig_scope : scope;
-                (* privatization data *)
-                p_data : Values.block * type; (* original entry *)
                 (* reduction data *)
                 r_data : option red_var_ledger 
             }
         .
-        #[export] Instance settable_pr_data : Settable _ := settable! Build_pr_data <orig_scope; p_data; r_data>.
+        #[export] Instance settable_pr_data : Settable _ := settable! Build_pr_data <orig_scope; r_data>.
 
         (* privatization and reduction map. 
         ident -> (original address, reduction information) *)
@@ -191,15 +189,12 @@ From stdpp Require Import base list.
         Definition prm_get prm (i: ident)  :=
             prm ! i.
 
-
         (* privatize vars in ge, register them to prm, allocate copies in le *)
         Definition prm_register_p_ge_list prm (priv_ge_clause : privatization_clause_type) ge : option pr_map :=
             foldr (λ i_ty maybe_prm, 
                         prm ← maybe_prm;
                         let i := i_ty.1 in
-                        let ty := i_ty.2 in
-                        b ← Genv.find_symbol ge i;
-                        Some $ PTree.set i (Build_pr_data VarGlobal (b, ty) None) prm)
+                        Some $ PTree.set i (Build_pr_data VarGlobal None) prm)
                    (Some prm) priv_ge_clause.
         
         
@@ -207,9 +202,7 @@ From stdpp Require Import base list.
             foldr (λ i_ty maybe_prm, 
                         prm ← maybe_prm;
                         let i := i_ty.1 in
-                        (* i_ty.2 (from the priv_le_clause) given by the parser must equal to b_ty.2, the one stored in le *)
-                        b_ty ← (le!i);
-                        Some $ PTree.set i (Build_pr_data VarLocal b_ty None) prm) 
+                        Some $ PTree.set i (Build_pr_data VarLocal None) prm) 
                   (Some prm) priv_le_clause.
 
         Definition prm_register_p prm (priv_ge_clause priv_le_clause: privatization_clause_type) ge le: option pr_map :=
@@ -256,24 +249,35 @@ From stdpp Require Import base list.
                 (Some orig_val)
                 contribs.
 
+                
+        Definition get_b_ty scope ge le i : option (Values.block * type) :=
+            match scope with
+            | VarGlobal =>
+                b ← Genv.find_symbol ge i;
+                v_info ← Genv.find_var_info ge b;
+                Some (b, v_info.(gvar_info))
+            | VarLocal =>
+                le ! i
+            end.
+
         (* write v to (Vptr b Ptrofs.zero) of type ty. *)
         Definition write_v (ce:composite_env) b ty m v : option mem :=
             assign_loc_fun ce ty m b Ptrofs.zero Full v.
 
-        (* for every entry in prm, if it has a reduction ledger, write combined_v to the address of the original copy. *)
-        Definition prm_write_red_result prm ce (m:mem) : option mem :=
+        (* for every entry in prm, if it has a reduction ledger,
+           write combined_v to the address of the original copy,
+           according to the orig_ge and orig_le. *)
+        Definition prm_write_red_result prm ce orig_ge orig_le (m:mem) : option mem :=
             PTree.fold (λ maybe_m i prd,
                             m ← maybe_m;
                             rvl ← prd.(r_data);
                             combined_v ← combine_contrib ce m rvl;
                             (* block&type of the original copy *)
-                            let b_ty := prd.(p_data) in
+                            b_ty ← get_b_ty prd.(orig_scope) orig_ge orig_le i;
                             let '(b, ty) := b_ty in
                             write_v ce b ty m combined_v)
                         prm (Some m).
-
-        (* TODO for every name i∈prm, free private copy of i, restore ge[i] to prm[i].p_data *)
-        (* TODO rename p_data to orig_b and orig_ty *)
+        (* deallocation of privatized vars and restoration of original local env happens in the team tree. *)
     End PR_MAP.
 
 
