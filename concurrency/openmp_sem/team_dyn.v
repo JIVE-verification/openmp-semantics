@@ -1,6 +1,6 @@
 From mathcomp.ssreflect Require Import ssreflect ssrbool.
 Require Import Coq.Program.Wf FunInd Recdef.
-From compcert Require Import Values Clight.
+From compcert Require Import Values Clight Memory Ctypes AST Globalenvs.
 From VST.concurrency.openmp_sem Require Import reduction notations for_construct.
 From stdpp Require Import base list.
 From RecordUpdate Require Import RecordSet.
@@ -22,8 +22,14 @@ Section SiblingTree.
   Definition update_data (st: stree) (b: B) : stree :=
     match st with | SNode _ kids => SNode b kids end.
 
+  Definition update_data_f (st: stree) (f: B -> B) : stree :=
+    match st with | SNode b kids => SNode (f b) kids end.
+
   Definition update_kids (st: stree) (kids: list stree) : stree :=
     match st with | SNode b _ => SNode b kids end.
+
+  Definition update_kids_f (st: stree) (f: list stree -> list stree) : stree :=
+    match st with | SNode b kids => SNode b (f kids) end.
 
   (* stree eliminator, with the ability of knowing a node's parent
      f (parent: option B) (current_node_info: B) (previously accumulated results: A) *)
@@ -97,24 +103,25 @@ Section SiblingTree.
   Admitted.
 
   (* lookup with is_target, if found, update the data of the subtree root to b' *)
-  Definition stree_update (is_target: stree -> bool) (b': B) (st: stree) : option stree :=
+  Definition stree_update (is_target: stree -> bool) (f: stree -> option stree) (st: stree) : option stree :=
     ref ← stree_lookup is_target st;
-    Some (ref.2 $ update_data ref.1 b').
+    subtree ← f ref.1;
+    Some (ref.2 subtree).
 
 End SiblingTree.
 
 Notation " x '.data_of' " := (data_of x) (at level 20).
 Notation " x '.kids_of' " := (kids_of x) (at level 20).
 Notation " x '.update_data' b " := (update_data x b) (at level 20).
+Notation " x '.update_data_f' f " := (update_data_f x f) (at level 20).
 Notation " x '.update_kids' kids " := (update_kids x kids) (at level 20).
+Notation " x '.update_kids_f' f " := (update_kids_f x f) (at level 20).
 
 Section OpenMPThreads.
 
     (* OpenMP thread info *)
     Record ot_info := {
       t_tid : nat; (* thread id *)
-      o_team_id : nat; (* each of new team should get a different number *)
-      (* o_tid : nat; thread id in the current team, NOT tid *)
       (* o_level : nat; nesting level *)
       o_done : bool; (* if it is spawned by some primary thread, set to true when 
                      it has reached the last barrier *)
@@ -128,11 +135,18 @@ Section OpenMPThreads.
       (* if it can pass the barrier; issued by a thread to all its teammmates when it does
          not have a ticket and sees that all its team mates are at a barrier *)
       o_barrier_ticket : bool;
-      o_team_workloads : option $ list $ list chunk 
+      o_team_workloads : option $ list $ list chunk;
+      (* Privatization and reduction data.
+         Each list item is: the original ge and le at the time of privatization
+                            and the set of privatized variables.
+         the orig_ge and orig_le are used for looking up addr of original copies
+         of private vars, and at the end of a privatization scope, the thread's le
+         is restored to orig_le. *)
+      o_pr: list (env * pr_map * list reduction_clause_type)
     }.
 
     #[export] Instance settable_ot_info : Settable _ :=
-      settable! Build_ot_info <t_tid; o_team_id; o_done; o_work_sharing; o_barrier_ticket; o_team_workloads>.
+      settable! Build_ot_info <t_tid; o_done; o_work_sharing; o_barrier_ticket; o_team_workloads; o_pr>.
 
     Section OpenMPTeam.
 
@@ -163,17 +177,17 @@ Section OpenMPThreads.
          and the parent thread recovers its previous state as a leaf node.
          The bookkeeping data of a team contains `Some privatized_vars` if the parallel region of the team (i.e. the lifetime
          span of the team) also contains a reduction clause. *)
-      Definition team_tree := @stree (ot_info * option contrib_maps).
+      Definition team_tree := @stree (ot_info).
+
+      Implicit Types (prm : pr_map) (ot: ot_info) (tree: team_tree)
+        (i: ident) (ge orig_ge: genv) (le orig_le: env)
+        (ce:composite_env) (m: mem) (b:Values.block) (ty:type).
 
       (* the first thread in the program *)
-      Definition ot_init (tid: nat) := Build_ot_info tid 0 false.
+      Definition ot_init (tid: nat) := Build_ot_info tid false.
 
       (* a team starts with just the main thread *)
       Definition team_init (tid: nat) := SNode (ot_init tid) [].
-
-      (* ot creates a new team with the other team_mates and starts a new parallel region, which is not work-sharing. *)
-      Definition spawn_team' (ot: ot_info) (team_mates: list nat) (pv : option contrib_maps): team_tree :=
-        SNode (ot, pv) $ (λ tid, SNode ((Build_ot_info tid 0 false false false None), None) []) <$> (cons (ot.(t_tid)) team_mates).
 
       Definition is_tid (tid: nat) (ot: ot_info) : Prop :=
         ot.(t_tid) = tid.
@@ -183,7 +197,7 @@ Section OpenMPThreads.
       (* the list of all leaf threads *)
       Fixpoint tree_to_list (tree: team_tree) : (list ot_info) :=
         match tree with
-        | SNode (ot, pv) ts =>
+        | SNode ot ts =>
           match ts with
           | [] => [ot] (* leaf node*)
           | _ => concat (tree_to_list <$> ts)
@@ -198,10 +212,10 @@ Section OpenMPThreads.
         
       (* ot_info of the (immediate) team led by root of tree; does not include subteams *)
       Definition team_info (tree: team_tree) : list ot_info :=
-        (fst ∘ data_of) <$> kids_of tree.
+        data_of <$> kids_of tree.
 
       Definition has_tid (tid: nat) (tree: team_tree) : bool :=
-        isSome $ stree_lookup (λ st, decide $ is_tid tid $ st.data_of.1) tree.
+        isSome $ stree_lookup (λ st, decide $ is_tid tid $ st.data_of) tree.
 
       Lemma has_tid_correct tid tree :
         has_tid tid tree = true ↔ has_tid' tid tree.
@@ -222,7 +236,7 @@ Section OpenMPThreads.
       (* t is a leaf node and represents tid *)
       Definition is_leaf_tid (tid: nat) (t: team_tree) : bool :=
         match t with
-        | SNode (ot, None) [] => decide (is_tid tid ot)
+        | SNode ot [] => decide (is_tid tid ot)
         | _ => false
         end.
 
@@ -230,15 +244,60 @@ Section OpenMPThreads.
       Definition lookup_tid (tid: nat) (t: team_tree) : option tree_ref :=
         stree_lookup (is_leaf_tid tid) t.
 
-      Definition spawn_team (tid: nat) (team_mates: list nat) (tree: team_tree) (cms : option contrib_maps): option team_tree :=
-        (λ ref, ref.2 $ spawn_team' (ref.1.data_of.1) team_mates cms) <$> lookup_tid tid tree.
+      Definition update_tid (tid: nat) (t: team_tree) (f: team_tree -> option team_tree) : option team_tree :=
+        stree_update (is_leaf_tid tid) f t.
+
+      (* returns a list of team trees that corresponds to the new team that the parallel construct spawns.
+         First item in team_mates_tids should be the parent's tid, since the parent thread becomes the leader of the new team.  *)
+      Definition spawn_team' (team_mates_tids: list nat) : option $ list team_tree :=
+        foldr (λ tid tl,
+                tl ← tl;
+                let mate := SNode (Build_ot_info tid false false false None []) [] in
+                Some $ mate::tl)
+          (Some [])
+          team_mates_tids.
+
+      Definition spawn_team (tid: nat) (team_mates: list nat) (tree: team_tree) : option team_tree :=
+        update_tid tid tree (λ leaf,  
+          mates ← spawn_team' (tid::team_mates);
+          Some $ leaf.update_kids mates).
+
+      (* start a new privatization&reduction socpe.
+         register prm, original local env and reduction clauses for a thread.
+         t must be a leaf node for that thread. *)
+      Definition team_pr_start (t: team_tree) prm orig_le rcs : team_tree :=
+        t.update_data_f (λ ot, ot <| o_pr ::= cons (orig_le, prm, rcs) |>).
+
+      Definition team_pr_start_list (ts: list team_tree) (prm_lst:list pr_map) rcs (orig_le_lst: list env) : list team_tree :=
+        map (λ t_prm_orig_le, let '(t, prm, orig_le) := t_prm_orig_le in
+                team_pr_start t prm orig_le rcs)
+            (zip (zip ts prm_lst) orig_le_lst).
+
+      Definition team_pr_start_kids (t: team_tree) (prm_lst:list pr_map) rcs (orig_le_lst: list env)
+        : team_tree :=
+          t.update_kids_f (λ kids, team_pr_start_list kids prm_lst rcs orig_le_lst)
+        .
+
+      (* End a privatization&reduction scope for a thread.
+         t must be a leaf node for that thread.
+         pop a stack in o_pr, deallocate privatized copies in le, restore local to orig_le. *)
+      Definition team_pr_end (t: team_tree) ce m le : option (team_tree * env * Memory.mem) :=
+        match (t.data_of).(o_pr) with
+        | [] => None
+        | (orig_le, prm, rcs)::tl =>
+          m' ← prm_free_private prm ce m le;
+          le' ← prm_restore_le prm orig_le le;
+          let t' := t.update_data_f (λ ot, ot <| o_pr := tl |>) in
+          Some (t', le', m')
+        end
+        .
 
       (* a spawned team is done when all team members are TeamLeaf (so don't have a working team)
          and are done *)
       Definition is_team_done (tid: nat) (tree: team_tree) : Prop :=
         match tree with
         | SNode p ts => 
-          Forall (λ t, match t with SNode (ot,_) kids => (* all team members must be leaf *)
+          Forall (λ t, match t with SNode ot kids => (* all team members must be leaf *)
                              ot.(o_done) = true ∧ kids = [] end) ts end.
 
       #[global] Instance is_team_done_decidable tid tree : Decision (is_team_done tid tree).
@@ -253,7 +312,7 @@ Section OpenMPThreads.
        * Happens when all threads, including primary, are done in this team.
       *)
       Definition fire_team (tid: nat) (tree: team_tree) : option team_tree :=
-        (λ ref, ref.2 $ SNode (ref.1.data_of.1, None) []) <$> lookup_tid tid tree.
+        update_tid tid tree (λ leaf, Some $ leaf.update_kids []).
 
       (* whether the root of the tree is the leader of tid.
          this requires that they are in the same team.  *)
@@ -279,10 +338,7 @@ Section OpenMPThreads.
       Proof. Admitted.
 
       Definition set_tid_done (tid: nat) (tree: team_tree) : option team_tree :=
-        ref ← lookup_tid tid tree;
-        let '(ot, pv) := ref.1.data_of in
-        let kids := ref.1.kids_of in
-        Some (ref.2 $ SNode (ot <|o_done := true|>, pv) kids).
+        update_tid tid tree (λ leaf, Some $ leaf.update_data_f (λ ot, ot <|o_done := true|>)).
 
     End OpenMPTeam.
     

@@ -96,7 +96,7 @@ Definition typeof (e: expr) : type :=
 
 Definition label := ident.
 
-Definition privatization_clause_type : Type := list (ident * type).
+Definition privatization_clause_type : Type := list ident.
 
 (* https://www.openmp.org/wp-content/uploads/OpenMP-RefGuide-6.0-OMP60SC24-web.pdf 
   pg11, reduction clause *)
@@ -119,25 +119,26 @@ Variant reduction_identifier_type :=
   | RedIdLogicalOr
 .
 
-Record red_var_type :=
+(* Record red_var_type :=
   { red_var_name: ident;
     red_var_c_type: type
-  }.
+  }. 
 
 #[export] Instance settable_red_var : Settable _ :=
   settable! Build_red_var_type <red_var_name; red_var_c_type>.
+*)
 
 Variant reduction_clause_type :=
   | RedClause (* (redmods: list reduction_modifier_type) *) 
               (red_ident: reduction_identifier_type) (* the ident of the reduction operator *)
               (* assume that the parser figures out the scope *)
-              (red_vars: list red_var_type).
+              (red_vars: list ident).
 
 Variant meta_label : Type :=
   | OMPParallel (num_threads: nat)
                 (privatization_clauses_le: privatization_clause_type)
                 (privatization_clauses_ge: privatization_clause_type)
-                (reduction_clauses: reduction_clause_type) (* TODO this should be a list of red_clause *)
+                (reduction_clauses: list reduction_clause_type) (* TODO this should be a list of red_clause *)
   | OMPParallelEnd
   | OMPFor
   | OMPForEnd
@@ -568,6 +569,8 @@ Inductive state: Type :=
       (* resumes to some State, if the metalabel does not do anything *)
       (sp: state_params) : state.
 
+(* Clight is quantified over external_functions_sem, the external function semantics;
+  we further quantify over meta_label semantics and define it in the concurrent semantics. *)
 Variable run_meta_label: meta_label -> state_params -> state_params -> Prop.
 
 Definition state_of (p: state_params) :=

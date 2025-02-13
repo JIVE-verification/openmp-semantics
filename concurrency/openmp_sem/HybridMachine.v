@@ -168,7 +168,7 @@ Module DryHybridMachine.
 
     Definition transform_state_parallel_impl (c: Clight_core.state) (is_leader : bool) : option Clight_core.state :=
       match c with
-      | Clight_core.Metastate (OMPParallel num_threads red_clause) (f,s,k,e,le) =>
+      | Clight_core.Metastate (OMPParallel _ _ _ _) (f,s,k,e,le) =>
         (* need to bring threads in a `Metastate ParallelEnd` state to implement blocking/barrier for the leader *)
         let s' := Ssequence s (Smeta OMPParallelEnd Sskip) in
         let k' := if is_leader then k else Kstop in
@@ -190,12 +190,13 @@ Module DryHybridMachine.
     (* TODO implement these after instantiating C with the actual state *)
     Parameter transform_state_parallel : C -> bool -> option C.
     Parameter transform_state_for : C -> list chunk -> CanonicalLoopNest -> option C.
-    Parameter update_temp_env : C -> temp_env -> C.
+    Parameter update_le : C -> env -> C.
     Parameter update_statement : C -> statement -> C.
     Parameter envs_of_state : C -> genv -> env -> temp_env -> Prop.
     Parameter statement_of_state : C -> statement.
     Parameter make_halted : C -> C.
     Parameter is_a_canonical_loop_nest : statement -> option CanonicalLoopNest.
+    Parameter addThreads: thread_pool -> list $ option C -> res -> option (list pos.pos * thread_pool).
 
       (* (make_halted_spec c := ∃ ret_v, halted semSem (make_halted c) ret_v) *)
 
@@ -203,8 +204,8 @@ Module DryHybridMachine.
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
       thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=
     | step_parallel :
-        forall (tp_upd tp':thread_pool) c c' ge e  te te' virtue1 virtue2 ttree' (num_threads:nat) red_clause new_tids
-          leader_c teammate_c newThreadPermSum pv pv'
+        forall (tp_upd tp':thread_pool) c c' ge le  te m' virtue1 virtue2 ttree' ttree'' (num_threads:nat) pc_ge pc_le rcs new_tids
+          leader_c newThreadPermSum prm_lst le_lst le_lst0 le_lst_tl follower_c_lst 
           (Hbounded: if isCoarse then
                        ( sub_map virtue1.1 (getMaxPerm m).2 /\
                          sub_map virtue1.2 (getMaxPerm m).2)
@@ -220,36 +221,42 @@ Module DryHybridMachine.
           let newThreadPerm := (computeMap empty_map virtue2.1,
                                 computeMap empty_map virtue2.2) in
           forall
+            (* TODO num_thread at least 2? *)
             (Hinv : invariant tp)
             (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (* (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg) *)
-            (* FIXME OMPParallel should have a list of red_clauses? *)
-            (Hat_meta: at_meta semSem c m = Some (OMPParallel num_threads red_clause))
+            (Hat_meta: at_meta semSem c m = Some (OMPParallel num_threads pc_ge pc_le rcs))
             (HnewThreadPermSum1 :permMapJoin_n_times newThreadPerm.1 (num_threads-1) newThreadPermSum.1) 
             (HnewThreadPermSum2 :permMapJoin_n_times newThreadPerm.2 (num_threads-1) newThreadPermSum.2)
             (Hangel1: permMapJoin newThreadPermSum.1 threadPerm'.1 (getThreadR cnt0).1)
             (Hangel2: permMapJoin newThreadPermSum.2 threadPerm'.2 (getThreadR cnt0).2)
-            (* do reduction first, get a new state *)
-            (Henvs: envs_of_state c ge e te)
-            (* TODO pv should be somehting like nil*)
-            (Hred: add_red_clause_to_pv ge e te m red_clause pv te = Some (pv', te'))
-            (Hc': update_temp_env c te' = c')
+            (* setup the new le' *)
+            (Henvs: envs_of_state c ge le te)
+            (* make private copies for n threads *)
+            (Hprm: Some (prm_lst, le_lst, m') = prm_pr_start_n pc_ge pc_le rcs m ge le num_threads)
+            (* transform state *)
+            (Hle_lst:  le_lst = le_lst0::le_lst_tl)
+            (Hc': update_le c le_lst0 = c')
             (Hleader_state: Some leader_c = transform_state_parallel c' true)
-            (Hteammate_state: Some teammate_c = transform_state_parallel c' false)
+            (Hteammate_state: follower_c_lst = map (λ le, 
+                let c' := update_le c le in
+                transform_state_parallel c' false) le_lst_tl)
             (* set up new thread pool *)
-            (* TODO this should be Krun? *)
-            (Htp_upd: tp_upd = updThread cnt0 (Kresume leader_c Vundef) threadPerm')
-            (HaddThreads: (new_tids, tp') = addThreads tp_upd teammate_c newThreadPerm (num_threads-1))
+            (Htp_upd: tp_upd = updThread cnt0 (Krun leader_c) threadPerm')
+            (* TODO each thread should have different permissions, accounting for their private copies;
+               where to put permissions for the original copy? *)
+            (HaddThreads: Some (new_tids, tp') = addThreads tp_upd follower_c_lst newThreadPerm)
             (* add new team to team_tree *)
-            (Htree': Some ttree' = spawn_team tid0 (map pos.n new_tids) ttree $ Some pv'),
-            meta_step cnt0 Hcompat tp' m ttree'
+            (Htree': Some ttree' = spawn_team tid0 (map pos.n new_tids) ttree)
+            (Htree'': ttree'' = team_pr_start_kids ttree' prm_lst rcs le_lst),
+            meta_step cnt0 Hcompat tp' m' ttree''
     (* collect permission for threads at the end of its parallel region, if not leader
        gives all its permission to the leader.
        Thread state becomes halted.
        status in team tree set to done *)
     (* TODO maybe use OMPBarrier for the implicit barrier in parallel construct? *)
-    | step_parallel_end_not_leader :
+    (*  | step_parallel_end_not_leader :
         forall (tp1 tp2:thread_pool) c c'
           ge e te
           lref (ltree ltree' ltree'': team_tree) (* leader tree of tid0 *) 
@@ -294,7 +301,7 @@ Module DryHybridMachine.
             meta_step cnt0 Hcompat tp2 m ttree'
     (* if leader of this parallel region, collect permission for threads at the end of its parallel region,
        and accumulate reduction contributions. *)
-    | step_parallel_end_leader :
+     | step_parallel_end_leader :
         forall c c' ge e te te'
         lref ttree ttree' ttree'' ltree ltree' ltree'' tid_l
         maybe_pv pv pv'
@@ -418,7 +425,7 @@ Module DryHybridMachine.
       (Hmy_tree': my_tree' = my_tree.update_data (my_tree.data_of.1 <| o_barrier_ticket := false |>, my_tree.data_of.2))
       (Httree': ttree' = my_ref.2 my_tree')
       (Htp': tp' = updThread cnt0 (Krun c') (getThreadR cnt0)),
-      meta_step cnt0 Hcompat tp' m ttree'
+      meta_step cnt0 Hcompat tp' m ttree' *)
     .
 
     Inductive ext_step {isCoarse:bool} {tid0 tp m}

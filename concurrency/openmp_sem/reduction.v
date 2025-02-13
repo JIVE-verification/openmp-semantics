@@ -139,7 +139,7 @@ From stdpp Require Import base list.
         Record red_var_data :=
         {
             red_ident: reduction_identifier_type; (* reduction operator *)
-            red_var: red_var_type;
+            red_var: ident;
         }.
         #[export] Instance settable_red_var_data : Settable _ := settable! Build_red_var_data <red_ident; red_var>.
 
@@ -163,107 +163,167 @@ From stdpp Require Import base list.
         We assume the parser decides that a local variable to be privatized is in the local env,
         so we don't handle privatization of vars in temporal env. *)
         Variant scope :=
-        | VarGlobal 
+        | VarGlobal
         | VarLocal
         .
 
         (* privatization and reduction data structures *)
         Record pr_data :=
             {
-                orig_scope : scope;
                 (* reduction data *)
-                r_data : option red_var_ledger 
+                r_data : option val
             }
         .
-        #[export] Instance settable_pr_data : Settable _ := settable! Build_pr_data <orig_scope; r_data>.
+        #[export] Instance settable_pr_data : Settable _ := settable! Build_pr_data <r_data>.
 
         (* privatization and reduction map. 
         ident -> (original address, reduction information) *)
         Definition pr_map := PTree.t pr_data.
 
-        Implicit Types (prm : pr_map) (rvl: red_var_ledger) 
-                       (i: ident) (ge: genv) (le: env) (m: mem) (b:Values.block) (ty:type).
+        Implicit Types (prm : pr_map) (rvl: val) 
+                       (i: ident) (ge: genv) (le orig_le: env) (m: mem) (b:Values.block) (ty:type).
 
         Definition prm_init : pr_map := PTree.empty pr_data.
 
         Definition prm_get prm (i: ident)  :=
             prm ! i.
 
-        (* privatize vars in ge, register them to prm, allocate copies in le *)
-        Definition prm_register_p_ge_list prm (priv_ge_clause : privatization_clause_type) ge : option pr_map :=
-            foldr (λ i_ty maybe_prm, 
+        Definition prm_set_f prm (i: ident) f : option pr_map :=
+            prd ← prm ! i;
+            Some $ PTree.set i (f prd) prm.
+
+        Definition prm_set_r_data prm (i: ident) rvl : option pr_map :=
+            prm_set_f prm i (λ prd, prd <| r_data := Some rvl |>).
+
+        (* privatize vars in ge, register them to prm, TODO allocate copies in le *)
+        Definition prm_register_p_ge_list prm (priv_ge_clause : privatization_clause_type): option pr_map :=
+            foldr (λ i maybe_prm, 
                         prm ← maybe_prm;
-                        let i := i_ty.1 in
-                        Some $ PTree.set i (Build_pr_data VarGlobal None) prm)
+                        Some $ PTree.set i (Build_pr_data None) prm)
                    (Some prm) priv_ge_clause.
-        
-        
-        Definition prm_register_p_le_list prm (priv_le_clause : privatization_clause_type) le : option pr_map :=
-            foldr (λ i_ty maybe_prm, 
+
+        Definition prm_register_p_le_list prm (priv_le_clause : privatization_clause_type): option pr_map :=
+            foldr (λ i maybe_prm, 
                         prm ← maybe_prm;
-                        let i := i_ty.1 in
-                        Some $ PTree.set i (Build_pr_data VarLocal None) prm) 
+                        Some $ PTree.set i (Build_pr_data None) prm) 
                   (Some prm) priv_le_clause.
 
-        Definition prm_register_p prm (priv_ge_clause priv_le_clause: privatization_clause_type) ge le: option pr_map :=
-            prm' ← prm_register_p_ge_list prm priv_ge_clause ge;
-            prm' ← prm_register_p_le_list prm' priv_le_clause le;
+        Definition prm_register_p prm (priv_ge_clause priv_le_clause: privatization_clause_type): option pr_map :=
+            prm' ← prm_register_p_ge_list prm priv_ge_clause;
+            prm' ← prm_register_p_le_list prm' priv_le_clause;
             Some prm.
 
         (* register a variable for reduction *)
-        Definition prm_register_r prm (i: ident) (orig: val) (rv_data: red_var_data)  : option pr_map :=
-            let init_contribs := Build_red_var_ledger orig rv_data [] in
-            prd ← prm ! i;
-            Some $ PTree.set i (prd <| r_data := Some init_contribs |>) prm
-            .
-        
-        Definition r_contribs_append (rv_contribs: red_var_ledger) (v: val) : red_var_ledger :=
+        Definition prm_register_r_one_name prm (i: ident) (orig: val) : option pr_map :=
+            prm_set_r_data prm i orig
+        .
+
+        Definition prm_register_r_one_clause prm ge le m (rc: reduction_clause_type) : option pr_map :=
+            match rc with
+            | RedClause _ red_var_names => 
+                foldr (λ i maybe_prm, 
+                            prm ← maybe_prm;
+                            orig_val ← deref ge le i m;
+                            prm_set_r_data prm i orig_val)
+                      (Some prm) red_var_names
+            end.
+
+        Definition prm_register_r_clauses prm ge le m (rcs: list reduction_clause_type) : option pr_map :=
+            foldr (λ rc maybe_prm,
+                    prm ← maybe_prm;
+                    prm_register_r_one_clause prm ge le m rc) (Some prm) rcs.
+
+        Definition alloc_variables_priv_clause ge le m (priv_clause: privatization_clause_type) : option (env * mem) :=
+            foldr (λ i accu,
+                    accu ← accu;
+                    let '(le', m') := accu in
+                    alloc_variable_fun ge le' i m') (Some (le, m)) priv_clause.
+
+        (* start of privatization&reduction region.
+           Register privatizaiton and reduction information for t,
+           returns the new t, a new memory that has private vars allocated, and a new local env
+           that overwrite the original one with addrs of these private copies. *)
+        Definition prm_pr_start (priv_ge_clause priv_le_clause: privatization_clause_type)
+                                 (rcs: list reduction_clause_type)
+                                 m orig_ge orig_le : option (pr_map * env * mem) :=
+            prm ← prm_register_p prm_init priv_ge_clause priv_le_clause;
+            prm ← prm_register_r_clauses prm orig_ge orig_le m rcs;
+            env'_m' ← alloc_variables_priv_clause orig_ge orig_le m (priv_ge_clause ++ priv_le_clause);
+            Some (prm, env'_m'.1, env'_m'.2).
+
+        (* do pr_start for n threads. *)
+        Definition prm_pr_start_n (priv_ge_clause priv_le_clause: privatization_clause_type)
+                                 (rcs: list reduction_clause_type)
+                                 m orig_ge orig_le (n:nat): option (list pr_map * list env * mem) :=
+            foldr (λ _ accu,
+                    accu ← accu;
+                    let '(prm_lst, le_lst, m) := accu in
+                    res ← prm_pr_start priv_ge_clause priv_le_clause rcs m orig_ge orig_le;
+                    let '(prm, le, m') := res in
+                    Some $ (prm::prm_lst, le::le_lst, m'))
+                (Some ([], [], m)) (seq 0 n).
+
+        (* combine contribution *)
+        Definition r_contribs_append (v: val) (rv_contribs: red_var_ledger) : red_var_ledger :=
             rv_contribs <| contribs ::= cons v |>.
 
-        (* returns v if i↦v ∧ i∈le. *)
-        Definition deref_le (le: env) (i: ident) m : option val :=
-            b_ty ← le ! i;
-            let b := b_ty.1 in
-            let ty := b_ty.2 in
-            deref_loc_fun ty m b Ptrofs.zero Full.
+        (* return the idents for reduction vars *)
+        Definition prm_get_red_vars prm : list ident :=
+            PTree.fold (λ accu i prd,
+                            match prd.(r_data) with
+                            | Some _ => i :: accu
+                            | None => accu
+                            end)
+                        prm [].
 
-        (* for all the variables recorded in prm, find the thread's contribution by dereferencing the location,
-           and append it to the list of contributions in prm. Fails if not found in te. *)
+        (* for all the variables recorded in prm, find the thread's contribution in its current le,
+           and append it to the list of contributions in prm. *)
         Definition prm_r_append_contribs prm le m : option pr_map :=
-            PTree.fold (λ maybe_prm' i prd,
-                    prm' ← maybe_prm';
+            foldr (λ i maybe_prm,
+                    prm ← maybe_prm;
+                    prd ← prm ! i;
                     r_ledger ← prd.(r_data);
                     v ← deref_le le i m;
-                    let r_ledger' := r_contribs_append r_ledger v in
-                    Some $ PTree.set i (prd <| r_data := Some r_ledger' |>) prm') 
-                prm (Some prm).
+                    prm_set_r_data prm i v)
+                (Some prm) (prm_get_red_vars prm).
 
-        Definition combine_contrib ce m (rvl: red_var_ledger) : option val :=
+        (* free memory for private copies in prm. *)
+        Definition prm_free_private prm ce m le : option mem :=
+            foldr (λ i_data maybe_m,
+                    let i := i_data.1 in
+                    m ← maybe_m;
+                    b_ty ← le!i;
+                    let '(b, ty) := b_ty in
+                    Mem.free m b 0 (sizeof ce ty))
+                (Some m) (PTree.elements prm)
+        .
+
+        (* For privatized names in prm, restore entries in le.
+            if i∈orig_le, le[i] restores to orig_le[i];
+            otherwise it must be in orig_ge, in which case it is removed from le. *)
+        Definition prm_restore_le prm orig_le le : option env :=
+            foldr (λ i_data maybe_le,
+                    let i := i_data.1 in
+                    le ← maybe_le;
+                    match le!i with
+                    | Some b_ty => Some $ PTree.set i b_ty le
+                    | None => Some $ PTree.remove i le
+                    end)
+                (Some le) (PTree.elements prm)
+        .
+        (* TODO this should be in team_dyn *)
+        (* Definition combine_contrib ce m (rvl: red_var_ledger) ty : option val :=
             let rv_data := rvl.(rv_data) in
             let contribs := rvl.(contribs) in
             let orig_val := rvl.(orig_val) in
-            let ty := rv_data.(red_var).(red_var_c_type) in
             let red_id := rv_data.(red_ident) in
             foldr (λ v accu, accu ← accu;
                              combiner_sem ce m v accu ty red_id)
                 (Some orig_val)
                 contribs.
-
-                
-        Definition get_b_ty scope ge le i : option (Values.block * type) :=
-            match scope with
-            | VarGlobal =>
-                b ← Genv.find_symbol ge i;
-                v_info ← Genv.find_var_info ge b;
-                Some (b, v_info.(gvar_info))
-            | VarLocal =>
-                le ! i
-            end.
-
         (* write v to (Vptr b Ptrofs.zero) of type ty. *)
         Definition write_v (ce:composite_env) b ty m v : option mem :=
             assign_loc_fun ce ty m b Ptrofs.zero Full v.
-
         (* for every entry in prm, if it has a reduction ledger,
            write combined_v to the address of the original copy,
            according to the orig_ge and orig_le. *)
@@ -271,12 +331,12 @@ From stdpp Require Import base list.
             PTree.fold (λ maybe_m i prd,
                             m ← maybe_m;
                             rvl ← prd.(r_data);
-                            combined_v ← combine_contrib ce m rvl;
                             (* block&type of the original copy *)
-                            b_ty ← get_b_ty prd.(orig_scope) orig_ge orig_le i;
+                            b_ty ← get_b_ty orig_ge orig_le i;
                             let '(b, ty) := b_ty in
+                            combined_v ← combine_contrib ce m rvl ty;
                             write_v ce b ty m combined_v)
-                        prm (Some m).
+                        prm (Some m). *)
         (* deallocation of privatized vars and restoration of original local env happens in the team tree. *)
     End PR_MAP.
 
