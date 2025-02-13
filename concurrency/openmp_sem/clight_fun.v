@@ -77,7 +77,7 @@ Unset Guard Checking.
 Section EvalExprFun.
     Context {ge: genv}.
     Context {e: env}.
-    Context {le: temp_env}.
+    Context {le_temp: temp_env}.
     Context {m: Memory.mem}.
 
     (* 
@@ -112,7 +112,7 @@ Section EvalExprFun.
     | (Econst_float f ty) => Some (Vfloat f)
     | (Econst_single f ty) => Some (Vsingle f)
     | (Econst_long i ty) => Some (Vlong i)
-    | (Etempvar id ty) => v ← le ! id; Some v
+    | (Etempvar id ty) => v ← le_temp ! id; Some v
     | (Eaddrof a ty) => match eval_lvalue_fun a  with
                     | Some (loc, ofs, Full) => Some (Vptr loc ofs)
                     | _ => None
@@ -189,8 +189,8 @@ Section EvalExprFun.
 
 
     Lemma eval_expr_fun_correct1:
-        ∀ exp v, (eval_expr_fun exp = Some v -> eval_expr ge e le m exp v) ∧
-                ∀ bl ofs bt, eval_lvalue_fun exp = Some (bl, ofs, bt) -> eval_lvalue ge e le m exp bl ofs bt.
+        ∀ exp v, (eval_expr_fun exp = Some v -> eval_expr ge e le_temp m exp v) ∧
+                ∀ bl ofs bt, eval_lvalue_fun exp = Some (bl, ofs, bt) -> eval_lvalue ge e le_temp m exp bl ofs bt.
     Proof.
     intro exp; induction exp; intros; split; intros; inv H; try (by constructor);
     try unfold_mbind_in_hyp; repeat destruct_match.
@@ -280,12 +280,12 @@ Section EvalExprFun.
 Definition step_fun (t: trace) (s: state) : option state :=
 match t with 
 | E0 => match s with 
-    | (State f (Sassign a1 a2) k e le m) =>  
+    | (State f (Sassign a1 a2) k e le_temp m) =>  
                 match eval_lvalue_fun (a1) with
                     |Some (a, b, c) => match (eval_expr_fun a2) with    
                     | Some v => match sem_cast (v) (typeof a2) (typeof a1) m with 
                             | Some v => match assign_loc_fun ge (typeof a1) m a b c v with 
-                                | Some m' => Some (State f Sskip k e le m')
+                                | Some m' => Some (State f Sskip k e le_temp m')
                                 | None => None
                                 end
                               | None => None  
@@ -294,7 +294,7 @@ match t with
                     end   
                     |None => None         
                 end    
-    (* | (State f (Sset id a) k e le m) => Some (State f Sskip k e (PTree.set id (eval_lvalue_fun ((e le m) a)) le) m) *)
+    | (State f (Sset id a) k e le m) => v ← (eval_expr_fun (a)) ; Some (State f Sskip k e (PTree.set id v le) m)
     (* | (State f (Scall optid a al) k e le m) => Some (Callstate (Genv.find_funct ge eval_lvalue_fun ((e le m) a)) vargs (Kcall optid f e le k) m) *)
     | _ => None
     end
