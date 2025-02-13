@@ -1,6 +1,6 @@
 (* function version of a part of clight semantics *)
 
-From compcert Require Import Clight Cop Clightdefs AST Integers Ctypes Values Memory.
+From compcert Require Import Clight Cop Clightdefs AST Integers Ctypes Values Memory Events Maps_wo_notation Globalenvs.
 
 From VST.concurrency.openmp_sem Require Import notations.
 
@@ -275,5 +275,34 @@ Section EvalExprFun.
         inv H.
         eapply assign_loc_value; done.
     Qed.
+(* Variable ge: genv. *)
+
+Definition step_fun (t: trace) (s: state) : option state :=
+match t with 
+| E0 => match s with 
+    | (State f (Sassign a1 a2) k e le m) =>  
+                match eval_lvalue_fun (a1) with
+                    |Some (a, b, c) => match (eval_expr_fun a2) with    
+                    | Some v => match sem_cast (v) (typeof a2) (typeof a1) m with 
+                            | Some v => match assign_loc_fun ge (typeof a1) m a b c v with 
+                                | Some m' => Some (State f Sskip k e le m')
+                                | None => None
+                                end
+                              | None => None  
+                        end
+                        |None => None    
+                    end   
+                    |None => None         
+                end    
+    (* | (State f (Sset id a) k e le m) => Some (State f Sskip k e (PTree.set id (eval_lvalue_fun ((e le m) a)) le) m) *)
+    (* | (State f (Scall optid a al) k e le m) => Some (Callstate (Genv.find_funct ge eval_lvalue_fun ((e le m) a)) vargs (Kcall optid f e le k) m) *)
+    | _ => None
+    end
+ (* | _ => match s with 
+    (* |(State f (Sbuiltin optid ef tyargs al) k e le m) => (State f Sskip k e (set_opttemp optid vres le) m') *)
+    | _ => None
+    end *)
+end .
 
 End EvalExprFun.
+
