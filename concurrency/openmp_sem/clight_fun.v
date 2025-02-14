@@ -284,7 +284,7 @@ match elist with
             | _ => None
         end
 | a::b=> vf ← eval_expr_fun a; match t with 
-    | Ctypes.Tcons i j => eval_exprlist_fun b j             
+    | Ctypes.Tcons i j => vflist ← eval_exprlist_fun b j; Some (vf::vflist)
     | Ctypes.Tnil => None
 end
 end.
@@ -292,7 +292,7 @@ end.
 
 Definition step_fun (t: trace) (s: state) : option state :=
 match t with 
-| E0 => match s with 
+| nil => match s with 
     | (State f (Sassign a1 a2) k e le_temp m) =>  
                 match eval_lvalue_fun (a1) with
                     |Some (a, b, c) => match (eval_expr_fun a2) with    
@@ -314,6 +314,7 @@ match t with
         end
     | _ => None    
     end
+|_=> None  
  (* | _ => match s with 
     (* |(State f (Sbuiltin optid ef tyargs al) k e le m) => (State f Sskip k e (set_opttemp optid vres le) m') *)
     | _ => None
