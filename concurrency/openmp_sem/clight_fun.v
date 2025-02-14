@@ -277,6 +277,19 @@ Section EvalExprFun.
     Qed.
 (* Variable ge: genv. *)
 
+Fixpoint eval_exprlist_fun (elist:list expr) (t: typelist) : option (list val) := 
+match elist with
+| nil => match t with 
+            | Ctypes.Tnil => Some nil
+            | _ => None
+        end
+| a::b=> vf ← eval_expr_fun a; match t with 
+    | Ctypes.Tcons i j => eval_exprlist_fun b j             
+    | Ctypes.Tnil => None
+end
+end.
+
+
 Definition step_fun (t: trace) (s: state) : option state :=
 match t with 
 | E0 => match s with 
@@ -295,8 +308,11 @@ match t with
                     |None => None         
                 end    
     | (State f (Sset id a) k e le m) => v ← (eval_expr_fun (a)) ; Some (State f Sskip k e (PTree.set id v le) m)
-    (* | (State f (Scall optid a al) k e le m) => Some (Callstate (Genv.find_funct ge eval_lvalue_fun ((e le m) a)) vargs (Kcall optid f e le k) m) *)
-    | _ => None
+    | (State f (Scall optid a al) k e le m) => vf ← eval_expr_fun (a) ; fd ← (Genv.find_funct ge vf) ; match classify_fun (typeof a) with 
+            | fun_case_f args res cc => vargs ← (eval_exprlist_fun al args) ; Some (Callstate fd vargs (Kcall optid f e le k) m)
+        | _ => None
+        end
+    | _ => None    
     end
  (* | _ => match s with 
     (* |(State f (Sbuiltin optid ef tyargs al) k e le m) => (State f Sskip k e (set_opttemp optid vres le) m') *)
