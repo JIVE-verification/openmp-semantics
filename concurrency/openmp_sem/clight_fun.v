@@ -312,9 +312,43 @@ match t with
             | fun_case_f args res cc => vargs ← (eval_exprlist_fun al args) ; Some (Callstate fd vargs (Kcall optid f e le k) m)
         | _ => None
         end
+    | (State f (Ssequence s1 s2) k e le m) => Some (State f s1 (Kseq s2 k) e le m)
+    | (State f Sskip (Kseq s k) e le m) => Some (State f s k e le m)
+    | (State f Scontinue (Kseq s k) e le m) => Some (State f Scontinue k e le m)
+    | (State f Sbreak (Kseq s k) e le m) => Some (State f Sbreak k e le m)
+    (*TODO: step_ifthenelse case *)
+    (* | (State f (Sifthenelse a s1 s2) k e le m) => Some (State f (if b then s1 else s2) k e le m) *)
+    | (State f (Sloop s1 s2) k e le m) => Some (State f s1 (Kloop1 s1 s2 k) e le m)
+    | (State f Sbreak (Kloop1 s1 s2 k) e le m) => Some (State f Sskip k e le m)
+    (*TODO: Check the below one and make sure 'x' is okay; also note how similar the 
+    preceding case and following case are*)
+    | (State f x (Kloop1 s1 s2 k) e le m) => Some (State f s2 (Kloop2 s1 s2 k) e le m)
+    | (State f Sskip (Kloop2 s1 s2 k) e le m) => Some (State f (Sloop s1 s2) k e le m)
+    | (State f Sbreak (Kloop2 s1 s2 k) e le m) => Some (State f Sskip k e le m)
+    (*TODO: step_return_0, step_return_1, step_skip_call, step_switch*)
+    (* | (State f (Sreturn None) k e le m) => Some (Returnstate Vundef (call_cont k) m') *)
+    (* | (State f (Sreturn (Some a)) k e le m) => Some (Returnstate v' (call_cont k) m') *)
+    (* | (State f Sskip k e le m) => (Returnstate Vundef k m') *)
+    (* | (State f (Sswitch a sl) k e le m) => Some (State f (seq_of_labeled_statement (select_switch n sl)) (Kswitch k) e le m) *)
+    | (State f Scontinue (Kswitch k) e le m) => Some (State f Scontinue k e le m)
+    (*TODO: another case where preceding is redundant is swapped with following*)
+    | (State f x (Kswitch k) e le m) => Some (State f Sskip k e le m)
+    | (State f (Slabel lbl s) k e le m) => Some (State f s k e le m)
+    (*TODO: step_goto, step_internal_function*)
+    (* | (State f (Sgoto lbl) k e le m) => (State f s' k' e le m) *)
+    (* | (Callstate (Internal f) vargs k m) => Some (State f f.(fn_body) k e le m1) *)
+    | (Returnstate v (Kcall optid f e le k) m) => Some (State f Sskip k e (set_opttemp optid v le) m)
     | _ => None    
     end
-|_=> None  
+    (*TODO: step_builtin, step_external_function, step_from_metastate*)
+|t => match s with 
+        (* | (State f (Sbuiltin optid ef tyargs al) k e le m) =>(State f Sskip k e (set_opttemp optid (*vres*) (vargs ← eval_exprlist_fun al tyargs; external_call ef ge vargs m t) le) (*m'*) (vargs ← eval_exprlist_fun al tyargs; external_call ef ge vargs m t)) *)
+        (* | (Callstate (External ef targs tres cconv) vargs k m) => Some (Returnstate vres k m') *)
+        | (State f (Smeta ml s) k e le m) => Some (Metastate ml (f, s, k, e, le, m))
+        (* | (Metastate ml sp) => Some (state_of sp') *)
+        | _ => None
+    end     
+(* |_=> None   *)
  (* | _ => match s with 
     (* |(State f (Sbuiltin optid ef tyargs al) k e le m) => (State f Sskip k e (set_opttemp optid vres le) m') *)
     | _ => None
