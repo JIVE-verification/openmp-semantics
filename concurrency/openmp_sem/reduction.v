@@ -255,21 +255,19 @@ From stdpp Require Import base list.
            Register privatizaiton and reduction information for t,
            returns the new t, a new memory that has private vars allocated, and a new local env
            that overwrite the original one with addrs of these private copies. *)
-        Definition prm_pr_start (priv_clause: privatization_clause_type)
-                                 (rcs: list reduction_clause_type)
+        Definition prm_priv_start (priv_clause: privatization_clause_type)
                                  m orig_ge orig_le : option (pr_map * env * mem) :=
             prm ← prm_register_p prm_init priv_clause;
             env'_m' ← alloc_variables_priv_clause orig_ge orig_le m priv_clause;
             Some (prm, env'_m'.1, env'_m'.2).
 
         (* do pr_start for n threads. *)
-        Definition prm_pr_start_n (priv_clause: privatization_clause_type)
-                                 (rcs: list reduction_clause_type)
+        Definition prm_priv_start_n (priv_clause: privatization_clause_type)
                                  m orig_ge orig_le (n:nat): option (list pr_map * list env * mem) :=
             foldr (λ _ accu,
                     accu ← accu;
                     let '(prm_lst, le_lst, m) := accu in
-                    res ← prm_pr_start priv_clause rcs m orig_ge orig_le;
+                    res ← prm_priv_start priv_clause m orig_ge orig_le;
                     let '(prm, le, m') := res in
                     Some $ (prm::prm_lst, le::le_lst, m'))
                 (Some ([], [], m)) (seq 0 n).
