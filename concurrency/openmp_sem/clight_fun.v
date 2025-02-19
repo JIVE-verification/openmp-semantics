@@ -137,6 +137,10 @@ Section MemOps.
         let '(b, ty) := b_ty in
         deref_loc_fun ty m b Ptrofs.zero Full.
 
+    (* write v to (Vptr b Ptrofs.zero) of type ty. *)
+    Definition write_v ce b ty m v : option mem :=
+        assign_loc_fun ce ty m b Ptrofs.zero Full v.
+
     Definition alloc_variable_fun (ge:genv) le i m : option (env * mem) :=
         b_ty ← get_b_ty ge le i;
         let '(_, ty) := b_ty in

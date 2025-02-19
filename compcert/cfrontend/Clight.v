@@ -136,11 +136,11 @@ Variant reduction_clause_type :=
 
 Variant meta_label : Type :=
   | OMPParallel (num_threads: nat)
-                (privatization_clauses_le: privatization_clause_type)
-                (privatization_clauses_ge: privatization_clause_type)
-                (reduction_clauses: list reduction_clause_type) (* TODO this should be a list of red_clause *)
+                (privatization_clause: privatization_clause_type)
+                (reduction_clauses: list reduction_clause_type)
   | OMPParallelEnd
-  | OMPFor
+  | OMPFor (privatization_clause: privatization_clause_type)
+           (reduction_clauses: list reduction_clause_type)
   | OMPForEnd
   | OMPBarrier
 .

@@ -1,7 +1,7 @@
 From mathcomp.ssreflect Require Import ssreflect ssrbool.
 Require Import Coq.Program.Wf FunInd Recdef.
 From compcert Require Import Values Clight Memory Ctypes AST Globalenvs.
-From VST.concurrency.openmp_sem Require Import reduction notations for_construct.
+From VST.concurrency.openmp_sem Require Import reduction notations for_construct clight_fun.
 From stdpp Require Import base list.
 From RecordUpdate Require Import RecordSet.
 Import RecordSetNotations.
@@ -97,6 +97,12 @@ Section SiblingTree.
   Definition stree_lookup (is_target: stree -> bool) (t: stree) : option tree_ref :=
     stree_lookup_aux is_target (t, id) None.
 
+  Lemma lookup_ref_same (is_target: stree -> bool) (t: stree) :
+    forall ref,
+    stree_lookup is_target t = Some ref →
+    ref.2 ref.1 = t.
+  Admitted.
+
   Lemma lookup_has_prop (is_target: stree -> bool) (t: stree) (ref: tree_ref) :
     stree_lookup is_target t = Some ref →
     is_target (fst ref) = true.
@@ -110,8 +116,8 @@ Section SiblingTree.
 
 End SiblingTree.
 
-Notation " x '.data_of' " := (data_of x) (at level 20).
-Notation " x '.kids_of' " := (kids_of x) (at level 20).
+Notation " x '.data_of' " := (data_of x) (at level 2).
+Notation " x '.kids_of' " := (kids_of x) (at level 2).
 Notation " x '.update_data' b " := (update_data x b) (at level 20).
 Notation " x '.update_data_f' f " := (update_data_f x f) (at level 20).
 Notation " x '.update_kids' kids " := (update_kids x kids) (at level 20).
@@ -123,8 +129,6 @@ Section OpenMPThreads.
     Record ot_info := {
       t_tid : nat; (* thread id *)
       (* o_level : nat; nesting level *)
-      o_done : bool; (* if it is spawned by some primary thread, set to true when 
-                     it has reached the last barrier *)
       o_work_sharing : bool; (* is in work-sharing region; can only enter once *)
       (* work loads of the team that is this thread spawns, i.e. the children of this node.
          now chunk split is decided the first time a thread hits the for pragma; if need to
@@ -132,21 +136,20 @@ Section OpenMPThreads.
          instantiate that thread's workload and quantify over the uninstantiated part
          [ team_workloads[i]=something ∧ ∃ rest workloads, s.t. the workloads are still
            consistent ] *)
-      (* if it can pass the barrier; issued by a thread to all its teammmates when it does
-         not have a ticket and sees that all its team mates are at a barrier *)
-      o_barrier_ticket : bool;
       o_team_workloads : option $ list $ list chunk;
       (* Privatization and reduction data.
-         Each list item is: the original ge and le at the time of privatization
+         Each list item is: the original le at the time of privatization
                             and the set of privatized variables.
-         the orig_ge and orig_le are used for looking up addr of original copies
+         the orig_le is used for looking up addr of original copies
          of private vars, and at the end of a privatization scope, the thread's le
          is restored to orig_le. *)
-      o_pr: list (env * pr_map * list reduction_clause_type)
+      o_pr: list (env * pr_map);
+      (* a stack of reduction information of kids. First thread encountering a reduction adds a stack. *)
+      o_red_stack: list red_vars
     }.
 
     #[export] Instance settable_ot_info : Settable _ :=
-      settable! Build_ot_info <t_tid; o_done; o_work_sharing; o_barrier_ticket; o_team_workloads; o_pr>.
+      settable! Build_ot_info <t_tid; o_work_sharing; o_team_workloads; o_pr; o_red_stack>.
 
     Section OpenMPTeam.
 
@@ -247,12 +250,28 @@ Section OpenMPThreads.
       Definition update_tid (tid: nat) (t: team_tree) (f: team_tree -> option team_tree) : option team_tree :=
         stree_update (is_leaf_tid tid) f t.
 
+      (* whether tree is the parent of a leaf node for tid. *)
+      Definition is_parent_tree_of (tid: nat) (tree: team_tree) : Prop :=
+        match tree with
+        | SNode ot kids =>
+           (Exists (λ kid, is_leaf_tid tid kid=true) tree.kids_of) end.
+      
+      #[global] Instance is_parent_tree_of_dec tid tree : Decision (is_parent_tree_of tid tree).
+      Proof.
+        move : tree => [ot ts].
+        rewrite /is_parent_tree_of.
+        apply Exists_dec. apply _.
+      Qed.
+
+      Definition parent_tree_of (tid: nat) (tree: team_tree) : option tree_ref :=
+        stree_lookup (λ st, decide $ is_parent_tree_of tid st) tree.
+
       (* returns a list of team trees that corresponds to the new team that the parallel construct spawns.
          First item in team_mates_tids should be the parent's tid, since the parent thread becomes the leader of the new team.  *)
       Definition spawn_team' (team_mates_tids: list nat) : option $ list team_tree :=
         foldr (λ tid tl,
                 tl ← tl;
-                let mate := SNode (Build_ot_info tid false false false None []) [] in
+                let mate := SNode (Build_ot_info tid false None [] []) [] in
                 Some $ mate::tl)
           (Some [])
           team_mates_tids.
@@ -262,29 +281,44 @@ Section OpenMPThreads.
           mates ← spawn_team' (tid::team_mates);
           Some $ leaf.update_kids mates).
 
-      (* start a new privatization&reduction socpe.
+      (* t must be a leaf node for that thread. *)
+      Definition team_pr_add_prm (t: team_tree) prm orig_le: team_tree :=
+        t.update_data_f (λ ot, ot <| o_pr ::= cons (orig_le, prm) |>).
+
+      (* start a new privatization&reduction scope.
          register prm, original local env and reduction clauses for a thread.
-         t must be a leaf node for that thread. *)
-      Definition team_pr_start (t: team_tree) prm orig_le rcs : team_tree :=
-        t.update_data_f (λ ot, ot <| o_pr ::= cons (orig_le, prm, rcs) |>).
+         Assume ge is invariant during the scope.
+         tree is the whole team tree. Start reduction scope for the parent thread;
+        if parent haven't had reduction information registered, add that to parent's o_red_stack. *)
+      Definition team_pr_start_tid (tree: team_tree) (tid: nat) prm ge orig_le m (rcs: list reduction_clause_type) : option team_tree :=
+        t ← update_tid tid tree (λ leaf, Some $ team_pr_add_prm leaf prm orig_le);
+        (* if parent's reduction info stack size is less than the kid's reduction info (by 1), that means the
+           kid is the first to encounter the reduction region and registers the info for parent node. *)
+        pref ← parent_tree_of tid tree;
+        ref ← lookup_tid tid tree;
+        let red_stack_depth := length pref.1.data_of.(o_red_stack) in
+        let o_pr_depth := length ref.1.data_of.(o_pr) in
+        if red_stack_depth <? o_pr_depth then
+          rvs ← init_rvs rcs ge orig_le m;
+          Some $ pref.2 $ pref.1.update_data_f (λ ot, ot <| o_red_stack ::= cons rvs |>)
+        else Some t
+      .
 
-      Definition team_pr_start_list (ts: list team_tree) (prm_lst:list pr_map) rcs (orig_le_lst: list env) : list team_tree :=
-        map (λ t_prm_orig_le, let '(t, prm, orig_le) := t_prm_orig_le in
-                team_pr_start t prm orig_le rcs)
-            (zip (zip ts prm_lst) orig_le_lst).
+      (* find tid's teammates' thread ids, including tid.
+         If tid is root, return itself. *)
+      Definition team_mates_tids tid tree: list nat :=
+      match parent_tree_of tid tree with
+      | None => [tid]
+      | Some pref => map (λ kid, kid.data_of.(t_tid)) pref.1.kids_of
+      end.
 
-      Definition team_pr_start_kids (t: team_tree) (prm_lst:list pr_map) rcs (orig_le_lst: list env)
-        : team_tree :=
-          t.update_kids_f (λ kids, team_pr_start_list kids prm_lst rcs orig_le_lst)
-        .
-
-      (* End a privatization&reduction scope for a thread.
+      (* End a privatization & reduction scope for a thread.
          t must be a leaf node for that thread.
          pop a stack in o_pr, deallocate privatized copies in le, restore local to orig_le. *)
-      Definition team_pr_end (t: team_tree) ce m le : option (team_tree * env * Memory.mem) :=
-        match (t.data_of).(o_pr) with
+      Definition team_pr_end (t: team_tree) ce m le: option (team_tree * env * mem) :=
+        match t.data_of.(o_pr) with
         | [] => None
-        | (orig_le, prm, rcs)::tl =>
+        | (orig_le, prm)::tl =>
           m' ← prm_free_private prm ce m le;
           le' ← prm_restore_le prm orig_le le;
           let t' := t.update_data_f (λ ot, ot <| o_pr := tl |>) in
@@ -292,20 +326,11 @@ Section OpenMPThreads.
         end
         .
 
-      (* a spawned team is done when all team members are TeamLeaf (so don't have a working team)
-         and are done *)
-      Definition is_team_done (tid: nat) (tree: team_tree) : Prop :=
-        match tree with
-        | SNode p ts => 
-          Forall (λ t, match t with SNode ot kids => (* all team members must be leaf *)
-                             ot.(o_done) = true ∧ kids = [] end) ts end.
-
-      #[global] Instance is_team_done_decidable tid tree : Decision (is_team_done tid tree).
-      Proof.
-        move : tree => [ot ts].
-        rewrite /is_team_done. apply Forall_dec => [[? ?]].
-        tc_solve.
-      Qed.
+      Definition team_pr_end_tid (tree: team_tree) (tid: nat) ce m le : option (team_tree * env * mem) :=
+        ref ← lookup_tid tid tree;
+        subtree'_le'_m' ← team_pr_end ref.1 ce m le;
+        let '(subtree', le', m') := (subtree'_le'_m': (team_tree * env * mem)) in
+        Some $ (ref.2 subtree', le', m').
       
       (** assume tid is the primary thread of some team, turn that TeamNode to TeamLeaf,
           set pv to None (since reduction is finished)
@@ -314,32 +339,35 @@ Section OpenMPThreads.
       Definition fire_team (tid: nat) (tree: team_tree) : option team_tree :=
         update_tid tid tree (λ leaf, Some $ leaf.update_kids []).
 
-      (* whether the root of the tree is the leader of tid.
-         this requires that they are in the same team.  *)
-      Definition is_leader_tree_of (tid: nat) (tree: team_tree) : Prop :=
-        match tree with
-        | SNode ot kids =>
-           (In tid $ t_tid <$> team_info tree) end.
+      Fixpoint find_index {A:Type} (f: A->bool) (l:list A) : option nat :=
+        match l with
+        | [] => None
+        | x::xs => if f x then Some 0 else
+                   match find_index f xs with
+                   | None => None
+                   | Some n => Some (S n)
+                   end
+        end.
       
-      #[global] Instance is_leader_tree_of_dec tid tree : Decision (is_leader_tree_of tid tree).
-      Proof.
-        move : tree => [ot ts].
-        rewrite /is_leader_tree_of.
-        apply In_dec => [? ?]. apply Nat.eq_dec.
-      Qed.
+      (* thread num is the index to tid of parent tree's kids list. *)
+      Definition get_thread_num tid tree : option nat :=
+        ref ← parent_tree_of tid tree;
+        find_index (λ t:team_tree, decide $ is_leaf_tid tid t) ref.1.kids_of.
 
-      Definition leader_tree_of (tid: nat) (tree: team_tree) : option tree_ref :=
-        stree_lookup (λ st, decide $ is_leader_tree_of tid st) tree.
+      (* rvs for a leaf tid is stored at its parent's node. *)
+      Definition team_pop_rvs tid tree: option (team_tree * red_vars) :=
+        ref ← parent_tree_of tid tree;
+        match ref.1.data_of.(o_red_stack) with
+        | [] => None
+        | rvs::tl => Some (ref.2 ref.1.update_data_f (λ ot, ot <| o_red_stack := tl |>), rvs)
+        end.
 
-      Lemma has_leader_or_no_kid (tid: nat) (tree: team_tree) :
-        has_tid tid tree ->
-        tree.kids_of <> [] ->
-        ∃ leader_tree,  leader_tree_of tid tree = Some leader_tree.
-      Proof. Admitted.
-
-      Definition set_tid_done (tid: nat) (tree: team_tree) : option team_tree :=
-        update_tid tid tree (λ leaf, Some $ leaf.update_data_f (λ ot, ot <|o_done := true|>)).
+      (* tid is a leader of its current team if it's parent node has the same tid. *)
+      Definition is_leader (tid: nat) (tree: team_tree) : bool :=
+        match parent_tree_of tid tree with
+        | None => true
+        | Some pref => pref.1.data_of.(t_tid) =? tid
+        end.
 
     End OpenMPTeam.
-    
 End OpenMPThreads.

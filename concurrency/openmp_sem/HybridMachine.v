@@ -166,19 +166,18 @@ Module DryHybridMachine.
                      end) dm.
 
 
-    Definition transform_state_parallel_impl (c: Clight_core.state) (is_leader : bool) : option Clight_core.state :=
+    Definition transform_state_parallel_impl (c: Clight_core.state) : option Clight_core.state :=
       match c with
-      | Clight_core.Metastate (OMPParallel _ _ _ _) (f,s,k,e,le) =>
+      | Clight_core.Metastate (OMPParallel _ _ _) (f,s,k,e,le) =>
         (* need to bring threads in a `Metastate ParallelEnd` state to implement blocking/barrier for the leader *)
         let s' := Ssequence s (Smeta OMPParallelEnd Sskip) in
-        let k' := if is_leader then k else Kstop in
-        Some (Clight_core.State f s' k' e le)
+        Some (Clight_core.State f s' k e le)
       | _ => None
       end.
 
     Definition transform_state_for_impl (c: Clight_core.state) (my_workload: list chunk) (cln: CanonicalLoopNest) : option Clight_core.state :=
       match c with
-      | Clight_core.Metastate (OMPFor) (f,s,k,e,le) =>
+      | Clight_core.Metastate (OMPFor _ _) (f,s,k,e,le) =>
         (* need to bring threads in a `Metastate ParallelEnd` state to implement blocking/barrier for the leader *)
          let s' := Ssequence (Ssequence (transform_chunks my_workload cln)
                                         (Smeta OMPForEnd Sskip))
@@ -188,24 +187,39 @@ Module DryHybridMachine.
       end.
 
     (* TODO implement these after instantiating C with the actual state *)
-    Parameter transform_state_parallel : C -> bool -> option C.
+    Parameter transform_state_parallel : C  -> option C.
     Parameter transform_state_for : C -> list chunk -> CanonicalLoopNest -> option C.
     Parameter update_le : C -> env -> C.
     Parameter update_statement : C -> statement -> C.
-    Parameter envs_of_state : C -> genv -> env -> temp_env -> Prop.
+    Parameter envs_of_state : C -> (env * temp_env).
+    Parameter ce : Ctypes.composite_env.
     Parameter statement_of_state : C -> statement.
     Parameter make_halted : C -> C.
     Parameter is_a_canonical_loop_nest : statement -> option CanonicalLoopNest.
-    Parameter addThreads: thread_pool -> list $ option C -> res -> option (list pos.pos * thread_pool).
+    Parameter permJoinFun : res -> res -> option res.
 
-      (* (make_halted_spec c := ∃ ret_v, halted semSem (make_halted c) ret_v) *)
+    Definition blocked_at (ct:ctl) : option C :=
+       match ct with
+      | Kblocked c => Some c
+      | _ => None
+      end.
+
+    Definition permMapJoinPair (pmap1 pmap2 pmap3: res) : Prop :=
+      permMapJoin pmap1.1 pmap2.1 pmap3.1 ∧
+      permMapJoin pmap1.2 pmap2.2 pmap3.2.
+
+    Definition permMapJoinPair_n_times pmap1 n pmap2 : Prop :=
+      permMapJoin_n_times pmap1.1 n pmap2.1 ∧
+      permMapJoin_n_times pmap1.2 n pmap2.2.
+
+    Definition emptyPerm: res := (empty_map, empty_map).
 
     Inductive meta_step {isCoarse:bool} {tid0 tp m} {ttree: team_tree}
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
       thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=
     | step_parallel :
-        forall (tp_upd tp':thread_pool) c c' ge le  te m' virtue1 virtue2 ttree' ttree'' (num_threads:nat) pc_ge pc_le rcs new_tids
-          leader_c newThreadPermSum prm_lst le_lst le_lst0 le_lst_tl follower_c_lst 
+        forall (tp_upd tp' tp'':thread_pool) c c' ge le te m1 m' m'' virtue1 virtue2 ttree' ttree'' (num_threads:nat) pc rcs new_tids
+          newThreadPermSum
           (Hbounded: if isCoarse then
                        ( sub_map virtue1.1 (getMaxPerm m).2 /\
                          sub_map virtue1.2 (getMaxPerm m).2)
@@ -226,82 +240,89 @@ Module DryHybridMachine.
             (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (* (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg) *)
-            (Hat_meta: at_meta semSem c m = Some (OMPParallel num_threads pc_ge pc_le rcs))
-            (HnewThreadPermSum1 :permMapJoin_n_times newThreadPerm.1 (num_threads-1) newThreadPermSum.1) 
-            (HnewThreadPermSum2 :permMapJoin_n_times newThreadPerm.2 (num_threads-1) newThreadPermSum.2)
-            (Hangel1: permMapJoin newThreadPermSum.1 threadPerm'.1 (getThreadR cnt0).1)
-            (Hangel2: permMapJoin newThreadPermSum.2 threadPerm'.2 (getThreadR cnt0).2)
-            (* setup the new le' *)
-            (Henvs: envs_of_state c ge le te)
-            (* make private copies for n threads *)
-            (Hprm: Some (prm_lst, le_lst, m') = prm_pr_start_n pc_ge pc_le rcs m ge le num_threads)
-            (* transform state *)
-            (Hle_lst:  le_lst = le_lst0::le_lst_tl)
-            (Hc': update_le c le_lst0 = c')
-            (Hleader_state: Some leader_c = transform_state_parallel c' true)
-            (Hteammate_state: follower_c_lst = map (λ le, 
-                let c' := update_le c le in
-                transform_state_parallel c' false) le_lst_tl)
-            (* set up new thread pool *)
-            (Htp_upd: tp_upd = updThread cnt0 (Krun leader_c) threadPerm')
-            (* TODO each thread should have different permissions, accounting for their private copies;
-               where to put permissions for the original copy? *)
-            (HaddThreads: Some (new_tids, tp') = addThreads tp_upd follower_c_lst newThreadPerm)
-            (* add new team to team_tree *)
-            (Htree': Some ttree' = spawn_team tid0 (map pos.n new_tids) ttree)
-            (Htree'': ttree'' = team_pr_start_kids ttree' prm_lst rcs le_lst),
-            meta_step cnt0 Hcompat tp' m' ttree''
-    (* collect permission for threads at the end of its parallel region, if not leader
-       gives all its permission to the leader.
-       Thread state becomes halted.
-       status in team tree set to done *)
-    (* TODO maybe use OMPBarrier for the implicit barrier in parallel construct? *)
-    (*  | step_parallel_end_not_leader :
-        forall (tp1 tp2:thread_pool) c c'
-          ge e te
-          lref (ltree ltree' ltree'': team_tree) (* leader tree of tid0 *) 
-          leader_ot maybe_pv pv pv'
-          ttree ttree' tid_l
-          (Hleader_tree: leader_tree_of tid0 ttree = Some lref)
-          (Htree: ltree = lref.1)
-          (Hot_info: leader_ot = ttree.data_of.1)
-          (Hmaybe_pv: maybe_pv = ttree.data_of.2)
-          (Hleader_tid: leader_ot.(t_tid) = tid_l)
-          (Hnot_leader: tid0 <> tid_l)
-          (cnt_l: containsThread tp1 tid_l)
-          (leaderPerm':res)
-        ,
-          let threadPerm := getThreadR cnt0 in
-          let threadPerm' : res := (empty_map, empty_map) in
-          (* gives current permission to leader *)
-          let leaderPerm : res := getThreadR cnt_l in
-          forall
-            (Hinv : invariant tp)
-            (Hcode: getThreadC cnt0 = Kblocked c)
-            (Hat_meta: at_meta semSem c m = Some OMPParallelEnd)
-            (Henvs: envs_of_state c ge e te)
-            (* add reduction contribution to the pv in ltree *)
-            (Hreduction: match maybe_pv with
-                         | Some pv => (* needs to do reduction *)
-                            collect_red_contribs te pv = Some pv' ∧
-                            ltree' = ltree.update_data (leader_ot, Some pv')
-                         | None =>
-                            pv' = pv ∧
-                            ltree' = ltree
-                         end)
-            (* the state is updated to some halted state.
-               TODO do we need to know what c' exactly is? *)
-            (Hc':= make_halted c)
-            (Htp_upd1: tp1 = updThread(tp:=tp) cnt0 (Krun c') threadPerm')
-            (Hleader_perm'1 : permMapJoin threadPerm.1 leaderPerm.1 leaderPerm'.1)
-            (Hleader_perm'2 : permMapJoin threadPerm.2 leaderPerm.2 leaderPerm'.2)
-            (Htp_upd2: tp2 = updThread(tp:=tp1) cnt_l (getThreadC cnt_l) leaderPerm')
-            (Hset_done: Some ltree'' = set_tid_done tid0 ltree')
-            (Htree': ttree' = lref.2 ltree''),
-            meta_step cnt0 Hcompat tp2 m ttree'
+            (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m1)
+            (Hat_meta: at_meta semSem c m1 = Some (OMPParallel num_threads pc rcs))
+            (HnewThreadPermSum1: permMapJoinPair_n_times newThreadPerm (num_threads-1) newThreadPermSum)
+            (Hangel: permMapJoinPair newThreadPermSum threadPerm' (getThreadR cnt0))
+            (* 1. spawn new threads as fork, add them to team. *)
+            (Henvs: envs_of_state c = (le, te))
+            (Hc': Some c' = transform_state_parallel c)
+            (HaddThreads: (new_tids, tp') = let tp' := (updThread cnt0 (Krun c') threadPerm') in
+                                            addThreads tp' c' newThreadPerm (num_threads-1))
+            (*    add new team to team_tree *)
+            (Htree': Some ttree' = spawn_team tid0 (map pos.n new_tids) ttree),
+            (* 2. after spawning new threads, all the threads are Krun.
+               for each thread in team, start a privatization and reduction scope. *)
+            let team_tids := tid0::(map pos.n new_tids) in
+            forall
+            (Htree'': Some (tp'', m'', ttree'') = foldr (
+                λ tid maybe_tp_m_ttree,
+                tp_m_ttree ← maybe_tp_m_ttree;
+                let '(tp, m, ttree) := tp_m_ttree in
+                cnt_i ← maybeContainsThread tp tid;
+                c ← blocked_at $ getThreadC cnt_i;
+                let '(le, te) := envs_of_state c in
+                maybe_prm_le'_m' ← prm_pr_start pc rcs m ge le;
+                let '(prm, le', m') := maybe_prm_le'_m' in
+                (* start privatization & reduction for tid *)
+                tree' ← team_pr_start_tid ttree tid prm ge le m rcs;
+                let c' := update_statement  (update_le c le') Sskip in
+                let tp' := updThreadC cnt_i (Krun c') in
+                Some (tp', m', tree')
+              ) (Some (tp', m', ttree')) team_tids),
+            meta_step cnt0 Hcompat tp'' m'' ttree''
+    (* End of a parallel region. 
+       End a privatization and reduction scope, combine results to memory.
+       Collect permission for threads at the end of its parallel region and transfer to leader.
+       non-leader teammates are halted. *)
+    | step_parallel_end :
+        forall tp' tp'' tp''' m' m'' ttree' ttree'' ttree''' mates_tids le_lst leader_tid rvs
+        permSum cnt_leader
+          (Hinv : invariant tp)
+          (* 1. every thread must be stuck at OMPParallelEnd. Collect their le,
+            combine reduction contribution to memory. *)
+          (Hmates_tids: mates_tids = team_mates_tids tid0 ttree)
+          (Hleader_tid: Some leader_tid = hd_error mates_tids)
+          (Hall_teammates_at_barrier: Some le_lst = foldr (λ tid maybe_le_lst,
+            le_lst ← maybe_le_lst;
+            cnt_i ← maybeContainsThread tp tid;
+            (* every thread is blocked at OMPParallelEnd *)
+            c ← blocked_at $ getThreadC cnt_i;
+            match at_meta semSem c m with
+            | Some OMPParallelEnd =>
+              (* add reduction contribs *)
+              let '(le, te) := envs_of_state c in Some $ le::le_lst
+            | _ => None
+            end)
+            (Some []) mates_tids)
+          (Hrvs: Some (ttree', rvs) = team_pop_rvs tid0 ttree)
+          (Hreduce: Some m' = rvs_combine_reduction_contribs rvs le_lst ce m)
+          
+          (* 2. end priv&red scope, collect permission for threads at the end of its parallel region. *)
+          (Hend_pr: Some (permSum, tp', m'', ttree'') = foldr (λ tid maybe_permSum_tp_m_ttree,
+              permSum_tp_m_ttree ← maybe_permSum_tp_m_ttree;
+              let '(permSum, tp, m, ttree) := permSum_tp_m_ttree in
+              cnt_i ← maybeContainsThread tp tid;
+              permSum' ← permJoinFun permSum (getThreadR cnt_i);
+              c ← blocked_at $ getThreadC cnt_i;
+              let '(le, _) := envs_of_state c in
+              ttree'_le'_m' ← team_pr_end_tid ttree tid ce m le;
+              let '(ttree', le', m') := ttree'_le'_m' in
+              let c' := update_statement c Sskip in
+              let c'' := update_le c' le' in
+              let c''' := if tid =? leader_tid then c'' else make_halted c'' in
+              let tp' := updThread cnt_i (Krun c''') emptyPerm in
+              Some (permSum', tp', m', ttree'))
+            (Some (emptyPerm, tp, m', ttree')) mates_tids)
+          (* 3. fire teammates *)
+          (Hfireteam: Some ttree''' = fire_team tid0 ttree'')
+          (* 4. give collected permission back to leader. *)
+          (Hcnt_leader: Some cnt_leader = maybeContainsThread tp'' tid0)
+          (Htp''': tp''' = updThreadR cnt_leader permSum),
+            meta_step cnt0 Hcompat tp''' m'' ttree'''
     (* if leader of this parallel region, collect permission for threads at the end of its parallel region,
        and accumulate reduction contributions. *)
-     | step_parallel_end_leader :
+    (* | step_parallel_end_leader :
         forall c c' ge e te te'
         lref ttree ttree' ttree'' ltree ltree' ltree'' tid_l
         maybe_pv pv pv'
@@ -335,21 +356,22 @@ Module DryHybridMachine.
         forall (Htp_upd2: tp' = updThread cnt0 (Krun c') threadPerm)
                 (Htree'': Some ttree''= fire_team tid0 ttree'),
           meta_step cnt0 Hcompat tp' m ttree''
-    | step_for :
+    *)
+    (*| step_for :
     (* TODO reduction *)
-      forall c c' ge e te num_threads stmt cln lb incr 
+      forall c c' ge le te num_threads stmt cln lb incr 
        (team_workloads : list $ list chunk) my_workload
        leader_ref (my_ref: tree_ref) (leader_tree'  my_tree' ttree' ttree'': team_tree)
-       tp'  team_id
+       tp' tnum pc rc
       (Hcode: getThreadC cnt0 = Kblocked c)
-      (Hat_meta: at_meta semSem c m = Some $ OMPFor)
+      (Hat_meta: at_meta semSem c m = Some $ OMPFor pc rc)
       (* next statement is a canonical loop nest *)
       (Hstmt: statement_of_state c = stmt)
-      (Henvs_of_state: envs_of_state c ge e te)
+      (Henvs_of_state: envs_of_state c ge le te)
       (* exists a chunk split of the iterations *)
       (His_cln: stmt = Some cln)
-      (Hlb_of_loop: lb_of_loop cln ge e te m = Some lb)
-      (Hincr_of_loop: incr_of_loop cln ge e te m = Some incr),
+      (Hlb_of_loop: lb_of_loop cln ge le te m = Some lb)
+      (Hincr_of_loop: incr_of_loop cln ge le te m = Some incr),
       (* TODO chunk_split has parameters lb, incr, iter_num *)
       let my_tree := my_ref.1 in
       let my_ot_info := my_tree.data_of.1 in
@@ -358,6 +380,7 @@ Module DryHybridMachine.
       forall 
       (Hleader_ref: leader_tree_of tid0 ttree = Some leader_ref)
       (Hnum_threads: num_threads = length (ltree.kids_of))
+      (* first thread encountering the for-construct decide workload *)
       (Hleader_tree': match ltree.data_of.1.(o_team_workloads) with
                 | Some _team_workloads => leader_tree' = ltree ∧ _team_workloads = team_workloads
                 (* if not already set, set team_workloads *)
@@ -365,16 +388,19 @@ Module DryHybridMachine.
                 end)
       (Httree': ttree' = leader_ref.2 leader_tree')
       (Hmy_tree: Some my_ref = lookup_tid tid0 ttree')
-      (Hteam_id: team_id = my_ot_info.(o_team_id))
-      (Hchunks: Some my_workload = nth_error team_workloads team_id)
+      (Htnum: Some tnum = get_thread_num tid0 ttree)
+      (Hchunks: Some my_workload = nth_error team_workloads tnum)
+      (* start privatization & reduction scope *)
+      (Hprm: Some (prm, le, m') = prm_pr_start pc rcs m ge le)
       (* sets up new state *)
-      (Hc': Some c' = transform_state_for c my_workload cln)
+      (Hc': c' = update_env )
+      (Hc': Some c'' = transform_state_for c' my_workload cln)
       (* set work-sharing to true *)
       (Hnot_work_sharing:  my_ot_info.(o_work_sharing) = false)
       (Hmy_tree'': my_tree' = my_tree.update_data (my_ot_info <| o_work_sharing := true |>, my_tree.data_of.2))
       (Htree'': ttree'' = my_ref.2 my_tree')
-      (Htp': tp' = updThread cnt0 (Krun c') threadPerm),
-      meta_step cnt0 Hcompat tp' m ttree''
+      (Htp': tp' = updThread cnt0 (Krun c'') threadPerm),
+      meta_step cnt0 Hcompat tp' m' ttree''
     (* TODO move barrier to step_for *)
     | step_for_end :
       (* ends work-sharing region, insert a barrier (if nowait clause is absent) *)
@@ -391,41 +417,23 @@ Module DryHybridMachine.
       (Hc': c' = update_statement c (Smeta OMPBarrier Sskip))
       (Htp': tp' = updThread cnt0 (Kblocked c') threadPerm),
       meta_step cnt0 Hcompat tp' m ttree'
-    | step_barrier_issue_ticket :
-      forall c m my_ref my_tree lref ltree ltree' ttree' team_mates team_mates' team_mates_tids
-      (Hcode: getThreadC cnt0 = Kblocked c)
-      (Hat_meta: at_meta semSem c m = Some $ OMPBarrier)
-      (* if I don't have a ticket *)
-      (Hmy_ref: Some my_ref = lookup_tid tid0 ttree)
-      (Hmy_tree: my_tree = my_ref.1)
-      (HI_dont_have_ticket: my_tree.data_of.1.(o_barrier_ticket) = false)
-      (* and all team mates are at a barrier *)
-      (Hleader_ref: Some lref = leader_tree_of tid0 ttree)
-      (Hleader_tree: ltree = lref.1)
-      (Hteam_mates: team_mates = ltree.kids_of)
-      (Hteam_mates_tids: team_mates_tids = map (fun m => m.data_of.1.(t_tid)) team_mates)
-      (* TODO (Hteam_mates_waiting: forall tid, In tid team_mates_tids -> at_meta c_team_mate m = Some $ OMPBarrier) *)
-      (* then issue ticket to all teammates *)
-      (Hteam_mates': team_mates' = map (fun m => m.update_data (m.data_of.1 <| o_barrier_ticket := true |>, m.data_of.2)) team_mates)
-      (* update ttree with team_mates' *)
-      (Hleader_tree': ltree' =  ltree.update_kids team_mates')
-      (Httree': ttree' = lref.2 ltree'),
-      meta_step cnt0 Hcompat tp m ttree'
+      *)
     | step_barrier :
-      (* go pass a barrier if has a barrier ticket *)
-      forall c c' m my_ref my_tree my_tree' ttree' tp'
-      (Hcode: getThreadC cnt0 = Kblocked c)
-      (Hat_meta: at_meta semSem c m = Some $ OMPBarrier)
-      (* if I have a ticket *)
-      (Hmy_ref: Some my_ref = lookup_tid tid0 ttree)
-      (Hmy_tree: my_tree = my_ref.1)
-      (HI_have_ticket: my_tree.data_of.1.(o_barrier_ticket) = true)
-      (* then pass the barrier *)
-      (Hc': c' = update_statement c Sskip)
-      (Hmy_tree': my_tree' = my_tree.update_data (my_tree.data_of.1 <| o_barrier_ticket := false |>, my_tree.data_of.2))
-      (Httree': ttree' = my_ref.2 my_tree')
-      (Htp': tp' = updThread cnt0 (Krun c') (getThreadR cnt0)),
-      meta_step cnt0 Hcompat tp' m ttree' *)
+      (* if all teammates are at barrier, move them across the barrier. *)
+      forall m  mates_tids tp'
+      (Hmates_tids: mates_tids = team_mates_tids tid0 ttree)
+      (Hstep_barrier: Some tp' = foldr (λ tid maybe_tp,
+          tp ← maybe_tp;
+          cnt_i ← maybeContainsThread tp tid;
+          c ← blocked_at $ getThreadC cnt_i;
+          match at_meta semSem c m with
+          | Some OMPBarrier =>
+            let c' := update_statement c Sskip in
+            Some $ updThreadC cnt_i (Krun c')
+          | _ => None
+          end)
+        (Some tp) mates_tids),
+      meta_step cnt0 Hcompat tp' m ttree
     .
 
     Inductive ext_step {isCoarse:bool} {tid0 tp m}

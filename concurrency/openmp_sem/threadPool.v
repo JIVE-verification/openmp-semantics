@@ -74,7 +74,7 @@ Module ThreadPool.
             List.nth_error (resourceList tp) i = Some (getThreadR cnti)          
         ;  containsThread_dec_:
              forall i tp, {containsThread tp i} + { ~ containsThread tp i}
-
+        ; maybeContainsThread tp tid : option (containsThread tp tid) 
         (*Proof Irrelevance of contains*)
         ;  cnt_irr: forall t tid
                       (cnt1 cnt2: containsThread t tid),
@@ -2150,7 +2150,13 @@ Module OrdinalPool.
         rewrite containsList_spec.
         reflexivity.
     Qed.
-        
+
+    Definition maybeContainsThread tp tid : option (containsThread tp tid) :=
+      match containsThread_dec tid tp with
+      | left cnt => Some cnt
+      | right _ => None
+      end.
+
     Definition OrdinalThreadPool: ThreadPool.ThreadPool :=
       (@ThreadPool.Build_ThreadPool _ _
                                     t
@@ -2177,6 +2183,7 @@ Module OrdinalPool.
                                     find_thread
                                     resourceList_spec
                                     containsThread_dec
+                                    maybeContainsThread
                                     (*Proof Irrelevance of contains*)
                                     cnt_irr
                                     (@cntAdd)
