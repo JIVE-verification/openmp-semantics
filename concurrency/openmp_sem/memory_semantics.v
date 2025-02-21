@@ -49,7 +49,6 @@ Record CoreSemantics {C M : Type} : Type :=
   ; at_external : C -> M -> option (external_function * list val)
   ; after_external : option val -> C -> M -> option C
   ; at_meta : C -> M -> option meta_label
-  ; after_meta : C -> M -> option C
   ; halted : C -> int -> Prop
   ; corestep : C -> M -> C -> M -> Prop
   ; corestep_not_halted:

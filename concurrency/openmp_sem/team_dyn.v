@@ -187,10 +187,10 @@ Section OpenMPThreads.
         (ce:composite_env) (m: mem) (b:Values.block) (ty:type).
 
       (* the first thread in the program *)
-      Definition ot_init (tid: nat) := Build_ot_info tid false.
+      Definition ot_init (tid: nat) : ot_info := Build_ot_info tid false None [] [].
 
       (* a team starts with just the main thread *)
-      Definition team_init (tid: nat) := SNode (ot_init tid) [].
+      Definition team_init (tid: nat) : team_tree := SNode (ot_init tid) [].
 
       Definition is_tid (tid: nat) (ot: ot_info) : Prop :=
         ot.(t_tid) = tid.

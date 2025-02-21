@@ -49,7 +49,7 @@ Module DryHybridMachine.
     (** Assume some threadwise semantics *)
     Context {Sem: Semantics}
             {tpool : @ThreadPool.ThreadPool dryResources Sem}.
-    
+    (* define this as clightSem in clightSemanticsForMachines*)
     Notation C:= (@semC Sem).
     Notation G:= (@semG Sem).
 
@@ -214,23 +214,13 @@ Module DryHybridMachine.
 
     Definition emptyPerm: res := (empty_map, empty_map).
 
-    Inductive meta_step {isCoarse:bool} {tid0 tp m} {ttree: team_tree}
+    Inductive pragma_step {tid0 tp m} {ttree: team_tree}
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
       thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=
     | step_parallel :
         forall (tp_upd tp' tp'':thread_pool) c c' ge le te m1 m' m'' virtue1 virtue2 
           ttree' ttree'' (num_threads:nat) pc rcs new_tids
-          newThreadPermSum
-          (Hbounded: if isCoarse then
-                       ( sub_map virtue1.1 (getMaxPerm m).2 /\
-                         sub_map virtue1.2 (getMaxPerm m).2)
-                     else
-                       True )
-          (Hbounded_new: if isCoarse then
-                           ( sub_map virtue2.1 (getMaxPerm m).2 /\
-                             sub_map virtue2.2 (getMaxPerm m).2)
-                         else
-                           True ),
+          newThreadPermSum,
           let threadPerm' := (computeMap (getThreadR cnt0).1 virtue1.1,
                               computeMap (getThreadR cnt0).2 virtue1.2) in
           let newThreadPerm := (computeMap empty_map virtue2.1,
@@ -271,7 +261,7 @@ Module DryHybridMachine.
                 let tp' := updThreadC cnt_i (Krun c') in
                 Some (tp', m', tree')
               ) (Some (tp', m', ttree')) team_tids),
-            meta_step cnt0 Hcompat tp'' m'' ttree''
+              pragma_step cnt0 Hcompat tp'' m'' ttree''
     (* End of a parallel region. 
        End a privatization and reduction scope, combine results to memory.
        Collect permission for threads at the end of its parallel region and transfer to parent.
@@ -320,7 +310,7 @@ Module DryHybridMachine.
           (* 4. give collected permission back to parent. *)
           (Hcnt_parent: Some cnt_parent = maybeContainsThread tp'' tid0)
           (Htp''': tp''' = updThreadR cnt_parent permSum),
-            meta_step cnt0 Hcompat tp''' m'' ttree'''
+          pragma_step cnt0 Hcompat tp''' m'' ttree'''
     | step_for :
     (* TODO reduction *)
       forall c c' c'' ge le le' te team_size stmt cln lb incr 
@@ -361,7 +351,7 @@ Module DryHybridMachine.
       (Htree'': Some ttree''' = update_tid tid0 ttree'' (λ t, Some $ t.update_data_f (λ ot, ot <| o_work_sharing := true |>)) )
       (* 5. update tp with the new c'' *)
       (Htp': tp' = updThread cnt0 (Krun c'') threadPerm),
-      meta_step cnt0 Hcompat tp' m' ttree''
+      pragma_step cnt0 Hcompat tp' m' ttree''
     (* TODO move barrier to step_for *)
    | step_for_end:
     forall tp' m' m'' ttree' ttree'' mates_tids le_lst parent_tid rvs
@@ -399,7 +389,7 @@ Module DryHybridMachine.
           tree'' ← update_tid tid ttree' (λ t, Some $ t.update_data_f (λ ot, ot <| o_work_sharing := false |>));
           Some (tp', m', ttree''))
         (Some (tp, m', ttree')) mates_tids),
-        meta_step cnt0 Hcompat tp' m'' ttree''
+        pragma_step cnt0 Hcompat tp' m'' ttree''
     | step_barrier :
       (* if all teammates are at barrier, move them across the barrier. *)
       forall m  mates_tids tp'
@@ -415,8 +405,63 @@ Module DryHybridMachine.
           | _ => None
           end)
         (Some tp) mates_tids),
-      meta_step cnt0 Hcompat tp' m ttree
-    . 
+        pragma_step cnt0 Hcompat tp' m ttree
+    .
+
+    Definition threadStep: forall {tid0 ms m},
+        containsThread ms tid0 -> mem_compatible ms m ->
+        thread_pool -> mem -> seq.seq mem_event -> Prop:=
+      @dry_step.
+
+    Lemma threadStep_at_Krun:
+      forall i tp m cnt cmpt tp' m' tr,
+        @threadStep i tp m cnt cmpt tp' m' tr ->
+        (exists q, @getThreadC _ _ _ i tp cnt = Krun q).
+    Proof.
+      intros.
+      inversion H; subst;
+        now eauto.
+    Qed.
+    
+    Lemma threadStep_equal_run:
+      forall i tp m cnt cmpt tp' m' tr,
+        @threadStep i tp m cnt cmpt tp' m' tr ->
+        forall j,
+          (exists cntj q, @getThreadC _ _ _ j tp cntj = Krun q) <->
+          (exists cntj' q', @getThreadC _ _ _ j tp' cntj' = Krun q').
+    Proof.
+      intros. split.
+      - intros [cntj [ q running]].
+        inversion H; subst.
+        assert (cntj':=cntj).
+        (* XXX: eapply does not work here. report? *)
+        pose proof (cntUpdate (Krun c') (getCurPerm m', (getThreadR cnt)#2) cnt cntj') as cntj''.
+        exists cntj''.
+        destruct (NatTID.eq_tid_dec i j).
+        + subst j; exists c'.
+          rewrite gssThreadCode; reflexivity.
+        + exists q.
+          erewrite gsoThreadCode;
+            now eauto.
+      - intros [cntj' [ q' running]].
+        inversion H; subst.
+        assert (cntj:=cntj').
+        eapply cntUpdate' with(c:=Krun c')(p:=(getCurPerm m', (getThreadR cnt)#2)) in cntj; eauto.
+        exists cntj.
+        destruct (NatTID.eq_tid_dec i j).
+        + subst j; exists c.
+          rewrite <- Hcode.
+          f_equal.
+          apply cnt_irr.
+        + exists q'.
+          rewrite gsoThreadCode in running; auto.
+    Qed.
+
+    Definition pragmaStep:
+      forall {tid0 ms m ttree},
+        containsThread ms tid0 -> mem_compatible ms m ->
+        thread_pool -> mem -> team_tree -> Prop:=
+      @pragma_step.
 
     Inductive ext_step {isCoarse:bool} {tid0 tp m}
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
@@ -459,7 +504,7 @@ Module DryHybridMachine.
             (HisLock: lockRes tp (b, Ptrofs.intval ofs) = Some pmap)
             (Hangel1: permMapJoin pmap.1 (getThreadR cnt0).1 newThreadPerm.1)
             (Hangel2: permMapJoin pmap.2 (getThreadR cnt0).2 newThreadPerm.2)
-            (Htp': tp' = updThread cnt0 (Kresume (transform_state_parallel c true) Vundef) newThreadPerm)
+            (Htp': tp' = updThread cnt0 (Kresume c Vundef) newThreadPerm)
             (** acquiring the lock leaves empty permissions at the resource pool*)
             (Htp'': tp'' = updLockSet tp' (b, Ptrofs.intval ofs) (empty_map, empty_map)),
             ext_step cnt0 Hcompat tp'' m'
@@ -502,7 +547,7 @@ Module DryHybridMachine.
             (** release the lock *)
             (Hstore: Mem.store Mptr m1 b (Ptrofs.intval ofs) (Vptrofs Ptrofs.one) = Some m')
             (HisLock: lockRes tp (b, Ptrofs.intval ofs) = Some rmap)
-            (Hrmap: forall b ofs, rmap.1 !! b ofs = None /\ rmap.2 !! b ofs = None)
+            (Hrmap: forall b ofs, rmap.1 !!!! b ofs = None /\ rmap.2 !!!! b ofs = None)
             (Hangel1: permMapJoin newThreadPerm.1 virtueLP.1 (getThreadR cnt0).1)
             (Hangel2: permMapJoin newThreadPerm.2 virtueLP.2 (getThreadR cnt0).2)
             (Htp': tp' = updThread cnt0 (Kresume c Vundef)
@@ -599,7 +644,7 @@ Module DryHybridMachine.
             (** If this address is a lock*)
             (His_lock: lockRes tp (b, (Ptrofs.intval ofs)) = Some rmap)
             (** And the lock is taken *)
-            (Hrmap: forall b ofs, rmap.1 !! b ofs = None /\ rmap.2 !! b ofs = None)
+            (Hrmap: forall b ofs, rmap.1 !!!! b ofs = None /\ rmap.2 !!!! b ofs = None)
             (** Install the thread's lock permissions*)
             (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).2 = m1)
             (** To free the lock the thread must have at least Writable on it*)
@@ -640,55 +685,6 @@ Module DryHybridMachine.
            (** Lock is already acquired.*)
            (Hload: Mem.load Mptr m1 b (Ptrofs.intval ofs) = Some (Vptrofs Ptrofs.zero)),
           ext_step cnt0 Hcompat tp m (failacq (b, Ptrofs.intval ofs)).
-
-    Definition threadStep: forall {tid0 ms m},
-        containsThread ms tid0 -> mem_compatible ms m ->
-        thread_pool -> mem -> seq.seq mem_event -> Prop:=
-      @dry_step.
-
-    Lemma threadStep_at_Krun:
-      forall i tp m cnt cmpt tp' m' tr,
-        @threadStep i tp m cnt cmpt tp' m' tr ->
-        (exists q, @getThreadC _ _ _ i tp cnt = Krun q).
-    Proof.
-      intros.
-      inversion H; subst;
-        now eauto.
-    Qed.
-    
-    Lemma threadStep_equal_run:
-      forall i tp m cnt cmpt tp' m' tr,
-        @threadStep i tp m cnt cmpt tp' m' tr ->
-        forall j,
-          (exists cntj q, @getThreadC _ _ _ j tp cntj = Krun q) <->
-          (exists cntj' q', @getThreadC _ _ _ j tp' cntj' = Krun q').
-    Proof.
-      intros. split.
-      - intros [cntj [ q running]].
-        inversion H; subst.
-        assert (cntj':=cntj).
-        (* XXX: eapply does not work here. report? *)
-        pose proof (cntUpdate (Krun c') (getCurPerm m', (getThreadR cnt)#2) cnt cntj') as cntj''.
-        exists cntj''.
-        destruct (NatTID.eq_tid_dec i j).
-        + subst j; exists c'.
-          rewrite gssThreadCode; reflexivity.
-        + exists q.
-          erewrite gsoThreadCode;
-            now eauto.
-      - intros [cntj' [ q' running]].
-        inversion H; subst.
-        assert (cntj:=cntj').
-        eapply cntUpdate' with(c:=Krun c')(p:=(getCurPerm m', (getThreadR cnt)#2)) in cntj; eauto.
-        exists cntj.
-        destruct (NatTID.eq_tid_dec i j).
-        + subst j; exists c.
-          rewrite <- Hcode.
-          f_equal.
-          apply cnt_irr.
-        + exists q'.
-          rewrite gsoThreadCode in running; auto.
-    Qed.
 
     Definition syncStep (isCoarse:bool) :
       forall {tid0 ms m},
@@ -758,17 +754,6 @@ Module DryHybridMachine.
                  rewrite gssThreadCode in running;
                  discriminate).
           
-          { (*addthread*)
-            assert (cntj':=cntj).
-            eapply cntAdd' in cntj'; destruct cntj' as [ [HH HHH] | HH].
-            * exfalso.
-              assert (Heq: getThreadC cntj = getThreadC HH)
-                by (rewrite gsoAddCode; reflexivity).
-              rewrite Heq in running.
-              rewrite gssThreadCode in running.
-              discriminate.
-            * erewrite gssAddCode in running; eauto.
-              discriminate. }
           { (*remove lock*)
             pose proof (cntUpdate' _ _ cnt (cntRemoveL' _ cntj)) as cnti.
             erewrite  gRemLockSetCode with (cnti := cntRemoveL' _ cntj) in running.
@@ -800,17 +785,6 @@ Module DryHybridMachine.
             intros.
             erewrite cnt_irr with (cnt1 := Hyp1).
             reflexivity.
-          -  (*Add thread case*)
-            assert (cntj':=cntj).
-            eapply cntAdd' in cntj'; destruct cntj' as [ [HH HHH] | HH].
-            * pose proof (cntUpdate' _ _ _ HH) as cntj0.
-              exists cntj0, q.
-              rewrite <- running.
-              erewrite gsoAddCode with (cntj := HH).
-              rewrite gsoThreadCode;
-                now eauto.
-            * exfalso.
-              erewrite gssAddCode in running; eauto. discriminate.
           - exists (cntUpdate' _ _ cnt (cntUpdateL' _ _ cntj)), q.
             rewrite <- running.
             rewrite gLockSetCode.
@@ -832,9 +806,6 @@ Module DryHybridMachine.
              erewrite cnt_irr with (cnt1 := Hyp1).
              reflexivity.
           - do 2 eexists;
-              now eauto.
-            Unshelve.
-            apply cntUpdate;
               now eauto.
     Qed.
 
@@ -886,6 +857,7 @@ Module DryHybridMachine.
                              threadStep_at_Krun
                              threadStep_equal_run
                              (@syncStep)
+                             (@pragmaStep)
                              syncstep_equal_run
                              syncstep_not_running
                              init_mach

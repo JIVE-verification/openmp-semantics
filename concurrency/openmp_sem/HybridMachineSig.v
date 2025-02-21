@@ -50,6 +50,7 @@ Require Import VST.concurrency.common.machine_semantics.
 Require Import VST.concurrency.openmp_sem.permissions.
 
 Require Import VST.concurrency.openmp_sem.addressFiniteMap.
+Require Import VST.concurrency.openmp_sem.team_dyn.
 Require Import Coq.Program.Program.
 
 (*Require Import VST.concurrency.safety.
@@ -213,7 +214,7 @@ Module HybridMachineSig.
         ; threadStep:
             forall {tid0 ms m},
               containsThread ms tid0 -> mem_compatible ms m ->
-              thread_pool -> mem -> seq mem_event -> Prop
+              thread_pool -> mem -> seq mem_event ->  Prop
 
         ; threadStep_at_Krun:
             forall i tp m cnt cmpt tp' m' tr,
@@ -232,10 +233,15 @@ Module HybridMachineSig.
             forall {tid0 ms m},
                 containsThread ms tid0 -> mem_compatible ms m ->
                 thread_pool -> mem -> sync_event -> Prop
-                                                   
+
+        ; pragmaStep:
+        forall {tid0 ms m} {ttree: team_tree},
+            containsThread ms tid0 -> mem_compatible ms m ->
+            thread_pool -> mem -> team_tree -> Prop
+
         ;  syncstep_equal_run:
-             forall b i tp m cnt cmpt tp' m' tr,
-               @syncStep b i tp m cnt cmpt tp' m' tr ->
+             forall b i tp m cnt cmpt tp' m' tr ,
+               @syncStep b i tp m cnt cmpt tp' m' tr   ->
                forall j,
                  (exists cntj q, @getThreadC _ _ _ j tp cntj = Krun q) <->
                  (exists cntj' q', @getThreadC _ _ _ j tp' cntj' = Krun q')
@@ -252,7 +258,7 @@ Module HybridMachineSig.
 
     Definition event_trace := (seq machine_event).
     Definition schedule := (seq nat).
-    Definition MachState : Type:= (schedule * event_trace * t)%type.
+    Definition MachState : Type:= (schedule * event_trace * t * team_tree)%type.
   
     Definition schedPeek sch: option nat:=
       match sch with
@@ -332,65 +338,73 @@ Module HybridMachineSig.
   Context {scheduler : Scheduler}.
 
   Inductive machine_step:
-    schedule -> event_trace -> machine_state -> mem -> schedule ->
-    event_trace -> machine_state -> mem -> Prop :=
+    schedule -> event_trace -> machine_state -> mem -> team_tree -> schedule ->
+    event_trace -> machine_state -> mem -> team_tree -> Prop :=
   | start_step:
-        forall tid U ms ms' m m' tr
+        forall tid U ms ms' m m' tr ttree
           (HschedN: schedPeek U = Some tid)
           (Htid: containsThread ms tid)
           (Htstep: start_thread m Htid ms' m'),
-          machine_step U tr ms m (yield U) tr ms' (diluteMem m')
+          machine_step U tr ms m ttree (yield U) tr ms' (diluteMem m') ttree
     | resume_step:
-        forall tid U ms ms' m tr
+        forall tid U ms ms' m tr ttree
           (HschedN: schedPeek U = Some tid)
           (Htid: containsThread ms tid)
           (Htstep: resume_thread m Htid ms'),
-          machine_step U tr ms m (yield U) tr ms' m
+          machine_step U tr ms m ttree (yield U) tr ms' m ttree
     | thread_step:
-        forall tid U ms ms' m m' ev tr
+        forall tid U ms ms' m m' ev tr ttree
           (HschedN: schedPeek U = Some tid)
           (Htid: containsThread ms tid)
           (Hcmpt: mem_compatible ms m)
           (Htstep: threadStep Htid Hcmpt ms' m' ev),
-          machine_step U tr ms m (yield U)
-                       (tr ++ (List.map (fun mev => internal tid mev) ev)) ms' (diluteMem m')
+          machine_step U tr ms m ttree (yield U)
+                       (tr ++ (List.map (fun mev => internal tid mev) ev)) ms' (diluteMem m') ttree
     | suspend_step:
-        forall tid U U' ms ms' m tr
+        forall tid U U' ms ms' m tr ttree
           (HschedN: schedPeek U = Some tid)
           (HschedS: schedSkip U = U')        (*Schedule Forward*)
           (Htid: containsThread ms tid)
           (Htstep:suspend_thread m Htid ms'),
-          machine_step U tr ms m U' tr ms' m
+          machine_step U tr ms m ttree U' tr ms' m ttree
     | sync_step:
-        forall tid U U' ms ms' m m' ev tr
+        forall tid U U' ms ms' m m' ev tr ttree
           (HschedN: schedPeek U = Some tid)
           (HschedS: schedSkip U = U')        (*Schedule Forward*)
           (Htid: containsThread ms tid)
           (Hcmpt: mem_compatible ms m)
           (Htstep: syncStep isCoarse Htid Hcmpt ms' m' ev),
-          machine_step U tr ms m U' (tr ++ [:: external tid ev]) ms' m'
+          machine_step U tr ms m ttree U' (tr ++ [:: external tid ev]) ms' m' ttree
     | halted_step:
-        forall tid U U' ms m tr i
+        forall tid U U' ms m tr ttree i
           (HschedN: schedPeek U = Some tid)
           (Htid: containsThread ms tid)
           (Hhalt: halted_thread Htid i)
           (Hinv: invariant ms)
           (Hcmpt: mem_compatible ms m)
           (HschedS: schedSkip U = U'),        (*Schedule Forward*)
-          machine_step U tr ms m U' tr ms m
+          machine_step U tr ms m ttree U' tr ms m ttree
     | schedfail :
-        forall tid U U' ms m tr
+        forall tid U U' ms m tr ttree
           (HschedN: schedPeek U = Some tid)
           (Htid: ~ containsThread ms tid)
           (Hinv: invariant ms)
           (Hcmpt: mem_compatible ms m)
           (HschedS: schedSkip U = U'),        (*Schedule Forward*)
-          machine_step U tr ms m U' tr ms m.
+          machine_step U tr ms m ttree U' tr ms m ttree
+    | pragma_step:
+        forall tid U ms ms' m m' tr ttree ttree'
+          (HschedN: schedPeek U = Some tid)
+          (Htid: containsThread ms tid)
+          (Hcmpt: mem_compatible ms m)
+          (HpragmaStep: @pragmaStep _ _ _ _ ttree Htid Hcmpt ms' m' ttree'),
+          machine_step U tr ms m ttree (yield U) tr ms' (diluteMem m') ttree'.
 
     Definition MachStep (c:MachState) (m:mem)
                (c':MachState) (m':mem) :=
-      @machine_step (fst (fst c)) (snd (fst c)) (snd c)  m
-                    (fst (fst c')) (snd (fst c')) (snd c')  m'.
+      let '(U, tr, t, ttree) := c in
+      let '(U', tr', t', ttree') := c' in
+      @machine_step U tr t m ttree U' tr' t' m' ttree'.
 
     Definition at_external_mach (st : MachState) (m: mem)
       : option (external_function * list val) := None.
@@ -400,24 +414,22 @@ Module HybridMachineSig.
     
     Definition at_meta_mach (st : MachState) (m: mem)
       : option (Clight.meta_label) := None.
-
-    Definition after_meta_mach (st : MachState) (m : mem) :
-      option (MachState) := None.
     
     (*not clear what the value of halted should be*)
     (*Nick: IMO, the machine should be halted when the schedule is empty.
       The value is probably unimportant? *)
     (*Santiago: I belive empty schedule should "diverge". After all that's *)
     Definition halted_machine (st : MachState) : option val :=
-      match schedPeek (fst (fst st)) with
+      match schedPeek (fst (fst (fst st))) with
       | Some _ => None
       | _ => Some Vundef
       end.
 
+    (* TODO how to talk about the initial team tree? *)
     Definition init_machine (U:schedule) (r : option res) (m: mem)
                (st : MachState) (m': mem) (f : val) (args : list val)
       : Prop :=
-      match st with (U', [::], c) => U' = U /\ init_mach r m c m' f args | _ => False end.
+      match st with (U', [::], c, ttree) => U' = U /\ init_mach r m c m' f args /\ ttree = team_init 0 | _ => False end.
 
     Program Definition MachineCoreSemantics (U:schedule) (r : option res):
       CoreSemantics MachState mem.
@@ -427,12 +439,11 @@ Module HybridMachineSig.
                                 at_external_mach
                                 after_external_mach
                                 at_meta_mach
-                                after_meta_mach
                                 (fun st i => halted_machine st = Some (Vint i)) (* this is False *)
                                 MachStep
           );
       unfold at_external_mach, halted_machine; try reflexivity.
-    intros. inversion H; subst; rewrite HschedN; intro Hcontra; discriminate.
+    intros. destruct (schedPeek (fst (fst (fst q)))); discriminate.
     Defined.
 
     Definition make_init_machine c r (* ex *) :=
@@ -458,13 +469,14 @@ Module HybridMachineSig.
 
     Lemma hybrid_initial_schedule: forall m m' main vals U p st n,
         initial_core (MachineCoreSemantics U p) n m st m' main vals ->
-        exists c, st = (U, nil, c).
+        exists c ttree, st = (U, nil, c, ttree).
       simpl. destruct st as ((?, ?), ?); simpl; intros.
+      destruct p0.
       destruct e; [|contradiction].
       destruct H; subst; eauto.
     Qed.
 
-      (** The new semantics below makes internal (thread) and external (machine)
+      (* (** The new semantics below makes internal (thread) and external (machine)
           steps explicit *)
     Inductive internal_step:
       schedule -> machine_state -> mem -> machine_state -> mem -> Prop :=
@@ -557,12 +569,12 @@ Module HybridMachineSig.
                  solve[econstructor 6 ; eauto]|
                  solve[econstructor 7 ; eauto]].
       Qed.
-
-      Program Definition new_MachineSemantics (op_m:option Mem.mem):
+ *)
+      (* Program Definition new_MachineSemantics (op_m:option Mem.mem):
         @ConcurSemantics G nat schedule event_trace machine_state mem res (*@semC Sem*).
       apply (@Build_ConcurSemantics _ nat schedule event_trace machine_state _ _ (*_*)
                                     (init_machine'' op_m)
-                                    (fun U st => halted_machine (U, nil, st))
+                                    (fun U st ttree => halted_machine (U, nil, st, ttree))
                                     (fun ge U st m st' m' =>
                                        @internal_step U st m
                                                       st' m'
@@ -576,7 +588,7 @@ Module HybridMachineSig.
       unfold at_external_mach, halted_machine; try reflexivity.
       - intros. inversion H; subst; rewrite HschedN; reflexivity.
       - intros. inversion H; subst; rewrite HschedN; reflexivity.
-    Defined.
+    Defined. *)
 
     (** The class of Hybrid Machines parameterized by:
         - Threadwise semantics
@@ -589,11 +601,11 @@ Module HybridMachineSig.
                                   @ConcurSemantics G nat (seq.seq nat) event_trace t mem res (*@semC Sem*)
         ; initial_schedule: forall m m' main vals U p st n,
             initial_core (MachineCoreSemantics U p) n m st m' main vals ->
-            exists c, st = (U, nil, c) (*XXX:this seems wrong *)
+            exists c ttree, st = (U, nil, c, ttree)
       }.
 
   End HybridMachineSig.
-  
+  (*
   (** Definition of the Coarse-grain hybrid machine *)
   Module HybridCoarseMachine.
     Section HybridCoarseMachine.
@@ -834,6 +846,7 @@ Module HybridMachineSig.
           ftrace tp m U (tr' ++ tr'').
     End HybridFineMachine.
 End HybridFineMachine.
+*)
 
 End HybridMachineSig.
 

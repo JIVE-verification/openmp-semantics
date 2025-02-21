@@ -57,6 +57,7 @@ Module ThreadPool.
         lockSet : t -> access_map;         (* Gets the permissions for the lock set *)
         lockRes : t -> address -> option lock_info;
 (*         extraRes : t -> res; (* extra resources not held by any thread or lock *) *)
+        (* addThread : t -> val -> val -> res -> t; *)
         addThread : t -> semC -> res -> t;
         addThreads : t -> semC -> res -> nat (* num of new threads to fork *) -> list pos (* new threads' tids *) * t;
         updThreadC : forall {tid tp}, containsThread tp tid -> ctl -> t;
