@@ -393,7 +393,13 @@ Section EvalStatement.
     | (State f Scontinue (Kseq s k) e le m) => Some (State f Scontinue k e le m, E0)
     | (State f Sbreak (Kseq s k) e le m) => Some (State f Sbreak k e le m, E0)
     (*TODO: step_ifthenelse case *)
-    (* | (State f (Sifthenelse a s1 s2) k e le m) => Some (State f (if b then s1 else s2) k e le m) *)
+    | (State f (Sifthenelse a s1 s2) k e le m) => match eval_expr_fun a with 
+        | Some (v1) => match bool_val v1 (typeof a) m with 
+                | Some b => Some (State f (if b then s1 else s2) k e le m, E0)
+                | None => None 
+                end
+        | _ => None
+        end
     | (State f (Sloop s1 s2) k e le m) => Some (State f s1 (Kloop1 s1 s2 k) e le m, E0)
     | (State f Sbreak (Kloop1 s1 s2 k) e le m) => Some (State f Sskip k e le m, E0)
     (*TODO: Check the below one and make sure 'x' is okay; also note how similar the 
