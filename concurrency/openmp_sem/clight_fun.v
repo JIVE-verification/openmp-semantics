@@ -359,7 +359,6 @@ Section EvalStatement.
     #[global] Instance conv_eq_dec: EqDecision calling_convention.
     Proof. unfold EqDecision. apply calling_convention_eq. Defined.
 
-
     Definition step_fun (s: state) : option (state * trace) :=
     match s with 
     | (State f (Sassign a1 a2) k e le m) =>  
@@ -408,21 +407,26 @@ Section EvalStatement.
     | (State f Sskip (Kloop2 s1 s2 k) e le m) => Some (State f (Sloop s1 s2) k e le m, E0)
     | (State f Sbreak (Kloop2 s1 s2 k) e le m) => Some (State f Sskip k e le m, E0)
     (*TODO: step_return_0, step_return_1, step_skip_call, step_switch*)
-    (* | (State f (Sreturn None) k e le m) => Some (Returnstate Vundef (call_cont k) m') *)
-    (* | (State f (Sreturn (Some a)) k e le m) => Some (Returnstate v' (call_cont k) m') *)
-    (* | (State f Sskip k e le m) => (Returnstate Vundef k m') *)
-    (* | (State f (Sswitch a sl) k e le m) => Some (State f (seq_of_labeled_statement (select_switch n sl)) (Kswitch k) e le m) *)
+    | (State f (Sreturn None) k e le m) => match Mem.free_list m (blocks_of_env ge e) with 
+                                            | Some m' => Some ((Returnstate Vundef (call_cont k) m'), E0)
+                                            | None => None
+                                            end
+    | (State f (Sreturn (Some a)) k e le m) => v ← eval_expr_fun a; v' ← sem_cast v (typeof a) f.(fn_return) m; m' ← Mem.free_list m (blocks_of_env ge e);  Some ((Returnstate v' (call_cont k) m'), E0)
+    | (State f Sskip k e le m) => m' ← Mem.free_list m (blocks_of_env ge e) ; Some ((Returnstate Vundef k m'), E0)
+    | (State f (Sswitch a sl) k e le m) => v ← eval_expr_fun a; n ← sem_switch_arg v (typeof a); Some ((State f (seq_of_labeled_statement (select_switch n sl)) (Kswitch k) e le m), E0)
     | (State f Scontinue (Kswitch k) e le m) => Some (State f Scontinue k e le m, E0)
-    (*TODO: another case where preceding is redundant is swapped with following*)
+    (*TODO: another case where preceding is redundant when swapped with following*)
     | (State f x (Kswitch k) e le m) => Some (State f Sskip k e le m, E0)
     | (State f (Slabel lbl s) k e le m) => Some (State f s k e le m, E0)
-    (*TODO: step_goto, step_internal_function*)
-    (* | (State f (Sgoto lbl) k e le m) => (State f s' k' e le m) *)
-    (* | (Callstate (Internal f) vargs k m) => Some (State f f.(fn_body) k e le m1) *)
+    | (State f (Sgoto lbl) k e le m) =>match find_label lbl f.(fn_body) (call_cont k) with
+                                        | Some (s', k') => Some ((State f s' k' e le m), E0)
+                                        | None => None
+                                        end
+    (*TODO: step_internal_function*)
+    (* | (Callstate (Internal f) vargs k m) => m1 ← function_entry f vargs m; Some ((State f f.(fn_body) k e le m1), E0) *)
     | (Returnstate v (Kcall optid f e le k) m) => Some (State f Sskip k e (set_opttemp optid v le) m, E0)
-    (*TODO: step_builtin, step_external_function, step_from_metastate*)
-
-    (* | (State f (Sbuiltin optid ef tyargs al) k e le m) =>(State f Sskip k e (set_opttemp optid (*vres*) (vargs ← eval_exprlist_fun al tyargs; external_call ef ge vargs m t) le) (*m'*) (vargs ← eval_exprlist_fun al tyargs; external_call ef ge vargs m t)) *)
+    (*TODO: step_builtin, step_external_function, step_to_metastate, step_from_metastate*)
+    (* | (State f (Sbuiltin optid ef tyargs al) k e le m) => vargs ← eval_exprlist_fun al tyargs; external_call ef ge vargs m *)
     (* | (Callstate (External ef targs tres cconv) vargs k m) => Some (Returnstate vres k m') *)
     | (State f (Smeta ml s) k e le m) => Some (Metastate ml (f, s, k, e, le, m), E0)
     | _ => None
