@@ -174,7 +174,7 @@ Module DryHybridMachine.
                      end) dm.
 
 
-    Definition transform_state_parallel_impl (c: Clight_core.state) : option Clight_core.state :=
+    Definition transform_state_parallel (c: Clight_core.state) : option Clight_core.state :=
       match c with
       | Clight_core.Metastate (OMPParallel _ _ _) (f,s,k,e,le) =>
         (* need to bring threads in a `Metastate ParallelEnd` state to implement blocking/barrier for the parent *)
@@ -183,7 +183,7 @@ Module DryHybridMachine.
       | _ => None
       end.
 
-    Definition transform_state_for_impl (c: Clight_core.state) (my_workload: list chunk) (cln: CanonicalLoopNest) : option Clight_core.state :=
+    Definition transform_state_for (c: Clight_core.state) (my_workload: list chunk) (cln: CanonicalLoopNest) : option Clight_core.state :=
       match c with
       | Clight_core.Metastate (OMPFor _ _) (f,s,k,e,le) =>
         (* need to bring threads in a `Metastate ParallelEnd` state to implement blocking/barrier for the parent *)
@@ -194,16 +194,58 @@ Module DryHybridMachine.
       | _ => None
       end.
 
-    (* TODO implement these after instantiating C with the actual state *)
-    Parameter transform_state_parallel : C  -> option C.
-    Parameter transform_state_for : C -> list chunk -> CanonicalLoopNest -> option C.
-    Parameter update_le : C -> env -> C.
-    Parameter update_statement : C -> statement -> C.
-    Parameter envs_of_state : C -> (env * temp_env).
-    Parameter ce : Ctypes.composite_env.
-    Parameter statement_of_state : C -> statement.
-    Parameter make_halted : C -> C.
-    Parameter is_a_canonical_loop_nest : statement -> option CanonicalLoopNest.
+    Definition update_le (c: state) (le': env) : option state :=
+      match c with
+      | State f s k le te => Some $ State f s k le' te
+      | Metastate ml (f,s,k,le,te) => Some $ Metastate ml (f,s,k,le',te)
+      | _ => None
+      end.
+
+    Definition update_stmt (c: state) (s': statement) : option state :=
+      match c with
+      | State f _ k le te => Some $ State f s' k le te
+      | Metastate ml (f,s',k,le,te) => Some $ Metastate ml (f,s',k,le,te)
+      | _ => None
+      end.
+
+    Definition update_stmt_le (c: state) (s': statement) (le': env) : option state :=
+      match c with
+      | State f _ k _ te => Some $ State f s' k le' te
+      | Metastate ml (f,s',k,_,te) => Some $ Metastate ml (f,s',k,le',te)
+      | _ => None
+      end.
+
+    Definition get_stmt (c: state) : option statement :=
+      match c with
+      | State _ s _ _ _ => Some s
+      | Metastate _ (_,s,_,_,_) => Some s
+      | _ => None
+      end.
+
+    Definition get_le (c: state) : option env :=
+      match c with
+      | State _ _ _ le _ => Some le
+      | Metastate _ (_,_,_,le,_) => Some le
+      | _ => None
+      end.
+
+    Definition get_te (c: state) : option temp_env :=
+      match c with
+      | State _ _ _ _ te => Some te
+      | Metastate _ (_,_,_,_,te) => Some te
+      | _ => None
+      end.
+
+    Definition ce := ge.(genv_cenv).
+
+    (* a halted state *)
+    Definition make_halted : state :=
+      Returnstate Vundef Kstop.
+    
+    Lemma make_halted_cl_halted :
+      cl_halted make_halted.
+    Proof. done. Qed.
+
     Parameter permJoinFun : res -> res -> option res.
 
     Definition blocked_at (ct:ctl) : option C :=
@@ -226,7 +268,7 @@ Module DryHybridMachine.
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
       thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=
     | step_parallel :
-        forall (tp_upd tp' tp'':thread_pool) c c' ge le te m1 m' m'' virtue1 virtue2 
+        forall (tp_upd tp' tp'':thread_pool) c c' ge m1 m' m'' virtue1 virtue2 
           ttree' ttree'' (num_threads:nat) pc rcs new_tids
           newThreadPermSum,
           let threadPerm' := (computeMap (getThreadR cnt0).1 virtue1.1,
@@ -244,7 +286,6 @@ Module DryHybridMachine.
             (HnewThreadPermSum1: permMapJoinPair_n_times newThreadPerm (num_threads-1) newThreadPermSum)
             (Hangel: permMapJoinPair newThreadPermSum threadPerm' (getThreadR cnt0))
             (* 1. spawn new threads as fork, add them to team. *)
-            (Henvs: envs_of_state c = (le, te))
             (Hc': Some c' = transform_state_parallel c)
             (HaddThreads: (new_tids, tp') = let tp' := (updThread cnt0 (Krun c') threadPerm') in
                                             addThreads tp' c' newThreadPerm (num_threads-1))
@@ -260,12 +301,12 @@ Module DryHybridMachine.
                 let '(tp, m, ttree) := tp_m_ttree in
                 cnt_i ← maybeContainsThread tp tid;
                 c ← blocked_at $ getThreadC cnt_i;
-                let '(le, te) := envs_of_state c in
+                le ← get_le c;
                 maybe_prm_le'_m' ← prm_priv_start pc m ge le;
                 let '(prm, le', m') := maybe_prm_le'_m' in
                 (* start privatization & reduction for tid *)
                 tree' ← team_pr_start_tid ttree tid prm ge le m rcs;
-                let c' := update_statement  (update_le c le') Sskip in
+                c' ← update_stmt_le c Sskip le';
                 let tp' := updThreadC cnt_i (Krun c') in
                 Some (tp', m', tree')
               ) (Some (tp', m', ttree')) team_tids),
@@ -290,7 +331,8 @@ Module DryHybridMachine.
             match at_meta semSem c with
             | Some OMPParallelEnd =>
               (* add reduction contribs *)
-              let '(le, te) := envs_of_state c in Some $ le::le_lst
+              le ← get_le c;
+              Some $ le::le_lst
             | _ => None
             end)
             (Some []) mates_tids)
@@ -304,12 +346,12 @@ Module DryHybridMachine.
               cnt_i ← maybeContainsThread tp tid;
               permSum' ← permJoinFun permSum (getThreadR cnt_i);
               c ← blocked_at $ getThreadC cnt_i;
-              let '(le, _) := envs_of_state c in
+              le ← get_le c;
               ttree'_le'_m' ← team_pr_end_tid ttree tid ce m le;
               let '(ttree', le', m') := ttree'_le'_m' in
-              let c' := update_statement c Sskip in
-              let c'' := update_le c' le' in
-              let c''' := if tid =? parent_tid then c'' else make_halted c'' in
+              c' ← update_stmt c Sskip;
+              c'' ← update_le c' le';
+              let c''' := if tid =? parent_tid then c'' else make_halted in
               let tp' := updThread cnt_i (Krun c''') emptyPerm in
               Some (permSum', tp', m', ttree'))
             (Some (emptyPerm, tp, m', ttree')) mates_tids)
@@ -328,10 +370,11 @@ Module DryHybridMachine.
       (Hcode: getThreadC cnt0 = Kblocked c)
       (Hat_meta: at_meta semSem c = Some $ OMPFor pc rcs)
       (* next statement is a canonical loop nest *)
-      (Hstmt: statement_of_state c = stmt)
-      (Henvs_of_state: (le, te) = envs_of_state c)
+      (Hstmt: Some stmt = get_stmt c)
+      (Hle: Some le = get_le c)
+      (Hte: Some te = get_te c)
       (* exists a chunk split of the iterations *)
-      (His_cln: is_a_canonical_loop_nest stmt = Some cln)
+      (His_cln: make_canonical_loop_nest stmt = Some cln)
       (Hlb_of_loop: lb_of_loop cln ge le te m = Some lb)
       (Hincr_of_loop: incr_of_loop cln ge le te m = Some incr),
       (* TODO chunk_split has parameters lb, incr, iter_num *)
@@ -350,7 +393,7 @@ Module DryHybridMachine.
       (* 2. start privatization and reduction *)
       (Hpriv_start: Some (prm, le', m') = prm_priv_start pc m ge le)
       (Hred_start: Some ttree'' = team_pr_start_tid ttree' tid0 prm ge le m rcs)
-      (Hc': c' = update_le c le')
+      (Hc': Some c' = update_le c le')
       (* 3. update current statement to be my workload *)
       (Htnum: Some tnum = get_thread_num tid0 ttree'')
       (Hchunks: Some my_workload = nth_error team_workloads tnum)
@@ -376,7 +419,8 @@ Module DryHybridMachine.
         match at_meta semSem c with
         | Some OMPForEnd =>
           (* collect their local environments *)
-          let '(le, te) := envs_of_state c in Some $ le::le_lst
+          le ← get_le c;
+          Some $ le::le_lst
         | _ => None
         end)
         (Some []) mates_tids)
@@ -389,12 +433,14 @@ Module DryHybridMachine.
           let '(tp, m, ttree) := tp_m_ttree in
           cnt_i ← maybeContainsThread tp tid;
           c ← blocked_at $ getThreadC cnt_i;
-          let '(le, _) := envs_of_state c in
+          le ← get_le c;
           ttree'_le'_m' ← team_pr_end_tid ttree tid ce m le;
           let '(ttree', le', m') := ttree'_le'_m' in
-          let c' := update_statement c Sskip in
-          let c'' := update_le c' le' in
+          c' ← update_stmt_le c Sskip le';
+          (* 4. set work-sharing to false *)
           tree'' ← update_tid tid ttree' (λ t, Some $ t.update_data_f (λ ot, ot <| o_work_sharing := false |>));
+          (* 5. update tp *)
+          let tp' := updThreadC cnt_i (Krun c') in
           Some (tp', m', ttree''))
         (Some (tp, m', ttree')) mates_tids),
         pragma_step cnt0 Hcompat tp' m'' ttree''
@@ -408,7 +454,7 @@ Module DryHybridMachine.
           c ← blocked_at $ getThreadC cnt_i;
           match at_meta semSem c with
           | Some OMPBarrier =>
-            let c' := update_statement c Sskip in
+            c' ← update_stmt c Sskip;
             Some $ updThreadC cnt_i (Krun c')
           | _ => None
           end)
