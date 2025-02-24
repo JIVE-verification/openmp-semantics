@@ -1,4 +1,4 @@
-Require Import VST.sepcomp.semantics.
+Require Import VST.concurrency.openmp_sem.memory_semantics.
 Require Import VST.veric.Clight_base.
 Require Import VST.veric.Clight_lemmas.
 Require compcert.common.Globalenvs.
@@ -6,7 +6,7 @@ Require Import compcert.common.Events.
 Require Import compcert.cfrontend.Clight.
 
 (*To prove memsem*)
-Require Import VST.sepcomp.semantics_lemmas.
+Require Import VST.concurrency.openmp_sem.semantics_lemmas.
 Require Import VST.sepcomp.mem_lemmas.
 Import compcert.lib.Maps.
 Require Import VST.concurrency.openmp_sem.event_semantics.
@@ -358,6 +358,12 @@ unfold cl_after_external in H.
 destruct q; inv H. destruct f; inv H1. reflexivity.
 Qed.
 
+Definition cl_at_meta (c: CC_core) : option meta_label :=
+  match c with
+  | Metastate ml _ => Some ml
+  | _ => None
+end.
+
 Program Definition cl_core_sem (ge: genv) :
   @CoreSemantics CC_core mem :=
   @Build_CoreSemantics _ _
@@ -365,6 +371,7 @@ Program Definition cl_core_sem (ge: genv) :
     (fun _ m c m' v args => cl_initial_core ge v args = Some c(* /\ Mem.arg_well_formed args m *) /\ m' = m)
     (fun c _ => cl_at_external c)
     (fun ret c _ => cl_after_external ret c)
+    cl_at_meta
     (fun c _ =>  cl_halted c <> None) (* Why don't we use the int argument of halted? *)
     (cl_step ge)
     (cl_corestep_not_halted ge)

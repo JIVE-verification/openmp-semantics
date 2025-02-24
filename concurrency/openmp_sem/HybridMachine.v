@@ -24,18 +24,25 @@ Require Import VST.concurrency.common.bounded_maps.
 Require Import VST.concurrency.common.addressFiniteMap.
 Require Import VST.concurrency.common.scheduler.
 Require Import Coq.Program.Program.
-(*Require Import VST.concurrency.common.safety.
-Require Import VST.concurrency.common.coinductive_safety.*)
 
-(* Require Import VST.veric.res_predicates. *)
-(* Require Import VST.veric.Clight_new. *)
-
-From VST.concurrency.openmp_sem Require Import HybridMachineSig team_dyn notations reduction canonical_loop_nest for_construct.
+From VST.concurrency.openmp_sem Require Import HybridMachineSig team_dyn notations reduction canonical_loop_nest for_construct Clight_evsem Clight_core.
 From stdpp Require Import base.
 (* Require Import VST.concurrency.CoreSemantics_sum. *)
 Import -(notations) Maps.
 From RecordUpdate Require Import RecordSet.
 Import RecordSetNotations.
+
+Lemma at_external_SEM_eq:
+   forall ge c m, memory_semantics.at_external (csem (msem (CLC_evsem ge))) c m =
+   match c with
+   | Callstate (Ctypes.External ef _ _ _) args _ => 
+       if ef_inline ef then None else Some (ef, args)
+   | _ => None
+ end.
+Proof. auto. Qed.
+
+#[export] Instance ClightSem ge : Semantics :=
+  { semG := G; semC := C; semSem := CLC_evsem ge; the_ge := ge }.
 
 Module DryHybridMachine.
   Import Events ThreadPool.
@@ -46,9 +53,11 @@ Module DryHybridMachine.
 
   Section DryHybridMachine.
         
+    Context {ge:genv}.
     (** Assume some threadwise semantics *)
-    Context {Sem: Semantics}
-            {tpool : @ThreadPool.ThreadPool dryResources Sem}.
+    #[export] Instance Sem : Semantics := ClightSem ge.
+    
+    Context {tpool : @ThreadPool.ThreadPool dryResources Sem}.
     (* define this as clightSem in clightSemanticsForMachines*)
     Notation C:= (@semC Sem).
     Notation G:= (@semG Sem).
@@ -73,7 +82,6 @@ Module DryHybridMachine.
         lockRes_blocks: forall l rmap, lockRes tp l = Some rmap ->
                                   Mem.valid_block m l.1}.
 
-    
       Lemma  mem_compat_restrPermMap:
         forall m perms st
           (permMapLt: permMapLt perms (getMaxPerm m)),
@@ -232,7 +240,7 @@ Module DryHybridMachine.
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (* (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg) *)
             (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m1)
-            (Hat_meta: at_meta semSem c m1 = Some (OMPParallel num_threads pc rcs))
+            (Hat_meta: at_meta semSem c = Some (OMPParallel num_threads pc rcs))
             (HnewThreadPermSum1: permMapJoinPair_n_times newThreadPerm (num_threads-1) newThreadPermSum)
             (Hangel: permMapJoinPair newThreadPermSum threadPerm' (getThreadR cnt0))
             (* 1. spawn new threads as fork, add them to team. *)
@@ -279,7 +287,7 @@ Module DryHybridMachine.
             cnt_i ← maybeContainsThread tp tid;
             (* every thread is blocked at OMPParallelEnd *)
             c ← blocked_at $ getThreadC cnt_i;
-            match at_meta semSem c m with
+            match at_meta semSem c with
             | Some OMPParallelEnd =>
               (* add reduction contribs *)
               let '(le, te) := envs_of_state c in Some $ le::le_lst
@@ -318,7 +326,7 @@ Module DryHybridMachine.
        pref ( ptree' ttree' ttree'' ttree''': team_tree)
        tp' tnum pc rcs prm m'
       (Hcode: getThreadC cnt0 = Kblocked c)
-      (Hat_meta: at_meta semSem c m = Some $ OMPFor pc rcs)
+      (Hat_meta: at_meta semSem c = Some $ OMPFor pc rcs)
       (* next statement is a canonical loop nest *)
       (Hstmt: statement_of_state c = stmt)
       (Henvs_of_state: (le, te) = envs_of_state c)
@@ -365,7 +373,7 @@ Module DryHybridMachine.
         cnt_i ← maybeContainsThread tp tid;
         (* every thread is blocked at OMPForEnd *)
         c ← blocked_at $ getThreadC cnt_i;
-        match at_meta semSem c m with
+        match at_meta semSem c with
         | Some OMPForEnd =>
           (* collect their local environments *)
           let '(le, te) := envs_of_state c in Some $ le::le_lst
@@ -398,7 +406,7 @@ Module DryHybridMachine.
           tp ← maybe_tp;
           cnt_i ← maybeContainsThread tp tid;
           c ← blocked_at $ getThreadC cnt_i;
-          match at_meta semSem c m with
+          match at_meta semSem c with
           | Some OMPBarrier =>
             let c' := update_statement c Sskip in
             Some $ updThreadC cnt_i (Krun c')
@@ -483,7 +491,7 @@ Module DryHybridMachine.
             (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg)
-            (Hat_external: at_external semSem c marg = Some (LOCK, Vptr b ofs::nil))
+            (Hat_external: memory_semantics.at_external semSem c marg = Some (LOCK, Vptr b ofs::nil))
             (** install the thread's permissions on lock locations*)
             (Hrestrict_pmap0: restrPermMap (Hcompat tid0 cnt0).2 = m0)
             (** To acquire the lock the thread must have [Readable] permission on it*)
@@ -532,7 +540,7 @@ Module DryHybridMachine.
             (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg)
-            (Hat_external: at_external semSem c marg =
+            (Hat_external: memory_semantics.at_external semSem c marg =
                            Some (UNLOCK, Vptr b ofs::nil))
             (** install the thread's permissions on lock locations *)
             (Hrestrict_pmap0: restrPermMap (Hcompat tid0 cnt0).2 = m0)
@@ -578,7 +586,7 @@ Module DryHybridMachine.
             (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg)
-            (Hat_external: at_external semSem c marg = Some (CREATE, Vptr b ofs::arg::nil))
+            (Hat_external: memory_semantics.at_external semSem c marg = Some (CREATE, Vptr b ofs::arg::nil))
 (*            (Harg: Val.inject (Mem.flat_inj (Mem.nextblock m)) arg arg) *)
             (** we do not need to enforce the almost empty predicate on thread
            spawn as long as it's considered a synchronizing operation *)
@@ -600,7 +608,7 @@ Module DryHybridMachine.
             (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg)
-            (Hat_external: at_external semSem c marg = Some (MKLOCK, Vptr b ofs::nil))
+            (Hat_external: memory_semantics.at_external semSem c marg = Some (MKLOCK, Vptr b ofs::nil))
             (** install the thread's data permissions*)
             (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m1)
             (** To create the lock the thread must have [Writable] permission on it*)
@@ -640,7 +648,7 @@ Module DryHybridMachine.
             (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg)
-            (Hat_external: at_external semSem c marg = Some (FREE_LOCK, Vptr b ofs::nil))
+            (Hat_external: memory_semantics.at_external semSem c marg = Some (FREE_LOCK, Vptr b ofs::nil))
             (** If this address is a lock*)
             (His_lock: lockRes tp (b, (Ptrofs.intval ofs)) = Some rmap)
             (** And the lock is taken *)
@@ -677,7 +685,7 @@ Module DryHybridMachine.
            (Hcode: getThreadC cnt0 = Kblocked c)
            (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
            (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg)
-           (Hat_external: at_external semSem c marg = Some (LOCK, Vptr b ofs::nil))
+           (Hat_external: memory_semantics.at_external semSem c marg = Some (LOCK, Vptr b ofs::nil))
            (** Install the thread's lock permissions*)
            (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).2 = m1)
            (** To acquire the lock the thread must have [Readable] permission on it*)
@@ -879,8 +887,9 @@ Module DryHybridMachine.
       Qed.
 
       (** Assume some threadwise semantics *)
-      Context {Sem: Semantics}
-            {tpool : @ThreadPool.ThreadPool dryResources Sem}.
+        Context {ge:genv}.
+        (** Assume some threadwise semantics *)
+        Context {tpool : @ThreadPool.ThreadPool dryResources (@Sem ge)}.
     
       
       (*TODO: This lemma should probably be moved. *)
@@ -901,8 +910,8 @@ Module DryHybridMachine.
       (* Many invariant lemmas were removed from here. *)
 
 
-    Notation thread_perms st i cnt:= (fst (@getThreadR _ _ _ st i cnt)).
-    Notation lock_perms st i cnt:= (snd (@getThreadR  _ _ _ st i cnt)).
+    Notation thread_perms st i cnt:= (fst (@getThreadR _ (@Sem ge) _ st i cnt)).
+    Notation lock_perms st i cnt:= (snd (@getThreadR  _ (@Sem ge) _ st i cnt)).
     Record thread_compat st i
            (cnt:containsThread st i) m:=
       { th_comp: permMapLt (thread_perms _ _ cnt) (getMaxPerm m);

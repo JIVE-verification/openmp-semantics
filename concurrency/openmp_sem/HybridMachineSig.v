@@ -412,7 +412,7 @@ Module HybridMachineSig.
     Definition after_external_mach (ov : option val) (st : MachState) (m : mem) :
       option (MachState) := None.
     
-    Definition at_meta_mach (st : MachState) (m: mem)
+    Definition at_meta_mach (st : MachState)
       : option (Clight.meta_label) := None.
     
     (*not clear what the value of halted should be*)

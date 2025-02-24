@@ -11,6 +11,7 @@ Require Import VST.msl.Extensionality.
 Require Import VST.sepcomp.mem_lemmas.
 Require Import VST.concurrency.openmp_sem.semantics.
 Require Import VST.concurrency.openmp_sem.semantics_lemmas.
+Require Import VST.concurrency.openmp_sem.memory_semantics.
 
 (** * Effect Semantics *)
 

@@ -1,10 +1,6 @@
-(* adapted from concurrency/common/semantics.v *)
+(* a fork of concurrency/common/semantics.v *)
 From mathcomp.ssreflect Require Import ssreflect seq ssrbool.
-(*Require Import VST.concurrency.common.core_semantics.*)
-Require Export VST.concurrency.openmp_sem.memory_semantics.
 Require Import VST.concurrency.openmp_sem.event_semantics.
-
-Require Import VST.concurrency.common.machine_semantics.
 
 (** *The typeclass version*)
 Class Semantics:=

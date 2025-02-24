@@ -181,7 +181,6 @@ Section LoopNest.
 
    (*
     for (int i=0; i!=2; i++) {
-        // short cuircuiting a loop
         if (i==0) {
             i=1;
         }
