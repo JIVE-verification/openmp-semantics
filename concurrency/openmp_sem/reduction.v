@@ -221,10 +221,13 @@ From stdpp Require Import base list.
 
         (* privatize vars in ge, register them to prm, TODO allocate copies in le *)
         Definition prm_register_p prm (priv_clause : privatization_clause_type): option pr_map :=
+            let pvs := match priv_clause with
+            | PrivClause pvs => pvs
+            end in
             foldr (λ i maybe_prm, 
                         prm ← maybe_prm;
                         Some $ PTree.set i (Build_pr_data None) prm)
-                   (Some prm) priv_clause.
+                   (Some prm) pvs.
         (* register a variable for reduction *)
         Definition prm_register_r_one_name prm (i: ident) (orig: val) : option pr_map :=
             prm_set_r_data prm i orig
@@ -246,10 +249,13 @@ From stdpp Require Import base list.
                     prm_register_r_one_clause prm ge le m rc) (Some prm) rcs.
 
         Definition alloc_variables_priv_clause ge le m (priv_clause: privatization_clause_type) : option (env * mem) :=
+            let pvs := match priv_clause with
+            | PrivClause pvs => pvs
+            end in
             foldr (λ i accu,
                     accu ← accu;
                     let '(le', m') := accu in
-                    alloc_variable_fun ge le' i m') (Some (le, m)) priv_clause.
+                    alloc_variable_fun ge le' i m') (Some (le, m)) pvs.
 
         (* start of privatization&reduction region.
            Register privatizaiton and reduction information for t,

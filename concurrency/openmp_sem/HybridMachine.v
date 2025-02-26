@@ -403,7 +403,6 @@ Module DryHybridMachine.
       (* 5. update tp with the new c'' *)
       (Htp': tp' = updThread cnt0 (Krun c'') threadPerm),
       pragma_step cnt0 Hcompat tp' m' ttree''
-    (* TODO move barrier to step_for *)
    | step_for_end:
     forall tp' m' m'' ttree' ttree'' mates_tids le_lst parent_tid rvs
       (Hinv : invariant tp)

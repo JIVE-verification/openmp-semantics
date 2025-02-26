@@ -96,7 +96,8 @@ Definition typeof (e: expr) : type :=
 
 Definition label := ident.
 
-Definition privatization_clause_type : Type := list ident.
+Variant privatization_clause_type : Type :=
+| PrivClause (priv_vars: list ident).
 
 (* https://www.openmp.org/wp-content/uploads/OpenMP-RefGuide-6.0-OMP60SC24-web.pdf 
   pg11, reduction clause *)
