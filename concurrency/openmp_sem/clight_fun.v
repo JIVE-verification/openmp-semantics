@@ -338,6 +338,13 @@ Section EvalExprFun.
     Lemma eval_exprlist_fun_correct1:
         ∀ elist t vl, eval_exprlist_fun elist t = Some vl -> eval_exprlist ge e le m elist t vl.
     Proof. Admitted.
+    
+Definition is_call_cont_bool (k: cont) : bool :=
+  match k with
+  | Kstop => true
+  | Kcall _ _ _ _ _ => true
+  | _ => false
+  end.
 
 End EvalExprFun.
 
@@ -402,7 +409,7 @@ Section EvalStatement.
     | (State f Sbreak (Kloop1 s1 s2 k) e le m) => Some (State f Sskip k e le m, E0)
     (*TODO: Check the below one and make sure 'x' is okay; also note how similar the 
     preceding case and following case are*)
-    | (State f x (Kloop1 s1 s2 k) e le m) => Some (State f s2 (Kloop2 s1 s2 k) e le m, E0)
+    | (State f _x (Kloop1 s1 s2 k) e le m) => Some (State f s2 (Kloop2 s1 s2 k) e le m, E0)
     | (State f Sskip (Kloop2 s1 s2 k) e le m) => Some (State f (Sloop s1 s2) k e le m, E0)
     | (State f Sbreak (Kloop2 s1 s2 k) e le m) => Some (State f Sskip k e le m, E0)
     | (State f (Sreturn None) k e le m) => match Mem.free_list m (blocks_of_env ge e) with 
@@ -410,11 +417,11 @@ Section EvalStatement.
                                             | None => None
                                             end
     | (State f (Sreturn (Some a)) k e le m) => v ← eval_expr_fun a; v' ← sem_cast v (typeof a) f.(fn_return) m; m' ← Mem.free_list m (blocks_of_env ge e);  Some ((Returnstate v' (call_cont k) m'), E0)
-    | (State f Sskip k e le m) => m' ← Mem.free_list m (blocks_of_env ge e) ; Some ((Returnstate Vundef k m'), E0)
+    | (State f Sskip k e le m) => m' ← Mem.free_list m (blocks_of_env ge e) ; if is_call_cont_bool k then Some ((Returnstate Vundef k m'), E0) else None
     | (State f (Sswitch a sl) k e le m) => v ← eval_expr_fun a; n ← sem_switch_arg v (typeof a); Some ((State f (seq_of_labeled_statement (select_switch n sl)) (Kswitch k) e le m), E0)
     | (State f Scontinue (Kswitch k) e le m) => Some (State f Scontinue k e le m, E0)
     (*TODO: another case where preceding is redundant when swapped with following*)
-    | (State f x (Kswitch k) e le m) => Some (State f Sskip k e le m, E0)
+    | (State f _x (Kswitch k) e le m) => Some (State f Sskip k e le m, E0)
     | (State f (Slabel lbl s) k e le m) => Some (State f s k e le m, E0)
     | (State f (Sgoto lbl) k e le m) =>match find_label lbl f.(fn_body) (call_cont k) with
                                         | Some (s', k') => Some ((State f s' k' e le m), E0)
@@ -439,5 +446,12 @@ Section EvalStatement.
             +constructor.
             +apply Heqo.
         -inv H1. constructor.
-    Admitted.
+        -inv H1. constructor. left. reflexivity. 
+        -inv H1. constructor. 
+        -inv H1. apply step_skip_call. 
+            +simpl. easy. 
+            +apply Heqo0.
+        -inv H1. admit.
+        -inv H1. constructor. 
+    Admitted. 
 End EvalStatement.
