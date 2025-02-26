@@ -441,17 +441,48 @@ Section EvalStatement.
     Lemma step_fun_correct:
         ∀ s s' t, step_fun s = Some (s', t) -> step ge run_meta_label function_entry s t s'.
     Proof.  intro s. induction s; intros;  inv H; try (by constructor);
-        try unfold_mbind_in_hyp; repeat destruct_match.
-        -inv H1. constructor.
-            +constructor.
-            +apply Heqo.
-        -inv H1. constructor.
-        -inv H1. constructor. left. reflexivity. 
-        -inv H1. constructor. 
-        -inv H1. apply step_skip_call. 
-            +simpl. easy. 
-            +apply Heqo0.
-        -inv H1. admit.
-        -inv H1. constructor. 
+        try unfold_mbind_in_hyp; repeat destruct_match; inv H1; try constructor.
+        -constructor.
+        -apply Heqo.
+        -left. reflexivity.
+        -simpl. easy.
+        -apply Heqo0.
+        -try apply step_assign. admit.
+        -apply eval_expr_fun_correct1. admit.
+        -admit.
+        -admit.
+        -admit.
+        -try apply step_ifthenelse. admit.
+        -admit.
+        -right. reflexivity.
+        -right. reflexivity.
+        -admit.
+        -admit.
+        -try right. simpl. admit. 
+        -admit.
+        -admit.
+        -admit.
+        -apply Heqo1.
+        -admit.
+        -right. simpl. admit. 
+        -admit.
+        -admit.
+        -apply Heqo1.
+        -admit.
+        -admit.
+        -right. try reflexivity. admit.
+        -admit.
+        -admit.
+        -admit.
+        -right. try reflexivity. admit. 
+        -right. try reflexivity. admit. 
+        -apply Heqo.
+        -apply Heqo.
+        -right. try reflexivity. admit. 
+        -apply Heqo.
+        -right. try reflexivity. admit. 
+        -apply Heqo0.
+        -right. try reflexivity. admit. 
+        -right. try reflexivity. admit. 
     Admitted. 
 End EvalStatement.
