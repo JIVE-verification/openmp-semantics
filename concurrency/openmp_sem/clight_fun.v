@@ -391,7 +391,6 @@ Section EvalStatement.
     | (State f Sskip (Kseq s k) e le m) => Some (State f s k e le m, E0)
     | (State f Scontinue (Kseq s k) e le m) => Some (State f Scontinue k e le m, E0)
     | (State f Sbreak (Kseq s k) e le m) => Some (State f Sbreak k e le m, E0)
-    (*TODO: step_ifthenelse case *)
     | (State f (Sifthenelse a s1 s2) k e le m) => match eval_expr_fun a with 
         | Some (v1) => match bool_val v1 (typeof a) m with 
                 | Some b => Some (State f (if b then s1 else s2) k e le m, E0)
@@ -406,7 +405,6 @@ Section EvalStatement.
     | (State f x (Kloop1 s1 s2 k) e le m) => Some (State f s2 (Kloop2 s1 s2 k) e le m, E0)
     | (State f Sskip (Kloop2 s1 s2 k) e le m) => Some (State f (Sloop s1 s2) k e le m, E0)
     | (State f Sbreak (Kloop2 s1 s2 k) e le m) => Some (State f Sskip k e le m, E0)
-    (*TODO: step_return_0, step_return_1, step_skip_call, step_switch*)
     | (State f (Sreturn None) k e le m) => match Mem.free_list m (blocks_of_env ge e) with 
                                             | Some m' => Some ((Returnstate Vundef (call_cont k) m'), E0)
                                             | None => None
@@ -423,7 +421,7 @@ Section EvalStatement.
                                         | None => None
                                         end
     (*TODO: step_internal_function*)
-    (* | (Callstate (Internal f) vargs k m) => m1 ← function_entry f vargs m; Some ((State f f.(fn_body) k e le m1), E0) *)
+    (* | (Callstate (Internal f) vargs k m) => m1 ← function_entry f vargs m e le; Some ((State f f.(fn_body) k e le m1),E0) *)
     | (Returnstate v (Kcall optid f e le k) m) => Some (State f Sskip k e (set_opttemp optid v le) m, E0)
     (*TODO: step_builtin, step_external_function, step_to_metastate, step_from_metastate*)
     (* | (State f (Sbuiltin optid ef tyargs al) k e le m) => vargs ← eval_exprlist_fun al tyargs; external_call ef ge vargs m *)
@@ -435,5 +433,11 @@ Section EvalStatement.
 
     Lemma step_fun_correct:
         ∀ s s' t, step_fun s = Some (s', t) -> step ge run_meta_label function_entry s t s'.
-    Proof. Admitted.
+    Proof.  intro s. induction s; intros;  inv H; try (by constructor);
+        try unfold_mbind_in_hyp; repeat destruct_match.
+        -inv H1. constructor.
+            +constructor.
+            +apply Heqo.
+        -inv H1. constructor.
+    Admitted.
 End EvalStatement.
