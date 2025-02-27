@@ -262,7 +262,7 @@ Section EvalExprFun.
     Notation eval_expr_fun := (eval_expr_fun ge e le m).
 
     Lemma eval_expr_fun_correct1 :
-        ∀  exp v, (@eval_expr_fun exp = Some v -> eval_expr ge e le m exp v) ∧
+        ∀  exp, (∀ v, @eval_expr_fun exp = Some v -> eval_expr ge e le m exp v) ∧
                 ∀ bl ofs bt, eval_lvalue_fun exp = Some (bl, ofs, bt) -> eval_lvalue ge e le m exp bl ofs bt.
     Proof.
     intro exp; induction exp; intros; split; intros; inv H; try (by constructor);
@@ -282,42 +282,44 @@ Section EvalExprFun.
     inv H1.
     apply eval_Evar_global; done.
     - inv H1; constructor; done.
-    - specialize (IHexp v0). rewrite Heqv1 in IHexp.
+    - 
     destruct IHexp as [IHexp1 IHexp2].
+    specialize (IHexp1 v0). rewrite Heqv1 in IHexp1.
     eapply eval_Elvalue.
     + constructor. eapply IHexp1; done.
     + apply deref_loc_fun_correct1 in H1. done.
-    - specialize (IHexp v0). rewrite Heqv1 in IHexp.
+    - 
     destruct IHexp as [IHexp1 IHexp2].
-    (* specialize (IHexp1 eq_refl). *)
+    specialize (IHexp1 v). rewrite Heqv0 in IHexp1.
     inv H1.
     eapply eval_Ederef.
     by eapply IHexp1.
-    - specialize (IHexp v). destruct IHexp as [IHexp1 IHexp2].
+    - destruct IHexp as [IHexp1 IHexp2].
+    specialize (IHexp1 v).
     inv H1. econstructor. by apply IHexp2.
-    - specialize (IHexp v0). destruct IHexp as [IHexp1 IHexp2].
+    - destruct IHexp as [IHexp1 IHexp2].
     econstructor; eauto.
-    - specialize (IHexp1 v0). destruct IHexp1 as [IHexp1 _].
-    specialize (IHexp2 v1). destruct IHexp2 as [IHexp2 _].
+    - destruct IHexp1 as [IHexp1 _].
+     destruct IHexp2 as [IHexp2 _].
     econstructor; eauto.
-    - specialize (IHexp v0). destruct IHexp as [IHexp1 IHexp2].
+    - destruct IHexp as [IHexp1 IHexp2].
     econstructor; eauto.
     - (* eval_Efield_struct *)
-    specialize (IHexp v0). subst. destruct IHexp as [IHexp1 IHexp2].
+     subst. destruct IHexp as [IHexp1 IHexp2].
     econstructor. 
     * eapply eval_Efield_struct; eauto.
     * by apply deref_loc_fun_correct1.
     - (* eval_Efield_union *)
-    specialize (IHexp v0). subst. destruct IHexp as [IHexp1 IHexp2].
+    subst. destruct IHexp as [IHexp1 IHexp2].
     econstructor. 
     * eapply eval_Efield_union; eauto.
     * by apply deref_loc_fun_correct1.
     - (* eval_Efield_struct *)
-    specialize (IHexp v0). subst. destruct IHexp as [IHexp1 IHexp2].
+    subst. destruct IHexp as [IHexp1 IHexp2].
     inv H1.
     eapply eval_Efield_struct; eauto.
     - (* eval_Efield_union *)
-    specialize (IHexp v0). subst. destruct IHexp as [IHexp1 IHexp2].
+     subst. destruct IHexp as [IHexp1 IHexp2].
     inv H1.
     eapply eval_Efield_union; eauto.
     Qed.
@@ -356,10 +358,6 @@ Section EvalStatement.
     Variable run_pragma_label: pragma_label -> state_params -> state_params -> Prop.
     Variable function_entry: function -> list val -> mem -> env -> temp_env -> mem -> Prop.
 
-    Notation eval_lvalue_fun := (eval_lvalue_fun ge e le m).
-    Notation eval_expr_fun := (eval_expr_fun ge e le m).
-    Notation eval_exprlist_fun := (eval_exprlist_fun ge e le m).
-
     #[global]Instance typelist_eq_dec: EqDecision (typelist).
     Proof. unfold EqDecision. apply typelist_eq. Defined.
     
@@ -369,17 +367,17 @@ Section EvalStatement.
     Definition step_fun (s: state) : option (state * trace) :=
     match s with 
     | (State f (Sassign a1 a2) k e le m) =>  
-        loc_ofs_bf ← eval_lvalue_fun a1;
+        loc_ofs_bf ← eval_lvalue_fun ge e le m a1;
         let '(loc, ofs, bf) := loc_ofs_bf in
-        v2 ← eval_expr_fun a2;
+        v2 ← eval_expr_fun ge e le m a2;
         v ← sem_cast v2 (typeof a2) (typeof a1) m; 
         m' ← assign_loc_fun ge (typeof a1) m loc ofs bf v;
         Some (State f Sskip k e le m', E0)
     | (State f (Sset id a) k e le m) =>
-        v ← eval_expr_fun a;
+        v ← eval_expr_fun ge e le m a;
         Some (State f Sskip k e (PTree.set id v le) m, E0) 
     | (State f (Scall optid a al) k e le m) =>
-        vf ← eval_expr_fun a;
+        vf ← eval_expr_fun ge e le m a;
         fd ← Genv.find_funct ge vf;
         match classify_fun (typeof a) with 
         | fun_case_f tyargs tyres cconv =>
@@ -387,7 +385,7 @@ Section EvalStatement.
             | Tfunction tyargs' tyres' cconv' =>
                 if decide ((tyargs = tyargs') ∧ (tyres = tyres') ∧ (cconv = cconv'))
                 then         
-                    vargs ← eval_exprlist_fun al tyargs;
+                    vargs ← eval_exprlist_fun ge e le m al tyargs;
                     Some (Callstate fd vargs (Kcall optid f e le k) m, E0)
                 else None
             | _ => None
@@ -398,7 +396,7 @@ Section EvalStatement.
     | (State f Sskip (Kseq s k) e le m) => Some (State f s k e le m, E0)
     | (State f Scontinue (Kseq s k) e le m) => Some (State f Scontinue k e le m, E0)
     | (State f Sbreak (Kseq s k) e le m) => Some (State f Sbreak k e le m, E0)
-    | (State f (Sifthenelse a s1 s2) k e le m) => match eval_expr_fun a with 
+    | (State f (Sifthenelse a s1 s2) k e le m) => match eval_expr_fun ge e le m a with 
         | Some (v1) => match bool_val v1 (typeof a) m with 
                 | Some b => Some (State f (if b then s1 else s2) k e le m, E0)
                 | None => None 
@@ -416,9 +414,9 @@ Section EvalStatement.
                                             | Some m' => Some ((Returnstate Vundef (call_cont k) m'), E0)
                                             | None => None
                                             end
-    | (State f (Sreturn (Some a)) k e le m) => v ← eval_expr_fun a; v' ← sem_cast v (typeof a) f.(fn_return) m; m' ← Mem.free_list m (blocks_of_env ge e);  Some ((Returnstate v' (call_cont k) m'), E0)
+    | (State f (Sreturn (Some a)) k e le m) => v ← eval_expr_fun ge e le m a; v' ← sem_cast v (typeof a) f.(fn_return) m; m' ← Mem.free_list m (blocks_of_env ge e);  Some ((Returnstate v' (call_cont k) m'), E0)
     | (State f Sskip k e le m) => m' ← Mem.free_list m (blocks_of_env ge e) ; if is_call_cont_bool k then Some ((Returnstate Vundef k m'), E0) else None
-    | (State f (Sswitch a sl) k e le m) => v ← eval_expr_fun a; n ← sem_switch_arg v (typeof a); Some ((State f (seq_of_labeled_statement (select_switch n sl)) (Kswitch k) e le m), E0)
+    | (State f (Sswitch a sl) k e le m) => v ← eval_expr_fun ge e le m a; n ← sem_switch_arg v (typeof a); Some ((State f (seq_of_labeled_statement (select_switch n sl)) (Kswitch k) e le m), E0)
     | (State f Scontinue (Kswitch k) e le m) => Some (State f Scontinue k e le m, E0)
     (*TODO: another case where preceding is redundant when swapped with following*)
     | (State f _x (Kswitch k) e le m) => Some (State f Sskip k e le m, E0)
@@ -431,7 +429,7 @@ Section EvalStatement.
     (* | (Callstate (Internal f) vargs k m) => m1 ← function_entry f vargs m e le; Some ((State f f.(fn_body) k e le m1),E0) *)
     | (Returnstate v (Kcall optid f e le k) m) => Some (State f Sskip k e (set_opttemp optid v le) m, E0)
     (*TODO: step_builtin, step_external_function, step_to_metastate, step_from_metastate*)
-    (* | (State f (Sbuiltin optid ef tyargs al) k e le m) => vargs ← eval_exprlist_fun al tyargs; external_call ef ge vargs m *)
+    (* | (State f (Sbuiltin optid ef tyargs al) k e le m) => vargs ← eval_exprlist_fun ge e le m al tyargs; external_call ef ge vargs m *)
     (* | (Callstate (External ef targs tres cconv) vargs k m) => Some (Returnstate vres k m') *)
     | (State f (Spragma ml s) k e le m) => Some (Pragmastate ml (f, s, k, e, le, m), E0)
     | _ => None
@@ -440,49 +438,44 @@ Section EvalStatement.
 
     Lemma step_fun_correct: 
         ∀ s s' t, step_fun s = Some (s', t) -> step ge run_pragma_label function_entry s t s'.
-    Proof.  intro s. induction s; intros;  inv H; try (by constructor);
-        try unfold_mbind_in_hyp; repeat destruct_match; inv H1; try constructor.
-        -constructor.
-        -apply Heqo.
-        -left. reflexivity.
-        -simpl. easy.
-        -apply Heqo0.
-        -try apply step_assign. admit.
-        -apply eval_expr_fun_correct1. admit.
-        -admit.
-        -admit.
-        -admit.
-        -try apply step_ifthenelse. admit.
-        -admit.
-        -right. reflexivity.
-        -right. reflexivity.
-        -admit.
-        -admit.
-        -try right. simpl. admit. 
-        -admit.
-        -admit.
-        -admit.
-        -apply Heqo1.
-        -admit.
-        -right. simpl. admit. 
-        -admit.
-        -admit.
-        -apply Heqo1.
-        -admit.
-        -admit.
-        -right. try reflexivity. admit.
-        -admit.
-        -admit.
-        -admit.
-        -right. try reflexivity. admit. 
-        -right. try reflexivity. admit. 
-        -apply Heqo.
-        -apply Heqo.
-        -right. try reflexivity. admit. 
-        -apply Heqo.
-        -right. try reflexivity. admit. 
-        -apply Heqo0.
-        -right. try reflexivity. admit. 
-        -right. try reflexivity. admit. 
+    Proof.  intro s. destruct s; intros.
+        (* State case *)
+        - induction s eqn:Hs.
+          (* Sskip *)
+          + destruct k eqn:Hk.
+            * (* Kstop *)
+              simpl in H. unfold_mbind_in_hyp. 
+              destruct (Mem.free_list m0 (blocks_of_env ge e0)) eqn:?.
+              { inv H. eapply step_skip_call; done. }
+              done.
+            * (* Kseq *)
+              simpl in H. inv H.
+              apply step_skip_seq.
+            * (* Kloop1 *)
+              simpl in H. inv H. econstructor. left; done.
+            * (* Kloop2  *)
+               simpl in H. inv H. econstructor.
+            * (* Kswitch *)
+              simpl in H. inv H.
+              unfold_mbind_in_hyp.
+              destruct (Mem.free_list m0 (blocks_of_env ge e0)); done.
+            * (* Kcall *)
+              simpl in H. inv H.
+              unfold_mbind_in_hyp.
+              destruct (Mem.free_list m0 (blocks_of_env ge e0)) eqn:?.
+              { inv H1. econstructor; done. }
+              done.
+          + (* Sassign *)
+            simpl in H. unfold_mbind_in_hyp.
+            repeat destruct_match.
+            inv H.
+            eapply step_assign.
+            { apply eval_expr_fun_correct1. done. }
+            { apply eval_expr_fun_correct1. done. }
+            done.
+            { apply assign_loc_fun_correct1. done. }
+          + (* Sset  *)
+            admit.
+          + admit.
     Admitted.
 End EvalStatement.
