@@ -302,10 +302,10 @@ Module DryHybridMachine.
                 cnt_i ← maybeContainsThread tp tid;
                 c ← blocked_at $ getThreadC cnt_i;
                 le ← get_le c;
-                maybe_prm_le'_m' ← prm_priv_start pc m ge le;
-                let '(prm, le', m') := maybe_prm_le'_m' in
+                maybe_pvm_le'_m' ← pvm_priv_start pc m ge le;
+                let '(pvm, le', m') := maybe_pvm_le'_m' in
                 (* start privatization & reduction for tid *)
-                tree' ← team_pr_start_tid ttree tid prm ge le m rcs;
+                tree' ← team_pr_start_tid ttree tid pvm ge le m rcs;
                 c' ← update_stmt_le c Sskip le';
                 let tp' := updThreadC cnt_i (Krun c') in
                 Some (tp', m', tree')
@@ -366,7 +366,7 @@ Module DryHybridMachine.
       forall c c' c'' ge le le' te team_size stmt cln lb incr 
        (team_workloads : list $ list chunk) my_workload
        pref ( ptree' ttree' ttree'' ttree''': team_tree)
-       tp' tnum pc rcs prm m'
+       tp' tnum pc rcs pvm m'
       (Hcode: getThreadC cnt0 = Kblocked c)
       (Hat_meta: at_meta semSem c = Some $ OMPFor pc rcs)
       (* next statement is a canonical loop nest *)
@@ -391,8 +391,8 @@ Module DryHybridMachine.
                 end))
       (Httree': ttree' = pref.2 ptree')
       (* 2. start privatization and reduction *)
-      (Hpriv_start: Some (prm, le', m') = prm_priv_start pc m ge le)
-      (Hred_start: Some ttree'' = team_pr_start_tid ttree' tid0 prm ge le m rcs)
+      (Hpriv_start: Some (pvm, le', m') = pvm_priv_start pc m ge le)
+      (Hred_start: Some ttree'' = team_pr_start_tid ttree' tid0 pvm ge le m rcs)
       (Hc': Some c' = update_le c le')
       (* 3. update current statement to be my workload *)
       (Htnum: Some tnum = get_thread_num tid0 ttree'')

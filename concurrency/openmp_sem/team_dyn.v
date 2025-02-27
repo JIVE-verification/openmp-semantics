@@ -143,7 +143,7 @@ Section OpenMPThreads.
          the orig_le is used for looking up addr of original copies
          of private vars, and at the end of a privatization scope, the thread's le
          is restored to orig_le. *)
-      o_pr: list (env * pr_map);
+      o_pr: list pv_map;
       (* a stack of reduction information of kids. First thread encountering a reduction adds a stack. *)
       o_red_stack: list red_vars
     }.
@@ -182,7 +182,7 @@ Section OpenMPThreads.
          span of the team) also contains a reduction clause. *)
       Definition team_tree := @stree (ot_info).
 
-      Implicit Types (prm : pr_map) (ot: ot_info) (tree: team_tree)
+      Implicit Types (pvm : pv_map) (ot: ot_info) (tree: team_tree)
         (i: ident) (ge orig_ge: genv) (le orig_le: env)
         (ce:composite_env) (m: mem) (b:Values.block) (ty:type).
 
@@ -282,16 +282,16 @@ Section OpenMPThreads.
           Some $ leaf.update_kids mates).
 
       (* t must be a leaf node for that thread. *)
-      Definition team_pr_add_prm (t: team_tree) prm orig_le: team_tree :=
-        t.update_data_f (λ ot, ot <| o_pr ::= cons (orig_le, prm) |>).
+      Definition team_pr_add_pvm (t: team_tree) pvm orig_le: team_tree :=
+        t.update_data_f (λ ot, ot <| o_pr ::= cons pvm |>).
 
       (* start a new privatization&reduction scope.
-         register prm, original local env and reduction clauses for a thread.
+         register pvm, original local env and reduction clauses for a thread.
          Assume ge is invariant during the scope.
          tree is the whole team tree. Start reduction scope for the parent thread;
         if parent haven't had reduction information registered, add that to parent's o_red_stack. *)
-      Definition team_pr_start_tid (tree: team_tree) (tid: nat) prm ge orig_le m (rcs: list reduction_clause_type) : option team_tree :=
-        t ← update_tid tid tree (λ leaf, Some $ team_pr_add_prm leaf prm orig_le);
+      Definition team_pr_start_tid (tree: team_tree) (tid: nat) pvm ge orig_le m (rcs: list reduction_clause_type) : option team_tree :=
+        t ← update_tid tid tree (λ leaf, Some $ team_pr_add_pvm leaf pvm orig_le);
         (* if parent's reduction info stack size is less than the kid's reduction info (by 1), that means the
            kid is the first to encounter the reduction region and registers the info for parent node. *)
         pref ← parent_tree_of tid tree;
@@ -318,9 +318,9 @@ Section OpenMPThreads.
       Definition team_pr_end (t: team_tree) ce m le: option (team_tree * env * mem) :=
         match t.data_of.(o_pr) with
         | [] => None
-        | (orig_le, prm)::tl =>
-          m' ← prm_free_private prm ce m le;
-          le' ← prm_restore_le prm orig_le le;
+        | pvm::tl =>
+          m' ← pvm_free_private pvm ce m le;
+          le' ← pvm_restore_le pvm le;
           let t' := t.update_data_f (λ ot, ot <| o_pr := tl |>) in
           Some (t', le', m')
         end
