@@ -412,8 +412,8 @@ Module HybridMachineSig.
     Definition after_external_mach (ov : option val) (st : MachState) (m : mem) :
       option (MachState) := None.
     
-    Definition at_meta_mach (st : MachState)
-      : option (Clight.meta_label) := None.
+    Definition at_pragma_mach (st : MachState)
+      : option (Clight.pragma_label) := None.
     
     (*not clear what the value of halted should be*)
     (*Nick: IMO, the machine should be halted when the schedule is empty.
@@ -438,7 +438,7 @@ Module HybridMachineSig.
                                 (fun n => init_machine U r)
                                 at_external_mach
                                 after_external_mach
-                                at_meta_mach
+                                at_pragma_mach
                                 (fun st i => halted_machine st = Some (Vint i)) (* this is False *)
                                 MachStep
           );

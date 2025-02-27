@@ -135,7 +135,7 @@ Variant reduction_clause_type :=
               (* assume that the parser figures out the scope *)
               (red_vars: list ident).
 
-Variant meta_label : Type :=
+Variant pragma_label : Type :=
   | OMPParallel (num_threads: nat)
                 (privatization_clause: privatization_clause_type)
                 (reduction_clauses: list reduction_clause_type)
@@ -161,7 +161,7 @@ Inductive statement : Type :=
   | Sswitch : expr -> labeled_statements -> statement  (**r [switch] statement *)
   | Slabel : label -> statement -> statement
   | Sgoto : label -> statement
-  | Smeta : meta_label -> statement -> statement
+  | Spragma : pragma_label -> statement -> statement
 
 with labeled_statements : Type :=            (**r cases of a [switch] *)
   | LSnil: labeled_statements
@@ -565,14 +565,14 @@ Inductive state: Type :=
       (res: val)
       (k: cont)
       (m: mem) : state
-  | Metastate 
-      (ml: meta_label)
+  | Pragmastate 
+      (pl: pragma_label)
       (* resumes to some State, if the metalabel does not do anything *)
       (sp: state_params) : state.
 
 (* Clight is quantified over external_functions_sem, the external function semantics;
-  we further quantify over meta_label semantics and define it in the concurrent semantics. *)
-Variable run_meta_label: meta_label -> state_params -> state_params -> Prop.
+  we further quantify over pragma_label semantics and define it in the concurrent semantics. *)
+Variable run_pragma_label: pragma_label -> state_params -> state_params -> Prop.
 
 Definition state_of (p: state_params) :=
   let '(f, s, k, e, le, m) := p in
@@ -751,12 +751,12 @@ Inductive step: state -> trace -> state -> Prop :=
   | step_returnstate: forall v optid f e le k m,
       step (Returnstate v (Kcall optid f e le k) m)
         E0 (State f Sskip k e (set_opttemp optid v le) m)
-  | step_to_metastate: forall ml f s k e le m t,
-     step (State f (Smeta ml s) k e le m)
-        t (Metastate ml (f, s, k, e, le, m))
-  | step_from_metastate: forall ml sp sp' t,
-      run_meta_label ml sp sp' ->
-      step (Metastate ml sp)
+  | step_to_pragmastate: forall ml f s k e le m t,
+     step (State f (Spragma ml s) k e le m)
+        t (Pragmastate ml (f, s, k, e, le, m))
+  | step_from_pragmastate: forall ml sp sp' t,
+      run_pragma_label ml sp sp' ->
+      step (Pragmastate ml sp)
          t (state_of sp').
 
 (** ** Whole-program semantics *)
@@ -783,9 +783,9 @@ Inductive final_state: state -> int -> Prop :=
 
 End SEMANTICS.
 
-Record meta_label_mixin : Type := {
-  run_meta_label: meta_label -> state_params -> state_params -> Prop
-  (* properties of meta_label? *)
+Record pragma_label_mixin : Type := {
+  run_pragma_label: pragma_label -> state_params -> state_params -> Prop
+  (* properties of pragma_label? *)
 }.
 
 Section FunctionParameterSemantics.
@@ -799,10 +799,10 @@ Inductive function_entry1 (ge: genv) (f: function) (vargs: list val) (m: mem) (e
       le = create_undef_temps f.(fn_temps) ->
       function_entry1 ge f vargs m e le m'.
 
-Parameter (ml_mixin : meta_label_mixin).
+Parameter (ml_mixin : pragma_label_mixin).
 
 Definition step1 (ge: genv) 
-  := step ge ml_mixin.(run_meta_label) (function_entry1 ge).
+  := step ge ml_mixin.(run_pragma_label) (function_entry1 ge).
 
 (** Second, parameters as temporaries. *)
 
@@ -816,7 +816,7 @@ Inductive function_entry2 (ge: genv) (f: function) (vargs: list val) (m: mem) (e
       function_entry2 ge f vargs m e le m'.
 
 Definition step2 (ge: genv) := 
-  step ge ml_mixin.(run_meta_label) (function_entry2 ge).
+  step ge ml_mixin.(run_pragma_label) (function_entry2 ge).
 
 (** Wrapping up these definitions in two small-step semantics. *)
 (* FIXME *)
@@ -853,6 +853,6 @@ Proof.
   red; simpl; intros. inv H; simpl; try lia.
   eapply external_call_trace_length; eauto.
   eapply external_call_trace_length; eauto.
-  admit. (* run_meta_label creates events of length <= 1*)
+  admit. (* run_pragma_label creates events of length <= 1*)
 Admitted.
 End FunctionParameterSemantics.

@@ -353,7 +353,7 @@ Section EvalStatement.
     Context {e: env}. (* local env *)
     Context {le: temp_env}.
     Context {m: Memory.mem}.
-    Variable run_meta_label: meta_label -> state_params -> state_params -> Prop.
+    Variable run_pragma_label: pragma_label -> state_params -> state_params -> Prop.
     Variable function_entry: function -> list val -> mem -> env -> temp_env -> mem -> Prop.
 
     Notation eval_lvalue_fun := (eval_lvalue_fun ge e le m).
@@ -433,13 +433,13 @@ Section EvalStatement.
     (*TODO: step_builtin, step_external_function, step_to_metastate, step_from_metastate*)
     (* | (State f (Sbuiltin optid ef tyargs al) k e le m) => vargs ← eval_exprlist_fun al tyargs; external_call ef ge vargs m *)
     (* | (Callstate (External ef targs tres cconv) vargs k m) => Some (Returnstate vres k m') *)
-    | (State f (Smeta ml s) k e le m) => Some (Metastate ml (f, s, k, e, le, m), E0)
+    | (State f (Spragma ml s) k e le m) => Some (Pragmastate ml (f, s, k, e, le, m), E0)
     | _ => None
         (* |(State f (Sbuiltin optid ef tyargs al) k e le m) => (State f Sskip k e (set_opttemp optid vres le) m') *)
     end .
 
-    Lemma step_fun_correct:
-        ∀ s s' t, step_fun s = Some (s', t) -> step ge run_meta_label function_entry s t s'.
+    Lemma step_fun_correct: 
+        ∀ s s' t, step_fun s = Some (s', t) -> step ge run_pragma_label function_entry s t s'.
     Proof.  intro s. induction s; intros;  inv H; try (by constructor);
         try unfold_mbind_in_hyp; repeat destruct_match; inv H1; try constructor.
         -constructor.
@@ -484,5 +484,5 @@ Section EvalStatement.
         -apply Heqo0.
         -right. try reflexivity. admit. 
         -right. try reflexivity. admit. 
-    Admitted. 
+    Admitted.
 End EvalStatement.

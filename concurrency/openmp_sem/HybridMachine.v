@@ -19,7 +19,7 @@ Require Import VST.concurrency.openmp_sem.threadPool.
 
 Require Import VST.concurrency.common.machine_semantics.
 Require Import VST.concurrency.openmp_sem.permissions.
-Require Import VST.concurrency.compiler.mem_equiv.
+Require Import VST.concurrency.openmp_sem.mem_equiv.
 Require Import VST.concurrency.common.bounded_maps.
 Require Import VST.concurrency.common.addressFiniteMap.
 Require Import VST.concurrency.common.scheduler.
@@ -176,20 +176,20 @@ Module DryHybridMachine.
 
     Definition transform_state_parallel (c: Clight_core.state) : option Clight_core.state :=
       match c with
-      | Clight_core.Metastate (OMPParallel _ _ _) (f,s,k,e,le) =>
-        (* need to bring threads in a `Metastate ParallelEnd` state to implement blocking/barrier for the parent *)
-        let s' := Ssequence s (Smeta OMPParallelEnd Sskip) in
+      | Clight_core.Pragmastate (OMPParallel _ _ _) (f,s,k,e,le) =>
+        (* need to bring threads in a `Pragmastate ParallelEnd` state to implement blocking/barrier for the parent *)
+        let s' := Ssequence s (Spragma OMPParallelEnd Sskip) in
         Some (Clight_core.State f s' k e le)
       | _ => None
       end.
 
     Definition transform_state_for (c: Clight_core.state) (my_workload: list chunk) (cln: CanonicalLoopNest) : option Clight_core.state :=
       match c with
-      | Clight_core.Metastate (OMPFor _ _) (f,s,k,e,le) =>
-        (* need to bring threads in a `Metastate ParallelEnd` state to implement blocking/barrier for the parent *)
+      | Clight_core.Pragmastate (OMPFor _ _) (f,s,k,e,le) =>
+        (* need to bring threads in a `Pragmastate ParallelEnd` state to implement blocking/barrier for the parent *)
          let s' := Ssequence (Ssequence (transform_chunks my_workload cln)
-                                        (Smeta OMPForEnd Sskip))
-                             (Smeta OMPBarrier Sskip) in
+                                        (Spragma OMPForEnd Sskip))
+                             (Spragma OMPBarrier Sskip) in
         Some (Clight_core.State f s' k e le)
       | _ => None
       end.
@@ -197,42 +197,42 @@ Module DryHybridMachine.
     Definition update_le (c: state) (le': env) : option state :=
       match c with
       | State f s k le te => Some $ State f s k le' te
-      | Metastate ml (f,s,k,le,te) => Some $ Metastate ml (f,s,k,le',te)
+      | Pragmastate ml (f,s,k,le,te) => Some $ Pragmastate ml (f,s,k,le',te)
       | _ => None
       end.
 
     Definition update_stmt (c: state) (s': statement) : option state :=
       match c with
       | State f _ k le te => Some $ State f s' k le te
-      | Metastate ml (f,s',k,le,te) => Some $ Metastate ml (f,s',k,le,te)
+      | Pragmastate ml (f,s',k,le,te) => Some $ Pragmastate ml (f,s',k,le,te)
       | _ => None
       end.
 
     Definition update_stmt_le (c: state) (s': statement) (le': env) : option state :=
       match c with
       | State f _ k _ te => Some $ State f s' k le' te
-      | Metastate ml (f,s',k,_,te) => Some $ Metastate ml (f,s',k,le',te)
+      | Pragmastate ml (f,s',k,_,te) => Some $ Pragmastate ml (f,s',k,le',te)
       | _ => None
       end.
 
     Definition get_stmt (c: state) : option statement :=
       match c with
       | State _ s _ _ _ => Some s
-      | Metastate _ (_,s,_,_,_) => Some s
+      | Pragmastate _ (_,s,_,_,_) => Some s
       | _ => None
       end.
 
     Definition get_le (c: state) : option env :=
       match c with
       | State _ _ _ le _ => Some le
-      | Metastate _ (_,_,_,le,_) => Some le
+      | Pragmastate _ (_,_,_,le,_) => Some le
       | _ => None
       end.
 
     Definition get_te (c: state) : option temp_env :=
       match c with
       | State _ _ _ _ te => Some te
-      | Metastate _ (_,_,_,_,te) => Some te
+      | Pragmastate _ (_,_,_,_,te) => Some te
       | _ => None
       end.
 
@@ -282,7 +282,7 @@ Module DryHybridMachine.
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (* (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg) *)
             (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m1)
-            (Hat_meta: at_meta semSem c = Some (OMPParallel num_threads pc rcs))
+            (Hat_meta: at_pragma semSem c = Some (OMPParallel num_threads pc rcs))
             (HnewThreadPermSum1: permMapJoinPair_n_times newThreadPerm (num_threads-1) newThreadPermSum)
             (Hangel: permMapJoinPair newThreadPermSum threadPerm' (getThreadR cnt0))
             (* 1. spawn new threads as fork, add them to team. *)
@@ -328,7 +328,7 @@ Module DryHybridMachine.
             cnt_i ← maybeContainsThread tp tid;
             (* every thread is blocked at OMPParallelEnd *)
             c ← blocked_at $ getThreadC cnt_i;
-            match at_meta semSem c with
+            match at_pragma semSem c with
             | Some OMPParallelEnd =>
               (* add reduction contribs *)
               le ← get_le c;
@@ -368,7 +368,7 @@ Module DryHybridMachine.
        pref ( ptree' ttree' ttree'' ttree''': team_tree)
        tp' tnum pc rcs pvm m'
       (Hcode: getThreadC cnt0 = Kblocked c)
-      (Hat_meta: at_meta semSem c = Some $ OMPFor pc rcs)
+      (Hat_meta: at_pragma semSem c = Some $ OMPFor pc rcs)
       (* next statement is a canonical loop nest *)
       (Hstmt: Some stmt = get_stmt c)
       (Hle: Some le = get_le c)
@@ -415,7 +415,7 @@ Module DryHybridMachine.
         cnt_i ← maybeContainsThread tp tid;
         (* every thread is blocked at OMPForEnd *)
         c ← blocked_at $ getThreadC cnt_i;
-        match at_meta semSem c with
+        match at_pragma semSem c with
         | Some OMPForEnd =>
           (* collect their local environments *)
           le ← get_le c;
@@ -451,7 +451,7 @@ Module DryHybridMachine.
           tp ← maybe_tp;
           cnt_i ← maybeContainsThread tp tid;
           c ← blocked_at $ getThreadC cnt_i;
-          match at_meta semSem c with
+          match at_pragma semSem c with
           | Some OMPBarrier =>
             c' ← update_stmt c Sskip;
             Some $ updThreadC cnt_i (Krun c')
