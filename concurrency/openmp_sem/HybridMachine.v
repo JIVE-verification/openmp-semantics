@@ -363,7 +363,7 @@ Module DryHybridMachine.
           pragma_step cnt0 Hcompat tp''' m'' ttree'''
     | step_for :
     (* TODO reduction *)
-      forall c c' c'' ge le le' te team_size stmt cln lb incr 
+      forall c c' c'' ge le le' te stmt cln lb incr 
        (team_workloads : list $ list chunk) my_workload
        pref ( ptree' ttree' ttree'' ttree''': team_tree)
        tp' tnum pc rcs pvm m'
@@ -382,14 +382,8 @@ Module DryHybridMachine.
       let threadPerm := getThreadR cnt0 in
       forall 
       (Hparent_ref: parent_tree_of tid0 ttree = Some pref)
-      (Hnum_threads: team_size = length (ptree.kids_of))
       (* 1. first thread encountering the for-construct decide workload *)
-      (Hparent_tree': ptree' = ptree.update_data_f (λ ot, match ot.(o_team_workloads) with
-                | Some _ => ot
-                (* if not already set, set team_workloads *)
-                | None => ot <| o_team_workloads := Some team_workloads |>
-                end))
-      (Httree': ttree' = pref.2 ptree')
+      (Httree': ttree' = of_tref $ pref <| fst; data; o_team_workloads ::= (λ x, Some $ Option.default team_workloads x) |>)
       (* 2. start privatization and reduction *)
       (Hpriv_start: Some (pvm, le', m') = pvm_priv_start pc m ge le)
       (Hred_start: Some ttree'' = team_pr_start_tid ttree' tid0 pvm ge le m rcs)
@@ -399,7 +393,7 @@ Module DryHybridMachine.
       (Hchunks: Some my_workload = nth_error team_workloads tnum)
       (Hc'': Some c'' = transform_state_for c' my_workload cln)
       (* 4. set work-sharing to true *)
-      (Htree'': Some ttree''' = update_tid tid0 ttree'' (λ t, Some $ t.update_data_f (λ ot, ot <| o_work_sharing := true |>)) )
+      (Htree'': Some ttree''' = update_tid tid0 ttree'' (λ t, Some $ t <| data; o_work_sharing := true |>))
       (* 5. update tp with the new c'' *)
       (Htp': tp' = updThread cnt0 (Krun c'') threadPerm),
       pragma_step cnt0 Hcompat tp' m' ttree''
@@ -437,7 +431,7 @@ Module DryHybridMachine.
           let '(ttree', le', m') := ttree'_le'_m' in
           c' ← update_stmt_le c Sskip le';
           (* 4. set work-sharing to false *)
-          tree'' ← update_tid tid ttree' (λ t, Some $ t.update_data_f (λ ot, ot <| o_work_sharing := false |>));
+          tree'' ← update_tid tid ttree' (λ t, Some $ t <| data; o_work_sharing := false |>);
           (* 5. update tp *)
           let tp' := updThreadC cnt_i (Krun c') in
           Some (tp', m', ttree''))

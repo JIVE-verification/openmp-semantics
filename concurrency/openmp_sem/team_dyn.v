@@ -13,23 +13,19 @@ Section SiblingTree.
   Inductive stree :=
   | SNode : B -> list stree -> stree.
 
-  Definition data_of (st: stree) : B :=
+  Definition data (st: stree) : B :=
     match st with | SNode b _ => b end.
 
-  Definition kids_of (st: stree) : list stree :=
+  Definition kids (st: stree) : list stree :=
     match st with | SNode _ kids => kids end.
+
+  #[export] Instance stree_settable : Settable stree := settable! SNode < data; kids >.
 
   Definition update_data (st: stree) (b: B) : stree :=
     match st with | SNode _ kids => SNode b kids end.
 
-  Definition update_data_f (st: stree) (f: B -> B) : stree :=
-    match st with | SNode b kids => SNode (f b) kids end.
-
   Definition update_kids (st: stree) (kids: list stree) : stree :=
     match st with | SNode b _ => SNode b kids end.
-
-  Definition update_kids_f (st: stree) (f: list stree -> list stree) : stree :=
-    match st with | SNode b kids => SNode b (f kids) end.
 
   (* stree eliminator, with the ability of knowing a node's parent
      f (parent: option B) (current_node_info: B) (previously accumulated results: A) *)
@@ -42,6 +38,8 @@ Section SiblingTree.
   Definition tree_cursor : Type := stree -> stree.
 
   Definition tree_ref : Type := stree * tree_cursor.
+  #[export] Instance settable_tree_ref {A B: Type}: Settable _ := settable! (@pair A B) <fst; snd>.
+  Definition of_tref (tref: tree_ref) : stree := tref.2 tref.1.
 
   (* elements to the left and to the right *)
   Definition list_cursor {A: Type} : Type := @list A * @list A.
@@ -100,7 +98,7 @@ Section SiblingTree.
   Lemma lookup_ref_same (is_target: stree -> bool) (t: stree) :
     forall ref,
     stree_lookup is_target t = Some ref →
-    ref.2 ref.1 = t.
+    of_tref ref = t.
   Admitted.
 
   Lemma lookup_has_prop (is_target: stree -> bool) (t: stree) (ref: tree_ref) :
@@ -116,12 +114,8 @@ Section SiblingTree.
 
 End SiblingTree.
 
-Notation " x '.data_of' " := (data_of x) (at level 2).
-Notation " x '.kids_of' " := (kids_of x) (at level 2).
-Notation " x '.update_data' b " := (update_data x b) (at level 20).
-Notation " x '.update_data_f' f " := (update_data_f x f) (at level 20).
-Notation " x '.update_kids' kids " := (update_kids x kids) (at level 20).
-Notation " x '.update_kids_f' f " := (update_kids_f x f) (at level 20).
+Notation " x '.data' " := (data x) (at level 2).
+Notation " x '.kids' " := (kids x) (at level 2).
 
 Section OpenMPThreads.
 
@@ -215,10 +209,10 @@ Section OpenMPThreads.
         
       (* ot_info of the (immediate) team led by root of tree; does not include subteams *)
       Definition team_info (tree: team_tree) : list ot_info :=
-        data_of <$> kids_of tree.
+        data <$> kids tree.
 
       Definition has_tid (tid: nat) (tree: team_tree) : bool :=
-        isSome $ stree_lookup (λ st, decide $ is_tid tid $ st.data_of) tree.
+        isSome $ stree_lookup (λ st, decide $ is_tid tid $ st.data) tree.
 
       Lemma has_tid_correct tid tree :
         has_tid tid tree = true ↔ has_tid' tid tree.
@@ -254,8 +248,8 @@ Section OpenMPThreads.
       Definition is_parent_tree_of (tid: nat) (tree: team_tree) : Prop :=
         match tree with
         | SNode ot kids =>
-           (Exists (λ kid, is_leaf_tid tid kid=true) tree.kids_of) end.
-      
+           (Exists (λ kid, is_leaf_tid tid kid=true) tree.kids) end.
+
       #[global] Instance is_parent_tree_of_dec tid tree : Decision (is_parent_tree_of tid tree).
       Proof.
         move : tree => [ot ts].
@@ -277,13 +271,13 @@ Section OpenMPThreads.
           team_mates_tids.
 
       Definition spawn_team (tid: nat) (team_mates: list nat) (tree: team_tree) : option team_tree :=
-        update_tid tid tree (λ leaf,  
+        update_tid tid tree (λ leaf,
           mates ← spawn_team' (tid::team_mates);
-          Some $ leaf.update_kids mates).
+          Some $ leaf <| kids := mates |>).
 
       (* t must be a leaf node for that thread. *)
       Definition team_pr_add_pvm (t: team_tree) pvm orig_le: team_tree :=
-        t.update_data_f (λ ot, ot <| o_pr ::= cons pvm |>).
+        t <| data; o_pr ::= cons pvm |>.
 
       (* start a new privatization&reduction scope.
          register pvm, original local env and reduction clauses for a thread.
@@ -296,11 +290,11 @@ Section OpenMPThreads.
            kid is the first to encounter the reduction region and registers the info for parent node. *)
         pref ← parent_tree_of tid tree;
         ref ← lookup_tid tid tree;
-        let red_stack_depth := length pref.1.data_of.(o_red_stack) in
-        let o_pr_depth := length ref.1.data_of.(o_pr) in
+        let red_stack_depth := length pref.1.data.(o_red_stack) in
+        let o_pr_depth := length ref.1.data.(o_pr) in
         if red_stack_depth <? o_pr_depth then
           rvs ← init_rvs rcs ge orig_le m;
-          Some $ pref.2 $ pref.1.update_data_f (λ ot, ot <| o_red_stack ::= cons rvs |>)
+          Some $ of_tref $ pref  <| fst; data; o_red_stack ::= cons rvs |>
         else Some t
       .
 
@@ -309,19 +303,19 @@ Section OpenMPThreads.
       Definition team_mates_tids tid tree: list nat :=
       match parent_tree_of tid tree with
       | None => [tid]
-      | Some pref => map (λ kid, kid.data_of.(t_tid)) pref.1.kids_of
+      | Some pref => map (λ kid, kid.data.(t_tid)) pref.1.kids
       end.
 
       (* End a privatization & reduction scope for a thread.
          t must be a leaf node for that thread.
          pop a stack in o_pr, deallocate privatized copies in le, restore local to orig_le. *)
       Definition team_pr_end (t: team_tree) ce m le: option (team_tree * env * mem) :=
-        match t.data_of.(o_pr) with
+        match t.data.(o_pr) with
         | [] => None
         | pvm::tl =>
           m' ← pvm_free_private pvm ce m le;
           le' ← pvm_restore_le pvm le;
-          let t' := t.update_data_f (λ ot, ot <| o_pr := tl |>) in
+          let t' := t <| data; o_pr := tl |> in
           Some (t', le', m')
         end
         .
@@ -337,8 +331,9 @@ Section OpenMPThreads.
        * Happens when all threads, including primary, are done in this team.
       *)
       Definition fire_team (tid: nat) (tree: team_tree) : option team_tree :=
-        update_tid tid tree (λ leaf, Some $ leaf.update_kids []).
+        update_tid tid tree (λ leaf, Some $ leaf <| kids := [] |>).
 
+      (* returns the first i if f(l[i])=true. *)
       Fixpoint find_index {A:Type} (f: A->bool) (l:list A) : option nat :=
         match l with
         | [] => None
@@ -352,21 +347,21 @@ Section OpenMPThreads.
       (* thread num is the index to tid of parent tree's kids list. *)
       Definition get_thread_num tid tree : option nat :=
         ref ← parent_tree_of tid tree;
-        find_index (λ t:team_tree, decide $ is_leaf_tid tid t) ref.1.kids_of.
+        find_index (is_leaf_tid tid) ref.1.kids.
 
       (* rvs for a leaf tid is stored at its parent's node. *)
       Definition team_pop_rvs tid tree: option (team_tree * red_vars) :=
         ref ← parent_tree_of tid tree;
-        match ref.1.data_of.(o_red_stack) with
+        match ref.1.data.(o_red_stack) with
         | [] => None
-        | rvs::tl => Some (ref.2 ref.1.update_data_f (λ ot, ot <| o_red_stack := tl |>), rvs)
+        | rvs::tl => Some (of_tref $ ref <| fst; data; o_red_stack := tl |>, rvs)
         end.
 
       (* tid is a leader of its current team if it's parent node has the same tid. *)
       Definition is_leader (tid: nat) (tree: team_tree) : bool :=
         match parent_tree_of tid tree with
         | None => true
-        | Some pref => pref.1.data_of.(t_tid) =? tid
+        | Some pref => pref.1.data.(t_tid) =? tid
         end.
 
     End OpenMPTeam.
