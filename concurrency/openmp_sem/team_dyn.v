@@ -114,8 +114,8 @@ Section SiblingTree.
 
 End SiblingTree.
 
-Notation " x '.data' " := (data x) (at level 2).
-Notation " x '.kids' " := (kids x) (at level 2).
+Notation " x '.data' " := (data x) (at level 3).
+Notation " x '.kids' " := (kids x) (at level 3).
 
 Section OpenMPThreads.
 

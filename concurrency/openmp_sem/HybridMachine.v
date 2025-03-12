@@ -31,6 +31,7 @@ From stdpp Require Import base.
 Import -(notations) Maps.
 From RecordUpdate Require Import RecordSet.
 Import RecordSetNotations.
+Require Import Coq.Relations.Relation_Operators.
 
 Lemma at_external_SEM_eq:
    forall ge c m, memory_semantics.at_external (csem (msem (CLC_evsem ge))) c m =
@@ -55,7 +56,7 @@ Module DryHybridMachine.
         
     Context {ge:genv}.
     (** Assume some threadwise semantics *)
-    #[export] Instance Sem : Semantics := ClightSem ge.
+    Instance Sem : Semantics := ClightSem ge.
     
     Context {tpool : @ThreadPool.ThreadPool dryResources Sem}.
     (* define this as clightSem in clightSemanticsForMachines*)
@@ -870,7 +871,6 @@ Module DryHybridMachine.
         end.
     Qed.
 
-
     Definition initial_machine pmap c := mkPool (Krun c) (pmap, empty_map) (* (empty_map, empty_map) *).
 
     Definition init_mach (pmap : option res) (m: mem)
@@ -911,9 +911,13 @@ Module DryHybridMachine.
       ).
 
     
-  End DryHybridMachine.
+    Definition Ostate : Type := (@HybridMachineSig.MachState dryResources Sem tpool * mem).
 
-  
+    Definition Ostep (os os': Ostate) := @HybridMachineSig.MachStep _ _ _ HybridMachineSig.HybridCoarseMachine.DilMem DryHybridMachineSig
+                                          HybridMachineSig.HybridCoarseMachine.scheduler os.1 os.2 os'.1 os'.2.
+    Definition Ostep_refl_trans_closure := @clos_refl_trans_1n Ostate Ostep.
+
+  End DryHybridMachine.
   
   Section HybDryMachineLemmas.
 

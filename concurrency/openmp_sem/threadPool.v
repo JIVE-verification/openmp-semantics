@@ -22,6 +22,7 @@ Import Address.
 
 Set Implicit Arguments.
 Require Import List. Import List.ListNotations.
+Require Import -(notations) stdpp.base.
 
 Inductive ctl {cT:Type} : Type :=
 | Krun : cT -> ctl
@@ -620,13 +621,12 @@ Module OrdinalPool.
     Definition containsThread (tp : t) (i : NatTID.tid) : Prop:=
       i < num_threads tp.
 
-    Definition containsThread_dec:
-      forall i tp, {containsThread tp i} + { ~ containsThread tp i}.
+    #[export] Instance containsThread_dec:
+      forall i tp, Decision (containsThread tp i).
     Proof.
       intros.
       unfold containsThread.
-      destruct (leq (S i) (num_threads tp)) eqn:Hleq;
-        by auto.
+      apply _.
     Defined.
 
     Definition getThreadC {i tp} (cnt: containsThread tp i) : ctl :=

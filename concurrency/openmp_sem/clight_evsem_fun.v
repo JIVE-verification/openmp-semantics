@@ -1,74 +1,85 @@
-(* function version of a part of clight semantics *)
+(* function version of a part of clight_evsem semantics, a version of Clight that carries a trace of memory events *)
 
-From compcert Require Import Clight Cop Clightdefs AST Integers Ctypes Values Memory Events Globalenvs.
+From compcert Require Import Cop Clightdefs AST Integers Ctypes Values Memory Events Globalenvs.
 
-From VST.concurrency.openmp_sem Require Import notations.
+From VST.concurrency.openmp_sem Require Import notations clight_fun event_semantics Clight_evsem.
 
-(* From VST.concurrency.openmp_sem Require Import notations.  *)
 From stdpp Require Import base list.
 
-Section MemOps.
-    #[export] Instance singedness_eq_dec : RelDecision (@eq signedness).
-    Proof. unfold RelDecision. apply signedness_eq. Defined.
+Section MemOpsT.
 
-    #[export] Instance intsize_eq_dec : RelDecision (@eq intsize).
-    Proof. unfold RelDecision. apply intsize_eq. Defined.
-        
-    #[export] Instance type_eq_dec : EqDecision type.
-    Proof. unfold EqDecision. apply type_eq. Defined.
+    Open Scope Z.
+    #[export] Instance Z_divide_dec : RelDecision (Z.divide).
+    Proof. unfold RelDecision. apply Znumtheory.Zdivide_dec. Defined.
 
-    Definition load_bitfield_fun (ty:type) (sz: intsize) (sg: signedness) pos width m addr : option val :=
+    Definition load_bitfieldT_fun (ty:type) (sz: intsize) (sg: signedness) pos width m b ofs : option (val * list memval) :=
         match ty with
         | Tint sz' sg1 attr =>
             if (decide $ ((sz = sz' ∧ 0 <= pos ∧ 0 < width <= bitsize_intsize sz ∧ pos + width <= bitsize_carrier sz)%Z ∧
-                        ( sg1 = (if Coqlib.zlt width (bitsize_intsize sz) then Signed else sg))))
-            then match Memory.Mem.loadv (chunk_for_carrier sz) m addr with
-                | Some (Vint c) => Some (Vint (bitfield_extract sz sg pos width c))
+                          (sg1 = (if Coqlib.zlt width (bitsize_intsize sz) then Signed else sg)) ∧
+                          (align_chunk (chunk_for_carrier sz) | (Ptrofs.unsigned ofs))))
+            then 
+            match Mem.loadbytes m b (Ptrofs.unsigned ofs) (size_chunk (chunk_for_carrier sz)) with
+            | Some bytes =>
+                match decode_val (chunk_for_carrier sz) bytes with
+                | Vint c => Some ((Vint (bitfield_extract sz sg pos width c)), bytes)
                 | _ => None
                 end
+            | None => None end
             else None
         | _ => None
         end.
 
-    Lemma load_bitfield_fun_correct1:
-        ∀ ty sz sg pos width m addr v, load_bitfield_fun ty sz sg pos width m addr = Some v ->
-            load_bitfield ty sz sg pos width m addr v.
+    Lemma load_bitfieldT_fun_correct1:
+        ∀ ty sz sg pos width m b ofs v bytes, load_bitfieldT_fun ty sz sg pos width m b ofs = Some (v, bytes) ->
+            load_bitfieldT ty sz sg pos width m b ofs v bytes.
     Proof.
         intros; unfold load_bitfield_fun in *.
         destruct ty eqn:?; try done.
+        simpl in H.
         destruct (decide _) eqn:?; try done.
-        destruct (Memory.Mem.loadv _ _ _) eqn:?; try done.
-        destruct v0 eqn:?; try done.
-        inversion H.
-        destruct a0 as [[->[?[??]]]?].
+        destruct (Mem.loadbytes _ _ _ _) eqn:?; try done.
+        destruct (decode_val _ _) eqn:?; try done.
+        inv H.
+        destruct a0 as [[->[?[??]]][??]].
         eapply load_bitfield_intro; eauto.
     Qed.
 
-    Definition deref_loc_fun (ty: type) (m: Memory.mem) (b: Values.block) (ofs: ptrofs) (bf: bitfield) : option val :=
+    Definition deref_locT_fun (ty: type) (m: Memory.mem) (b: Values.block) (ofs: ptrofs) (bf: bitfield) : option (val * list mem_event) :=
         match bf with
         | Full =>
             match access_mode ty with
-            | By_value chunk => Memory.Mem.loadv chunk m (Vptr b ofs)
-            | By_reference => Some (Vptr b ofs)
-            | By_copy => Some (Vptr b ofs)
+            (* deref_locT_value *)
+            | By_value chunk => 
+                if decide $ (align_chunk chunk | (Ptrofs.unsigned ofs))%Z then
+                bytes ← Mem.loadbytes m b (Ptrofs.unsigned ofs) (size_chunk chunk);
+                Some (decode_val chunk bytes, Read b (Ptrofs.unsigned ofs) (size_chunk chunk) bytes :: nil)
+                else None
+            (* deref_locT_reference *)
+            | By_reference => Some (Vptr b ofs, [])
+            (* deref_locT_copy *) 
+            | By_copy => Some (Vptr b ofs, [])
             | _ => None
             end
+        (* deref_locT_bitfield *)
         | Bits sz sg pos width =>
-            load_bitfield_fun ty sz sg pos width m (Vptr b ofs)
+            v_bytes ← load_bitfieldT_fun ty sz sg pos width m b ofs;
+            let '(v, bytes) := v_bytes in
+            Some (v, (Read b (Ptrofs.unsigned ofs) (size_chunk (chunk_for_carrier sz)) bytes)::nil)
         end.
 
     Lemma deref_loc_fun_correct1:
-        ∀ ty m b ofs bf v, deref_loc_fun ty m b ofs bf = Some v -> deref_loc ty m b ofs bf v.
+        ∀ ty m b ofs bf v bytes, deref_locT_fun ty m b ofs bf = Some (v, bytes) -> deref_locT ty m b ofs bf v bytes.
     Proof.
         intros; unfold deref_loc_fun in *. destruct bf; try constructor.
         - destruct (access_mode ty) eqn:?.
-        + eapply deref_loc_value; eauto.
-        + inv H. eapply deref_loc_reference; eauto.
-        + inv H. eapply deref_loc_copy; eauto.
-        + done.
-        - by apply load_bitfield_fun_correct1.
+            + unfold deref_locT_fun in H. unfold_mbind_in_hyp. repeat destruct_match in H. inv H. eapply deref_locT_value; eauto.
+            + inv H. repeat destruct_match. inv H1. eapply deref_locT_reference; eauto.
+            + inv H. repeat destruct_match. inv H1. eapply deref_locT_copy; eauto.
+            + inv H. rewrite Heqm0 in H1. done.
+        - simpl in H. unfold_mbind_in_hyp. destruct_match. destruct p. inv H.
+          by apply deref_locT_bitfield, load_bitfieldT_fun_correct1.
     Qed.
-
 
     (* TODO only the assign_loc_value is defined, so struct/union/array not supported yet. *)
     Definition assign_loc_fun (ce: composite_env) (ty: type) m b (ofs: ptrofs) (bf: bitfield) v : option mem :=
@@ -85,8 +96,8 @@ Section MemOps.
         | _ => None
         end.
 
-    Lemma assign_loc_fun_correct1:
-        ∀ ce ty m b ofs bf v m', assign_loc_fun ce ty m b ofs bf v = Some m' -> assign_loc ce ty m b ofs bf v m'.
+    Lemma assign_locT_fun_correct1:
+        ∀ ce ty m b ofs bf v m', assign_locT_fun ce ty m b ofs bf v = Some m' -> assign_locT ce ty m b ofs bf v m'.
     Proof.
         intros; unfold assign_loc_fun in *.
         destruct_match.
@@ -540,6 +551,5 @@ Section EvalStatement.
              destruct k eqn:?; try inv Heqc; try constructor. 
             -inv H. 
             -inv H. destruct k eqn:?; try inv H1. constructor. 
-        -inv H.
-    Qed.
+    -inv H. Qed.
 End EvalStatement.
