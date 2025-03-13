@@ -1,13 +1,12 @@
 (* function version of a part of clight_evsem semantics, a version of Clight that carries a trace of memory events *)
 
-From compcert Require Import Cop Clightdefs AST Integers Ctypes Values Memory Events Globalenvs.
+From compcert Require Import Clight Cop Clightdefs AST Integers Ctypes Values Memory Events Globalenvs.
 
-From VST.concurrency.openmp_sem Require Import notations clight_fun event_semantics Clight_evsem.
+From VST.concurrency.openmp_sem Require Import notations clight_fun event_semantics Clight_evsem Clight_core.
 
 From stdpp Require Import base list.
 
 Section MemOpsT.
-
     Open Scope Z.
     #[export] Instance Z_divide_dec : RelDecision (Z.divide).
     Proof. unfold RelDecision. apply Znumtheory.Zdivide_dec. Defined.
@@ -51,7 +50,7 @@ Section MemOpsT.
             match access_mode ty with
             (* deref_locT_value *)
             | By_value chunk => 
-                if decide $ (align_chunk chunk | (Ptrofs.unsigned ofs))%Z then
+                if decide $ (align_chunk chunk | Ptrofs.unsigned ofs)%Z then
                 bytes ← Mem.loadbytes m b (Ptrofs.unsigned ofs) (size_chunk chunk);
                 Some (decode_val chunk bytes, Read b (Ptrofs.unsigned ofs) (size_chunk chunk) bytes :: nil)
                 else None
@@ -82,162 +81,136 @@ Section MemOpsT.
     Qed.
 
     (* TODO only the assign_loc_value is defined, so struct/union/array not supported yet. *)
-    Definition assign_loc_fun (ce: composite_env) (ty: type) m b (ofs: ptrofs) (bf: bitfield) v : option mem :=
-        match access_mode ty with
-        | By_value chunk => 
-            match bf with
-            | Bits _ _ _ _ => None (* if by value, bf=Full*)
-            | Full =>
-                match Mem.storev chunk m (Vptr b ofs) v with
-                | Some m' => Some m'
-                | None => None
-                end
+    Definition assign_locT_fun (ce: composite_env) (ty: type) m b (ofs: ptrofs) (bf: bitfield) v : option (mem * list mem_event) :=
+        match bf with
+        (* assign_locT_bitfield *)
+        | Bits _ _ _ _ => None (* if by value, bf=Full*)
+        | Full =>
+            match access_mode ty with
+            (* assign_locT_value *)
+            | By_value chunk =>
+                m' ← Mem.storev chunk m (Vptr b ofs) v;
+                Some (m', (Write b (Ptrofs.unsigned ofs) (encode_val chunk v) ::nil))
+            (* assign_locT_copy *)
+            | By_copy => None
+            | _ => None
             end
-        | _ => None
         end.
 
     Lemma assign_locT_fun_correct1:
-        ∀ ce ty m b ofs bf v m', assign_locT_fun ce ty m b ofs bf v = Some m' -> assign_locT ce ty m b ofs bf v m'.
+        ∀ ce ty m b ofs bf v m' T, assign_locT_fun ce ty m b ofs bf v = Some (m', T)-> assign_locT ce ty m b ofs bf v m' T.
     Proof.
         intros; unfold assign_loc_fun in *.
+        unfold assign_locT_fun in H.
+        unfold_mbind_in_hyp.
         destruct_match.
         destruct_match.
         destruct_match.
         inv H.
-        eapply assign_loc_value; done.
+        eapply assign_locT_value; done.
     Qed.
 
-    
-    Definition get_b_ty (ge:genv) le i : option (Values.block * type) :=
-        match le ! i with
-        | Some b_ty => Some b_ty
-        | None => b ← Genv.find_symbol ge i;
-                v_info ← Genv.find_var_info ge b;
-                let ty := v_info.(gvar_info) in
-                Some (b, ty)
+    Fixpoint alloc_variablesT_fun ge le m (l: list (ident * type)) : option (env * mem * list mem_event) :=
+        match l with
+        | nil => Some (le, m, nil)
+        | (i, ty) :: vars =>
+            let '(m1, b1) := Mem.alloc m 0 (@sizeof ge ty) in
+            let le1 := (PTree.set i (b1, ty) le) in
+            le2_m2_T ← alloc_variablesT_fun ge le1 m1 vars;
+            let '(le', m', T) := le2_m2_T in
+            Some (le', m', (Alloc b1 0 (@sizeof ge ty) :: T))
         end.
-
-    (* returns v if i↦v ∧ i∈le. *)
-    Definition deref_le (le: env) (i: ident) m : option val :=
-        b_ty ← le ! i;
-        let b := b_ty.1 in
-        let ty := b_ty.2 in
-        deref_loc_fun ty m b Ptrofs.zero Full.
-
-    Definition deref_ge (ge: genv) (i: ident) m : option val :=
-        b ← Genv.find_symbol ge i;
-        v_info ← Genv.find_var_info ge b;
-        let ty := v_info.(gvar_info) in
-        deref_loc_fun ty m b Ptrofs.zero Full.
-
-    Definition deref ge le i m: option val :=
-        b_ty ← get_b_ty ge le i;
-        let '(b, ty) := b_ty in
-        deref_loc_fun ty m b Ptrofs.zero Full.
-
-    (* write v to (Vptr b Ptrofs.zero) of type ty. *)
-    Definition write_v ce b ty m v : option mem :=
-        assign_loc_fun ce ty m b Ptrofs.zero Full v.
-
-    Definition alloc_variable_fun (ge:genv) le i m : option (env * mem) :=
-        b_ty ← get_b_ty ge le i;
-        let '(_, ty) := b_ty in
-        let (m', b') := Mem.alloc m 0 (sizeof ge ty) in
-        let le' := (PTree.set i (b', ty) le) in
-        Some (le', m').
-End MemOps.
+    
+    Lemma alloc_variablesT_fun_correct1:
+        ∀ ge le m l le' m' T,
+            alloc_variablesT_fun ge.(genv_cenv) le m l = Some (le', m', T) -> 
+            alloc_variablesT ge le m l le' m' T.
+    Proof.
+        intros until l. generalize ge le m. induction l; intros; simpl in H.
+        - inv H. apply alloc_variablesT_nil.
+        - unfold_mbind_in_hyp. repeat destruct_match in H.
+          inv H. econstructor 2; last apply IHl; done.
+    Qed.
+End MemOpsT.
 
 Unset Guard Checking.
-Section EvalExprFun.
+Section EvalExprTFun.
     Context (ge: genv).
     Context (le: env).
     Context (te: temp_env).
     Context (m: Memory.mem).
 
-    (* 
-    probably a bad solution that does not make correctness proof easier
-    From Coq Require Import Arith Lia Program.
-    From Equations Require Import Equations.
-
-    Derive NoConfusion NoConfusionHom for expr.
-    Derive Subterm for expr.
-
-    Equations eval_expr_fun (exp: expr) : option val :=
-    eval_expr_fun (Econst_int i ty) := Some (Vint i);
-    eval_expr_fun a := l ← eval_lvalue_fun a;
-                        let '(loc, ofs, bf) := l in
-                        deref_loc_fun (typeof a) m loc ofs bf
-
-    where eval_lvalue_fun (exp:expr) : option (Values.block * ptrofs * bitfield) :=
-    eval_lvalue_fun (Evar id ty) :=
-        match e ! id with
-        | Some (l, ty') => if decide (ty'=ty) then Some (l, Ptrofs.zero, Full) else None (* eval_Evar_local *)
-        | None => (* eval_Evar_global *)
-                l ← Globalenvs.Genv.find_symbol ge id;
-                Some (l, Ptrofs.zero, Full)
-        end;
-    eval_lvalue_fun _ := None. *)
-
     (* FIXME this fixpoint is not strictly structurally decreasing in the last case of eval_expr_fun;
-       maybe inline eval_lvalue_fun and fix the correctness proof. *)
-    Fixpoint eval_expr_fun (exp: expr) : option val :=
+       maybe inline eval_lvalueT_fun and fix the correctness proof. *)
+    Fixpoint eval_exprT_fun (exp: expr) : option (val * list mem_event) :=
     match exp with
-    | (Econst_int i ty) => Some (Vint i)
-    | (Econst_float f ty) => Some (Vfloat f)
-    | (Econst_single f ty) => Some (Vsingle f)
-    | (Econst_long i ty) => Some (Vlong i)
-    | (Etempvar id ty) => v ← te ! id; Some v
-    | (Eaddrof a ty) => match eval_lvalue_fun a  with
-                    | Some (loc, ofs, Full) => Some (Vptr loc ofs)
+    | Econst_int i ty => Some (Vint i, nil)
+    | Econst_float f ty => Some (Vfloat f, nil)
+    | Econst_single f ty => Some (Vsingle f, nil)
+    | Econst_long i ty => Some (Vlong i, nil)
+    | Etempvar id ty => v ← te ! id; Some (v, nil)
+    | Eaddrof a ty => match eval_lvalueT_fun a  with
+                    | Some (loc, ofs, Full, T) => Some (Vptr loc ofs, T)
                     | _ => None
                     end
-    | (Eunop op a ty) => v1 ← eval_expr_fun a; 
-                        sem_unary_operation op v1 (typeof a) m
-    | (Ebinop op a1 a2 ty) => v1 ← eval_expr_fun a1;
-                            v2 ← eval_expr_fun a2;
-                            sem_binary_operation ge op v1 (typeof a1) v2 (typeof a2) m
-    | (Ecast a ty) => v1 ← eval_expr_fun a;
-                    sem_cast v1 (typeof a) ty m
-    | (Esizeof ty1 ty) => Some (Vptrofs (Ptrofs.repr (sizeof ge ty1)))
-    | (Ealignof ty1 ty) => Some (Vptrofs (Ptrofs.repr (alignof ge ty1)))
+    | Eunop op a ty => v1_T ← eval_exprT_fun a; 
+                         let '(v1, T) := v1_T in
+                         v ← sem_unary_operation op v1 (typeof a) m;
+                         Some (v, T)
+    | Ebinop op a1 a2 ty => v1_T1 ← eval_exprT_fun a1;
+                              let '(v1, T1) := v1_T1 in
+                              v2_T2 ← eval_exprT_fun a2;
+                              let '(v2, T2) := v2_T2 in
+                              v ← sem_binary_operation ge op v1 (typeof a1) v2 (typeof a2) m;
+                              Some (v, T1 ++ T2)
+    | Ecast a ty => v1_T ← eval_exprT_fun a;
+                      let '(v1, T) := v1_T in
+                      v ← sem_cast v1 (typeof a) ty m;
+                      Some (v, T)
+    | Esizeof ty1 ty => Some (Vptrofs (Ptrofs.repr (@sizeof ge ty1)), nil)
+    | Ealignof ty1 ty => Some (Vptrofs (Ptrofs.repr (@alignof ge ty1)), nil)
     (* otherwise, an lvalue; eval_Elvalue *)
-    | a => l ← eval_lvalue_fun a;
-        let '(loc, ofs, bf) := l in
-        deref_loc_fun (typeof a) m loc ofs bf
+    | a => res ← eval_lvalueT_fun a;
+        let '(loc, ofs, bf, T1) := res in
+        v_T2 ← deref_locT_fun (typeof a) m loc ofs bf;
+        let '(v, T2) := v_T2 in
+        Some (v, T1 ++ T2)
     end
 
-    with eval_lvalue_fun (exp:expr) : option (Values.block * ptrofs * bitfield) :=
+    with eval_lvalueT_fun (exp:expr) : option (Values.block * ptrofs * bitfield * list mem_event) :=
     match exp with
-    | (Evar id ty) =>
+    | Evar id ty =>
         match le ! id with
-        | Some (l, ty') => if decide (ty'=ty) then Some (l, Ptrofs.zero, Full) else None (* eval_Evar_local *)
+        | Some (l, ty') => if decide (ty'=ty) then Some (l, Ptrofs.zero, Full, nil) else None (* eval_Evar_local *)
         | None => (* eval_Evar_global *)
                 l ← Globalenvs.Genv.find_symbol ge id;
-                Some (l, Ptrofs.zero, Full)
+                Some (l, Ptrofs.zero, Full, nil)
         end
-    | (Ederef a ty) => 
-        v ← eval_expr_fun a;
+    | Ederef a ty => 
+        v_T ← eval_exprT_fun a;
+        let '(v, T) := v_T in
         match v with
-        | (Vptr l ofs) => Some (l, ofs, Full)
+        | Vptr l ofs => Some (l, ofs, Full, T)
         | _ => None
         end
-    | (Efield a i ty) => 
-        v ← eval_expr_fun a;
+    | Efield a i ty => 
+        v_T ← eval_exprT_fun a;
+        let '(v, T) := v_T in
         match v with
-        | (Vptr l ofs) => 
+        | Vptr l ofs => 
             match typeof a with
             | Tstruct id att => 
                 (* eval_Efield_struct *)
                 co ← ge.(genv_cenv) ! id;
                 match field_offset ge i (co_members co) with
-                | Errors.OK (delta, bf) => Some (l, (Ptrofs.add ofs (Ptrofs.repr delta)), bf)
+                | Errors.OK (delta, bf) => Some (l, (Ptrofs.add ofs (Ptrofs.repr delta)), bf, T)
                 | _ => None
                 end
             | Tunion id att => 
                 (* eval_Efield_union *)
                 co ← ge.(genv_cenv) ! id;
                 match union_field_offset ge i (co_members co) with
-                | Errors.OK (delta, bf) => Some (l, (Ptrofs.add ofs (Ptrofs.repr delta)), bf)
+                | Errors.OK (delta, bf) => Some (l, (Ptrofs.add ofs (Ptrofs.repr delta)), bf, T)
                 | _ => None
                 end
             | _ => None
@@ -247,54 +220,55 @@ Section EvalExprFun.
     | _ => None 
     end 
     .
-End EvalExprFun.
-
+End EvalExprTFun.
 Set Guard Checking.
+
+Ltac deref_loc_fun_correct_tac :=
+    match goal with
+    | [ H: deref_locT_fun _ _ _ _ _ = Some _ |- _ ] => apply deref_loc_fun_correct1 in H
+    end.
+
 Section EvalExprFun.
     Context (ge: genv).
     Context (e: env). (* local env *)
     Context (le: temp_env).
     Context (m: Memory.mem).
 
-    Notation eval_lvalue_fun := (eval_lvalue_fun ge e le m).
-    Notation eval_expr_fun := (eval_expr_fun ge e le m).
+    Notation eval_lvalueT_fun := (eval_lvalueT_fun ge e le m).
+    Notation eval_exprT_fun := (eval_exprT_fun ge e le m).
 
-    Lemma eval_expr_fun_correct1 :
-        ∀  exp, (∀ v, @eval_expr_fun exp = Some v -> eval_expr ge e le m exp v) ∧
-                ∀ bl ofs bt, eval_lvalue_fun exp = Some (bl, ofs, bt) -> eval_lvalue ge e le m exp bl ofs bt.
+    Lemma eval_exprT_fun_correct1 :
+        ∀  exp, (∀ v T, @eval_exprT_fun exp = Some (v, T) -> eval_exprT ge e le m exp v T) ∧
+                ∀ bl ofs bt T, eval_lvalueT_fun exp = Some (bl, ofs, bt, T) -> eval_lvalueT ge e le m exp bl ofs bt T.
     Proof.
     intro exp; induction exp; intros; split; intros; inv H; try (by constructor);
-    try unfold_mbind_in_hyp; repeat destruct_match.
+    try unfold_mbind_in_hyp; repeat destruct_match; inv H1.
     - (* local *)
-    apply deref_loc_fun_correct1 in H1.
-    eapply eval_Elvalue; eauto.
-    eapply eval_Evar_local; eauto.
+    deref_loc_fun_correct_tac.
+    eapply evalT_Elvalue; eauto.
+    eapply evalT_Evar_local; eauto.
+    done.
     - (* global *)
-    apply deref_loc_fun_correct1 in H1.
-    eapply eval_Elvalue; eauto.
-    eapply eval_Evar_global; eauto.
-    - (* eval_Evar_local *)
-    inv H1.
+    deref_loc_fun_correct_tac.
+    eapply evalT_Elvalue; eauto.
+    eapply evalT_Evar_global; eauto.
+    done.
+    - (* evalT_Evar_local *)
     constructor. done.
-    - (* eval_Evar_global *)
-    inv H1.
-    apply eval_Evar_global; done.
-    - inv H1; constructor; done.
+    - (* evalT_Evar_global *)
+    apply evalT_Evar_global; done.
+    - constructor; done.
     - 
     destruct IHexp as [IHexp1 IHexp2].
-    specialize (IHexp1 v0). rewrite Heqv1 in IHexp1.
-    eapply eval_Elvalue.
+    eapply evalT_Elvalue; last done.
     + constructor. eapply IHexp1; done.
-    + apply deref_loc_fun_correct1 in H1. done.
+    + deref_loc_fun_correct_tac. done.
     - 
     destruct IHexp as [IHexp1 IHexp2].
-    specialize (IHexp1 v). rewrite Heqv0 in IHexp1.
-    inv H1.
-    eapply eval_Ederef.
+    eapply evalT_Ederef.
     by eapply IHexp1.
     - destruct IHexp as [IHexp1 IHexp2].
-    specialize (IHexp1 v).
-    inv H1. econstructor. by apply IHexp2.
+      econstructor. by apply IHexp2.
     - destruct IHexp as [IHexp1 IHexp2].
     econstructor; eauto.
     - destruct IHexp1 as [IHexp1 _].
@@ -302,49 +276,46 @@ Section EvalExprFun.
     econstructor; eauto.
     - destruct IHexp as [IHexp1 IHexp2].
     econstructor; eauto.
-    - (* eval_Efield_struct *)
+    - (* evalT_Efield_struct *)
      subst. destruct IHexp as [IHexp1 IHexp2].
     econstructor. 
-    * eapply eval_Efield_struct; eauto.
+    * eapply evalT_Efield_struct; eauto.
     * by apply deref_loc_fun_correct1.
-    - (* eval_Efield_union *)
+    * done.
+    - (* evalT_Efield_union *)
     subst. destruct IHexp as [IHexp1 IHexp2].
     econstructor. 
-    * eapply eval_Efield_union; eauto.
+    * eapply evalT_Efield_union; eauto.
     * by apply deref_loc_fun_correct1.
-    - (* eval_Efield_struct *)
+    * done.
+    - (* evalT_Efield_struct *)
     subst. destruct IHexp as [IHexp1 IHexp2].
-    inv H1.
-    eapply eval_Efield_struct; eauto.
-    - (* eval_Efield_union *)
+    eapply evalT_Efield_struct; eauto.
+    - (* evalT_Efield_union *)
      subst. destruct IHexp as [IHexp1 IHexp2].
-    inv H1.
-    eapply eval_Efield_union; eauto.
+    eapply evalT_Efield_union; eauto.
     Qed.
 
 
-    Fixpoint eval_exprlist_fun (elist:list expr) (t: typelist) : option (list val) := 
+    Fixpoint eval_exprTlist_fun (elist:list expr) (t: typelist) : option (list val * list mem_event) := 
         match elist, t with
-        | nil, Ctypes.Tnil => Some []
+        | nil, Ctypes.Tnil => Some ([], [])
         | a::bl, Ctypes.Tcons ty ty1 =>
-                 v1 ← eval_expr_fun a;
+                 v1_T ← eval_exprT_fun a;
+                 let '(v1, T) := v1_T in
                  v2 ← sem_cast v1 (typeof a) ty m;
-                 vl ← eval_exprlist_fun bl ty1;
-                 Some (v2::vl)
+                 vl_Tl ← eval_exprTlist_fun bl ty1;
+                 let '(vl, Tl) := vl_Tl in
+                 Some (v2::vl, T ++ Tl)
         | _, _ => None
         end
     .
 
-    Lemma eval_exprlist_fun_correct1:
-        ∀ elist t vl, eval_exprlist_fun elist t = Some vl -> eval_exprlist ge e le m elist t vl.
-    Proof. Admitted.
-    
-Definition is_call_cont_bool (k: cont) : bool :=
-  match k with
-  | Kstop => true
-  | Kcall _ _ _ _ _ => true
-  | _ => false
-  end.
+    Lemma evalT_exprlist_fun_correct1:
+        ∀ elist t vl Tl, eval_exprTlist_fun elist t = Some (vl, Tl) -> eval_exprTlist ge e le m elist t vl Tl.
+    Proof.
+    Admitted.
+
 
 End EvalExprFun.
 
@@ -356,26 +327,24 @@ Section EvalStatement.
     Variable run_pragma_label: pragma_label -> state_params -> state_params -> Prop.
     Variable function_entry: function -> list val -> mem -> env -> temp_env -> mem -> Prop.
 
-    #[global]Instance typelist_eq_dec: EqDecision (typelist).
-    Proof. unfold EqDecision. apply typelist_eq. Defined.
-    
-    #[global] Instance conv_eq_dec: EqDecision calling_convention.
-    Proof. unfold EqDecision. apply calling_convention_eq. Defined.
-
-    Definition step_fun (s: state) : option (state * trace) :=
+    Definition cl_evstep_fun (s: CC_core) m : option (CC_core * mem * list mem_event) :=
     match s with 
-    | (State f (Sassign a1 a2) k e le m) =>  
-        loc_ofs_bf ← eval_lvalue_fun ge e le m a1;
-        let '(loc, ofs, bf) := loc_ofs_bf in
-        v2 ← eval_expr_fun ge e le m a2;
+    | State f (Sassign a1 a2) k e le =>  
+        loc_ofs_bf_T1 ← eval_lvalueT_fun ge e le m a1;
+        let '(loc, ofs, bf, T1) := loc_ofs_bf_T1 in
+        v2_T2 ← eval_exprT_fun ge e le m a2;
+        let '(v2, T2) := v2_T2 in
         v ← sem_cast v2 (typeof a2) (typeof a1) m; 
-        m' ← assign_loc_fun ge (typeof a1) m loc ofs bf v;
-        Some (State f Sskip k e le m', E0)
-    | (State f (Sset id a) k e le m) =>
-        v ← eval_expr_fun ge e le m a;
-        Some (State f Sskip k e (PTree.set id v le) m, E0) 
-    | (State f (Scall optid a al) k e le m) =>
-        vf ← eval_expr_fun ge e le m a;
+        m'_T3 ← assign_locT_fun ge (typeof a1) m loc ofs bf v;
+        let '(m', T3) := m'_T3 in
+        Some (State f Sskip k e le, m', T1++T2++T3)
+    | State f (Sset id a) k e le =>
+        v_T ← eval_exprT_fun ge e le m a;
+        let '(v, T) := v_T in
+        Some (State f Sskip k e (PTree.set id v le), m, T) 
+    | State f (Scall optid a al) k e le =>
+        vf_T1 ← eval_exprT_fun ge e le m a;
+        let '(vf, T1) := vf_T1 in
         fd ← Genv.find_funct ge vf;
         match classify_fun (typeof a) with 
         | fun_case_f tyargs tyres cconv =>
@@ -383,68 +352,86 @@ Section EvalStatement.
             | Tfunction tyargs' tyres' cconv' =>
                 if decide ((tyargs = tyargs') ∧ (tyres = tyres') ∧ (cconv = cconv'))
                 then         
-                    vargs ← eval_exprlist_fun ge e le m al tyargs;
-                    Some (Callstate fd vargs (Kcall optid f e le k) m, E0)
+                    vargs_T2 ← eval_exprTlist_fun ge e le m al tyargs;
+                    let '(vargs, T2) := vargs_T2 in
+                    Some (Callstate fd vargs (Kcall optid f e le k), m, T1++T2)
                 else None
             | _ => None
             end
         | _ => None
         end
-    | (State f (Ssequence s1 s2) k e le m) => Some (State f s1 (Kseq s2 k) e le m, E0)
-    | (State f Sskip (Kseq s k) e le m) => Some (State f s k e le m, E0)
-    | (State f Scontinue (Kseq s k) e le m) => Some (State f Scontinue k e le m, E0)
-    | (State f Sbreak (Kseq s k) e le m) => Some (State f Sbreak k e le m, E0)
-    | (State f (Sifthenelse a s1 s2) k e le m) => match eval_expr_fun ge e le m a with 
-        | Some (v1) => match bool_val v1 (typeof a) m with 
-                | Some b => Some (State f (if b then s1 else s2) k e le m, E0)
-                | None => None 
-                end
+    | State f (Ssequence s1 s2) k e le =>
+        Some (State f s1 (Kseq s2 k) e le, m, nil)
+    | State f Sskip (Kseq s k) e le =>
+        Some (State f s k e le, m, nil)
+    | State f Scontinue (Kseq s k) e le =>
+        Some (State f Scontinue k e le, m, nil)
+    | State f Sbreak (Kseq s k) e le =>
+        Some (State f Sbreak k e le, m, nil)
+    | State f (Sifthenelse a s1 s2) k e le =>
+        v1_T ← eval_exprT_fun ge e le m a;
+        let '(v1, T) := v1_T in
+        b ← bool_val v1 (typeof a) m;
+        Some (State f (if b:bool then s1 else s2) k e le, m, T)
+    | State f (Sloop s1 s2) k e le =>
+        Some (State f s1 (Kloop1 s1 s2 k) e le, m, nil)
+    | State f Sbreak (Kloop1 s1 s2 k) e le =>
+        Some (State f Sskip k e le, m, nil)
+    | State f x (Kloop1 s1 s2 k) e le => 
+        match x with 
+        | Sskip => Some (State f s2 (Kloop2 s1 s2 k) e le, m, nil) 
+        | Scontinue => Some (State f s2 (Kloop2 s1 s2 k) e le, m, nil) 
         | _ => None
         end
-    | (State f (Sloop s1 s2) k e le m) => Some (State f s1 (Kloop1 s1 s2 k) e le m, E0)
-    | (State f Sbreak (Kloop1 s1 s2 k) e le m) => Some (State f Sskip k e le m, E0)
-    (*TODO: Check the below one and make sure 'x' is okay; also note how similar the 
-    preceding case and following case are*)
-    | (State f x (Kloop1 s1 s2 k) e le m) => match x with 
-                                                | Sskip => Some (State f s2 (Kloop2 s1 s2 k) e le m, E0) 
-                                                | Scontinue => Some (State f s2 (Kloop2 s1 s2 k) e le m, E0) 
-                                                | _ => None
-                                                end
-    | (State f Sskip (Kloop2 s1 s2 k) e le m) => Some (State f (Sloop s1 s2) k e le m, E0)
-    | (State f Sbreak (Kloop2 s1 s2 k) e le m) => Some (State f Sskip k e le m, E0)
-    | (State f (Sreturn None) k e le m) => m' ←  Mem.free_list m (blocks_of_env ge e); 
-     Some ((Returnstate Vundef (call_cont k) m'), E0)                               
-    | (State f (Sreturn (Some a)) k e le m) => v ← eval_expr_fun ge e le m a;
-                                                v' ← sem_cast v (typeof a) f.(fn_return) m;
-                                                m' ← Mem.free_list m (blocks_of_env ge e); 
-                                                Some ((Returnstate v' (call_cont k) m'), E0)
-    | (State f Sskip k e le m) => m' ← Mem.free_list m (blocks_of_env ge e) ; if is_call_cont_bool k then Some ((Returnstate Vundef k m'), E0) else None
-    | (State f (Sswitch a sl) k e le m) => v ← eval_expr_fun ge e le m a; n ← sem_switch_arg v (typeof a); Some ((State f (seq_of_labeled_statement (select_switch n sl)) (Kswitch k) e le m), E0)
-    | (State f Scontinue (Kswitch k) e le m) => Some (State f Scontinue k e le m, E0)
-    (*TODO: another case where preceding is redundant when swapped with following*)
-    | (State f x (Kswitch k) e le m) => match x with 
-                                        | Sskip => Some (State f Sskip k e le m, E0)
-                                        | Sbreak => Some (State f Sskip k e le m, E0)
-                                        | _ => None
-                                        end
-    | (State f (Slabel lbl s) k e le m) => Some (State f s k e le m, E0)
-    | (State f (Sgoto lbl) k e le m) =>match find_label lbl f.(fn_body) (call_cont k) with
-                                        | Some (s', k') => Some ((State f s' k' e le m), E0)
-                                        | None => None
-                                        end
+    | State f Sskip (Kloop2 s1 s2 k) e le =>
+        Some (State f (Sloop s1 s2) k e le, m, nil)
+    | State f Sbreak (Kloop2 s1 s2 k) e le =>
+        Some (State f Sskip k e le, m, nil)
+    | State f (Sreturn None) k e le =>
+        m' ← Mem.free_list m (blocks_of_env ge e); 
+        Some (Returnstate Vundef (call_cont k), m', Free (Clight.blocks_of_env ge e)::nil)                               
+    | State f (Sreturn (Some a)) k e le => 
+        v_T ← eval_exprT_fun ge e le m a;
+        let '(v, T) := v_T in
+        v' ← sem_cast v (typeof a) f.(fn_return) m;
+        m' ← Mem.free_list m (blocks_of_env ge e); 
+        Some (Returnstate v' (call_cont k), m', T ++ Free (Clight.blocks_of_env ge e)::nil)
+    | State f Sskip k e le =>
+        m' ← Mem.free_list m (blocks_of_env ge e) ;
+        if is_call_cont_bool k 
+        then Some (Returnstate Vundef k, m', Free (Clight.blocks_of_env ge e)::nil)
+        else None
+    | State f (Sswitch a sl) k e le =>
+        v_T ← eval_exprT_fun ge e le m a;
+        let '(v, T) := v_T in
+        n ← sem_switch_arg v (typeof a);
+        Some (State f (seq_of_labeled_statement (select_switch n sl)) (Kswitch k) e le, m, T)
+    | State f Scontinue (Kswitch k) e le =>
+        Some (State f Scontinue k e le, m, nil)
+    | State f x (Kswitch k) e le =>
+        match x with 
+        | Sskip | Sbreak => Some (State f Sskip k e le, m, nil)
+        | _ => None
+        end
+    | State f (Slabel lbl s) k e le =>
+        Some (State f s k e le, m, nil)
+    | State f (Sgoto lbl) k e le =>
+        s'_k' ← find_label lbl f.(fn_body) (call_cont k);
+        let '(s', k') := s'_k' in
+        Some (State f s' k' e le, m, nil)
     (*TODO: step_internal_function*)
-    (* | (Callstate (Internal f) vargs k m) => m1 ← function_entry f vargs m e le; Some ((State f f.(fn_body) k e le m1),E0) *)
-    | (Returnstate v (Kcall optid f e le k) m) => Some (State f Sskip k e (set_opttemp optid v le) m, E0)
+    (* | Callstate (Internal f) vargs k m) => m1 ← function_entry f vargs m e le; Some ((State f f.(fn_body) k e le m1),nil) *)
+    | Returnstate v (Kcall optid f e le k) => Some (State f Sskip k e (set_opttemp optid v le), m, nil)
     (*TODO: step_builtin, step_external_function, step_to_metastate, step_from_metastate*)
-    (* | (State f (Sbuiltin optid ef tyargs al) k e le m) => vargs ← eval_exprlist_fun ge e le m al tyargs; external_call ef ge vargs m *)
-    (* | (Callstate (External ef targs tres cconv) vargs k m) => Some (Returnstate vres k m') *)
-    | (State f (Spragma ml s) k e le m) => Some (Pragmastate ml (f, s, k, e, le, m), E0)
+    (* | State f (Sbuiltin optid ef tyargs al) k e le m) => vargs ← eval_exprlist_fun ge e le m al tyargs; external_call ef ge vargs m *)
+    (* | Callstate (External ef targs tres cconv) vargs k m) => Some (Returnstate vres k m') *)
+    | State f (Spragma ml s) k e le => Some (Pragmastate ml (f, s, k, e, le), m, nil)
     | _ => None
         (* |(State f (Sbuiltin optid ef tyargs al) k e le m) => (State f Sskip k e (set_opttemp optid vres le) m') *)
     end .
 
     Lemma step_fun_correct: 
-        ∀ s s' t, step_fun s = Some (s', t) -> step ge run_pragma_label function_entry s t s'.
+        ∀ s m T s' m', cl_evstep_fun s m = Some (s', m', T) -> cl_evstep ge s m T s' m'.
     Proof.  intro s. destruct s; intros.
         (* State case *)
         - induction s eqn:Hs.
