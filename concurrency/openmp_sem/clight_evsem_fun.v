@@ -447,7 +447,6 @@ Section EVStepFun.
              le ← bind_parameter_temps f.(fn_params) vargs (create_undef_temps f.(fn_temps));
              Some (State f f.(fn_body) k e le, m1, T)
         else None
-    (* | Callstate (Internal f) vargs k m) => m1 ← function_entry f vargs m e le; Some ((State f f.(fn_body) k e le m1),nil) *)
     | Returnstate v (Kcall optid f e le k) => Some (State f Sskip k e (set_opttemp optid v le), m, nil)
     (*TODO: step_builtin, step_external_function, step_to_metastate, step_from_metastate*)
     (* | State f (Sbuiltin optid ef tyargs al) k e le m) => vargs ← eval_exprlist_fun ge e le m al tyargs; external_call ef ge vargs m *)
