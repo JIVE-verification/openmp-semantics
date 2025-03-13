@@ -67,7 +67,7 @@ Section MemOpsT.
             Some (v, (Read b (Ptrofs.unsigned ofs) (size_chunk (chunk_for_carrier sz)) bytes)::nil)
         end.
 
-    Lemma deref_loc_fun_correct1:
+    Lemma deref_locT_fun_correct1:
         ∀ ty m b ofs bf v bytes, deref_locT_fun ty m b ofs bf = Some (v, bytes) -> deref_locT ty m b ofs bf v bytes.
     Proof.
         intros; unfold deref_loc_fun in *. destruct bf; try constructor.
@@ -223,9 +223,12 @@ Section EvalExprTFun.
 End EvalExprTFun.
 Set Guard Checking.
 
-Ltac deref_loc_fun_correct_tac :=
-    match goal with
-    | [ H: deref_locT_fun _ _ _ _ _ = Some _ |- _ ] => apply deref_loc_fun_correct1 in H
+Ltac fun_correct_tac :=
+    lazymatch goal with
+    | [ H: deref_locT_fun _ _ _ _ _ = Some _ |- _ ] => apply deref_locT_fun_correct1 in H
+    | [ H: load_bitfieldT_fun _ _ _ _ _ _ _ _ = Some _ |- _ ] => apply load_bitfieldT_fun_correct1 in H
+    | [ H: assign_locT_fun _ _ _ _ _ _ _ _ = Some _ |- _ ] => apply assign_locT_fun_correct1 in H
+    | [ H: alloc_variablesT_fun _ _ _ _ = Some _ |- _ ] => apply alloc_variablesT_fun_correct1 in H
     end.
 
 Section EvalExprFun.
@@ -244,12 +247,12 @@ Section EvalExprFun.
     intro exp; induction exp; intros; split; intros; inv H; try (by constructor);
     try unfold_mbind_in_hyp; repeat destruct_match; inv H1.
     - (* local *)
-    deref_loc_fun_correct_tac.
+    fun_correct_tac.
     eapply evalT_Elvalue; eauto.
     eapply evalT_Evar_local; eauto.
     done.
     - (* global *)
-    deref_loc_fun_correct_tac.
+    fun_correct_tac.
     eapply evalT_Elvalue; eauto.
     eapply evalT_Evar_global; eauto.
     done.
@@ -262,7 +265,7 @@ Section EvalExprFun.
     destruct IHexp as [IHexp1 IHexp2].
     eapply evalT_Elvalue; last done.
     + constructor. eapply IHexp1; done.
-    + deref_loc_fun_correct_tac. done.
+    + fun_correct_tac. done.
     - 
     destruct IHexp as [IHexp1 IHexp2].
     eapply evalT_Ederef.
@@ -280,13 +283,13 @@ Section EvalExprFun.
      subst. destruct IHexp as [IHexp1 IHexp2].
     econstructor. 
     * eapply evalT_Efield_struct; eauto.
-    * by apply deref_loc_fun_correct1.
+    * by fun_correct_tac.
     * done.
     - (* evalT_Efield_union *)
     subst. destruct IHexp as [IHexp1 IHexp2].
     econstructor. 
     * eapply evalT_Efield_union; eauto.
-    * by apply deref_loc_fun_correct1.
+    * by fun_correct_tac.
     * done.
     - (* evalT_Efield_struct *)
     subst. destruct IHexp as [IHexp1 IHexp2].
@@ -316,16 +319,32 @@ Section EvalExprFun.
     Proof.
     Admitted.
 
-
 End EvalExprFun.
 
-Section EvalStatement.
+Ltac fun_correct_tac ::=
+    lazymatch goal with
+    | [ H: deref_locT_fun _ _ _ _ _ = Some _ |- _ ] => apply deref_locT_fun_correct1 in H
+    | [ H: load_bitfieldT_fun _ _ _ _ _ _ _ _ = Some _ |- _ ] => apply load_bitfieldT_fun_correct1 in H
+    | [ H: assign_locT_fun _ _ _ _ _ _ _ = Some _ |- _ ] => apply assign_locT_fun_correct1 in H
+    | [ H: alloc_variablesT_fun _ _ _ _ = Some _ |- _ ] => apply alloc_variablesT_fun_correct1 in H
+    | [ H: eval_exprT_fun _ _ _ _ _ = Some _ |- _ ] => apply eval_exprT_fun_correct1 in H
+    | [ H: eval_lvalueT_fun _ _ _ _ _ = Some _ |- _ ] => apply eval_exprT_fun_correct1 in H
+    | [ H: eval_exprTlist_fun _ _ _ _ _ _ = Some _ |- _ ] => apply evalT_exprlist_fun_correct1 in H
+    end.
+
+Section EVStepFun.
     Context {ge: genv}.
     Context {e: env}. (* local env *)
     Context {le: temp_env}.
     Context {m: Memory.mem}.
-    Variable run_pragma_label: pragma_label -> state_params -> state_params -> Prop.
-    Variable function_entry: function -> list val -> mem -> env -> temp_env -> mem -> Prop.
+
+    #[export] Instance list_norepet_dec_inst  (A: Type) (l:list A) :
+        RelDecision (@eq A) -> Decision (Coqlib.list_norepet l).
+    Proof. intros. unfold Decision. apply Coqlib.list_norepet_dec. done. Defined. 
+
+    #[export] Instance list_disjoint_dec_inst  (A: Type) (l1 l2:list A) :
+        RelDecision (@eq A) -> Decision (Coqlib.list_disjoint l1 l2).
+    Proof. intros. unfold Decision. apply Coqlib.list_disjoint_dec. done. Defined.
 
     Definition cl_evstep_fun (s: CC_core) m : option (CC_core * mem * list mem_event) :=
     match s with 
@@ -419,7 +438,15 @@ Section EvalStatement.
         s'_k' ← find_label lbl f.(fn_body) (call_cont k);
         let '(s', k') := s'_k' in
         Some (State f s' k' e le, m, nil)
-    (*TODO: step_internal_function*)
+    | Callstate (Internal f) vargs k => 
+        if decide $ (Coqlib.list_norepet (var_names (fn_params f)) ∧ 
+                     Coqlib.list_disjoint (var_names (fn_params f)) (var_names (fn_temps f)) ∧
+                     Coqlib.list_norepet (var_names f.(fn_vars)))
+        then e_m1_T ← alloc_variablesT_fun ge empty_env m (f.(fn_vars));
+             let '(e, m1, T) := e_m1_T in
+             le ← bind_parameter_temps f.(fn_params) vargs (create_undef_temps f.(fn_temps));
+             Some (State f f.(fn_body) k e le, m1, T)
+        else None
     (* | Callstate (Internal f) vargs k m) => m1 ← function_entry f vargs m e le; Some ((State f f.(fn_body) k e le m1),nil) *)
     | Returnstate v (Kcall optid f e le k) => Some (State f Sskip k e (set_opttemp optid v le), m, nil)
     (*TODO: step_builtin, step_external_function, step_to_metastate, step_from_metastate*)
@@ -430,113 +457,53 @@ Section EvalStatement.
         (* |(State f (Sbuiltin optid ef tyargs al) k e le m) => (State f Sskip k e (set_opttemp optid vres le) m') *)
     end .
 
+    Ltac unfold_cl_evstep_fun :=
+        match goal with
+        | [ H: cl_evstep_fun _ _ = Some _ |- _ ] =>
+            unfold cl_evstep_fun in H;
+            try unfold_mbind_in_hyp;
+            repeat destruct_match;
+            inv H
+        end.
+
     Lemma step_fun_correct: 
         ∀ s m T s' m', cl_evstep_fun s m = Some (s', m', T) -> cl_evstep ge s m T s' m'.
     Proof.  intro s. destruct s; intros.
-        (* State case *)
-        - induction s eqn:Hs.
-          (* Sskip *)
-          + destruct k eqn:Hk.
-            * (* Kstop *)
-              simpl in H. unfold_mbind_in_hyp. 
-              destruct (Mem.free_list m0 (blocks_of_env ge e0)) eqn:?.
-              { inv H. eapply step_skip_call; done. }
-              done.
-            * (* Kseq *)
-              simpl in H. inv H.
-              apply step_skip_seq.
-            * (* Kloop1 *)
-              simpl in H. inv H. econstructor. left; done.
-            * (* Kloop2  *)
-               simpl in H. inv H. econstructor.
-            * (* Kswitch *)
-              simpl in H. inv H.
-              unfold_mbind_in_hyp.
-              destruct (Mem.free_list m0 (blocks_of_env ge e0)); done.
-            * (* Kcall *)
-              simpl in H. inv H.
-              unfold_mbind_in_hyp.
-              destruct (Mem.free_list m0 (blocks_of_env ge e0)) eqn:?.
-              { inv H1. econstructor; done. }
-              done.
-          + (* Sassign *)
-            simpl in H. unfold_mbind_in_hyp.
-            repeat destruct_match.
+    (* State case *)
+    - induction s eqn:Hs; try by (unfold_cl_evstep_fun; econstructor; eauto; repeat fun_correct_tac).
+        + (* evstep_call *)
+            unfold_cl_evstep_fun.
+            econstructor; try by (repeat fun_correct_tac).
+            { rewrite Heqt0. repeat destruct a; subst; done. }
+        + (* evstep_ifthenelse *)
+            unfold cl_evstep_fun in H.
+            unfold_mbind_in_hyp; do 3 destruct_match in H.
             inv H.
-            eapply step_assign.
-            { apply eval_expr_fun_correct1. done. }
-            { apply eval_expr_fun_correct1. done. }
-            done.
-            { apply assign_loc_fun_correct1. done. }
-          + (* Sset  *)
-            induction s eqn:Hs1; simpl in H; try inv H; unfold_mbind_in_hyp. 
-            destruct (eval_expr_fun ge e0 le0 m0 e1) eqn:?.
-                {inv H1. eapply step_set. apply eval_expr_fun_correct1. apply Heqo. }
-                {inv H1. }
-          + (* Scall *)
-          induction s eqn:Hs1; simpl in H; try inv H; unfold_mbind_in_hyp. 
-          repeat destruct_match. inv H1. econstructor.
-            { simpl. done.  }
-            { apply eval_expr_fun_correct1. done. }
-            { apply eval_exprlist_fun_correct1. done. }
-            {apply Heqo1. }
-            {rewrite Heqt0. repeat destruct a. rewrite e2, e3, e4. done.   }
-          + (* Sbuiltin *)
-          induction s eqn:Hs1; simpl in H; try inv H. 
-          destruct k; try done; try inv H1. 
-          +
-            induction s eqn:Hs1; simpl in H; try inv H. 
-            apply step_seq.
-          +
-          induction s eqn:Hs1; simpl in H; try inv H. 
-          destruct (eval_expr_fun ge e0 le0 m0 e1) eqn:evalexprdest;inv H1. 
-          destruct (bool_val v (typeof e1) m0) eqn:?; inv H0. 
-          eapply step_ifthenelse.
-            {apply eval_expr_fun_correct1. done. }
-            {apply Heqo. }
-           + induction s eqn:Hs1; simpl in H; try inv H. 
-           eapply step_loop.
-           + induction s eqn:Hs1; simpl in H; try inv H. 
-           destruct k; try done; try inv H1; constructor. right. reflexivity.
-           + induction s eqn:Hs1; simpl in H; try inv H. 
-           destruct k; try done; try inv H1; constructor; right. reflexivity.
-           +(*S return *) 
-           induction s eqn:Hs1; simpl in H; try inv H; destruct o eqn:?.
-                --destruct k eqn:?; repeat unfold_mbind_in_hyp;
-                destruct (eval_expr_fun ge e0 le0 m0 e1) eqn:?; try done;
-                destruct (sem_cast v (typeof e1) (fn_return f) m0) eqn:?; try done;
-                destruct (Mem.free_list m0 (blocks_of_env ge e0)) eqn:?; try inv Heqc; try econstructor;
-                try apply eval_expr_fun_correct1; try done; try apply Heqo2.
-                --destruct k eqn:?; repeat unfold_mbind_in_hyp;
-                destruct (Mem.free_list m0 (blocks_of_env ge e0)) eqn:?; try inv Heqc; try constructor;
-                try apply Heqo1. 
-            +induction s eqn:Hs1; simpl in H; try inv H. 
-            destruct k eqn:?; try unfold_mbind_in_hyp;
-            try destruct (eval_expr_fun ge e0 le0 m0 e1) eqn:?;
-            try destruct (sem_switch_arg v (typeof e1)) eqn:?; try inv Heqc; try econstructor;
-            try apply eval_expr_fun_correct1; try apply Heqo; try apply Heqo0. try apply Heqo1.
-            +induction s eqn:Hs1; simpl in H; try inv H. 
-            destruct k eqn:?; try unfold_mbind_in_hyp; try inv Heqc; try econstructor. 
-            +induction s eqn:Hs1; simpl in H; try inv H. 
-            destruct k eqn:?; try inv Heqc; try destruct (find_label l (fn_body f) (call_cont Kstop)) eqn:?;
-            try destruct p eqn:?.
-                --inv H1. econstructor. apply Heqo. 
-                --inv H1. 
-                --destruct (find_label l (fn_body f) (call_cont (Kseq s c))) eqn:?; try destruct p0;
-                try inv H1. constructor. apply Heqo0. 
-                --destruct (find_label l (fn_body f) (call_cont (Kseq s c))) eqn:?; try destruct p;
-                try inv H1. constructor. apply Heqo0. 
-                --destruct (find_label l (fn_body f) (call_cont (Kloop2 s s0 c))) eqn:?; try destruct p;
-                try inv H1. destruct p0. inv H0. constructor. apply Heqo0. 
-                --destruct (find_label l (fn_body f) (call_cont (Kloop2 s s0 c))) eqn:?; try destruct p; 
-                try inv H1. constructor. apply Heqo0. 
-                --destruct (find_label l (fn_body f) (call_cont (Kcall o f0 e1 t0 c))) eqn:?; try destruct p0;
-                try inv Heqo0. constructor. apply Heqo1. 
-                --destruct (find_label l (fn_body f) (call_cont (Kcall o f0 e1 t0 c))) eqn:?; try destruct p;
-                try inv H1. constructor. apply Heqo1.
-             +induction s eqn:Hs1; simpl in H; try inv H. 
-             destruct k eqn:?; try inv Heqc; try constructor. 
-            -inv H. 
-            -inv H. destruct k eqn:?; try inv H1. constructor. 
-    -inv H. Qed.
-End EvalStatement.
+            eapply evstep_ifthenelse; by fun_correct_tac.
+        +(* Sreturn *) 
+            (* proof goes by destructing return value and current continuation *)
+            unfold_cl_evstep_fun;
+            try match goal with
+            |  |- cl_evstep _ (State _ _ ?k1 _ _) _ _ (Returnstate _ (call_cont ?k2)) _ =>
+            replace (call_cont k2) with (call_cont $ k1) by done
+            end;
+            econstructor; repeat fun_correct_tac; eauto.
+    - unfold_cl_evstep_fun.
+      repeat destruct a.
+      econstructor; (repeat fun_correct_tac; eauto).
+    - unfold_cl_evstep_fun.  constructor. 
+    - inv H.
+    Qed.
+End EVStepFun.
+
+Ltac fun_correct_tac ::=
+    lazymatch goal with
+    | [ H: deref_locT_fun _ _ _ _ _ = Some _ |- _ ] => apply deref_locT_fun_correct1 in H
+    | [ H: load_bitfieldT_fun _ _ _ _ _ _ _ _ = Some _ |- _ ] => apply load_bitfieldT_fun_correct1 in H
+    | [ H: assign_locT_fun _ _ _ _ _ _ _ = Some _ |- _ ] => apply assign_locT_fun_correct1 in H
+    | [ H: alloc_variablesT_fun _ _ _ _ = Some _ |- _ ] => apply alloc_variablesT_fun_correct1 in H
+    | [ H: eval_exprT_fun _ _ _ _ _ = Some _ |- _ ] => apply eval_exprT_fun_correct1 in H
+    | [ H: eval_lvalueT_fun _ _ _ _ _ = Some _ |- _ ] => apply eval_exprT_fun_correct1 in H
+    | [ H: eval_exprTlist_fun _ _ _ _ _ _ = Some _ |- _ ] => apply evalT_exprlist_fun_correct1 in H
+    | [ H: cl_evstep_fun _ _ = Some _ |- _ ] => apply step_fun_correct in H
+    end.
