@@ -178,7 +178,6 @@ Proof.
         dependent destruction dp_term. clear Heqdp_term.
         unfold  Hth0_perms, eq_ind_r, eq_ind, eq_sym in m1_restr.
         dependent destruction Htp.
-        remember (proj1 (conj LtCurMax_m (empty_LT (getMaxPerm m)))) as Hlt.
         pose proof (restrPermMap_eq ((proj1 (conj LtCurMax_m (empty_LT (getMaxPerm m)))))).
         done.
     }
@@ -304,6 +303,11 @@ Proof.
                 (set _count (Mem.nextblock m, Ctypesdefs.tint) empty_env)) (create_undef_temps (fn_temps f_main))))
         (getCurPerm m2, (ThreadPool.getThreadR cnt0).2).
 
+    assert (H_lock_res_empty : forall i, forall cnti: containsThread tp i, (ThreadPool.getThreadR cnti).2 = empty_map).
+    { intros i cnti. subst tp.
+      unfold ThreadPool.getThreadR. done. }
+    assert (H_lockRes_empty: forall laddr, ThreadPool.lockRes tp laddr = None).
+    { intros. subst tp. rewrite /getThreadR /=  /ThreadPool.lockRes /lockRes  /= find_empty //.  }
     eapply (rt1n_trans Ostate Ostep _ (U2, tr2, tp2:ThreadPool.t, ttree, diluteMem m2)).
     { 
         (* build preconditions for evstep *)
@@ -324,7 +328,32 @@ Proof.
         (* TODO simplify (restrPermMap (ssrfun.pair_of_and (Hcompat 0 cnt0)).1) *)
         eapply (step_dry(m:=m) _ Hcompat _ c m1_restr  _ _ ev2).
         {  done. }
-        { econstructor; admit. }
+        { econstructor.
+          - intros.
+            destruct i.
+            + (* i=0 *)
+              destruct j; first done.
+              clear -cntj Htp.
+              subst tp.
+              simpl in cntj. unfold containsThread in cntj.
+              simpl in cntj. done.
+            + (* tid = 0 *)
+              clear -cnti Htp.
+              subst tp.
+              simpl in cnti. unfold containsThread in cnti. simpl in cnti. done.
+          - intros ????? Hres1 Hres2.
+            rewrite H_lockRes_empty // in Hres2.
+          - intros ???? Hres.
+            rewrite H_lockRes_empty // in Hres.
+          - intros. split; intros;
+              rewrite H_lock_res_empty;
+              apply permCoh_empty'.
+          - intros.
+            rewrite H_lockRes_empty // in Hres.
+          - rewrite /ThreadPool.lr_valid /OrdinalThreadPoolInst /OrdinalThreadPool /lr_valid.
+            intros.
+            rewrite H_lockRes_empty //.
+        }
         { rewrite /= /getThreadC. subst tp; done. }
         {
             apply evstep_fun_correct.
