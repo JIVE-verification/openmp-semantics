@@ -20,7 +20,7 @@ Module Info.
   Definition normalized := true.
 End Info.
 
-Definition ___builtin_ais_annot : ident := $"__builtin_ais_annot".
+(* Definition ___builtin_ais_annot : ident := $"__builtin_ais_annot".
 Definition ___builtin_annot : ident := $"__builtin_annot".
 Definition ___builtin_annot_intval : ident := $"__builtin_annot_intval".
 Definition ___builtin_bswap : ident := $"__builtin_bswap".
@@ -75,7 +75,7 @@ Definition ___compcert_i64_utof : ident := $"__compcert_i64_utof".
 Definition ___compcert_va_composite : ident := $"__compcert_va_composite".
 Definition ___compcert_va_float64 : ident := $"__compcert_va_float64".
 Definition ___compcert_va_int32 : ident := $"__compcert_va_int32".
-Definition ___compcert_va_int64 : ident := $"__compcert_va_int64".
+Definition ___compcert_va_int64 : ident := $"__compcert_va_int64". *)
 Definition _count : ident := $"count".
 Definition _i : ident := $"i".
 Definition _main : ident := $"main".
@@ -96,7 +96,8 @@ Definition f_main := {|
   fn_callconv := cc_default;
   fn_params := nil;
   fn_vars := ((_count, tint) :: (_i, tint) :: nil);
-  fn_temps := ((_ptr1, (tptr tint)) :: (_ptr2, (tptr tint)) ::
+  fn_temps := (
+    (* (_ptr1, (tptr tint)) :: (_ptr2, (tptr tint)) :: *)
                (_t'3, tint) :: (_t'2, tint) :: (_t'1, tint) :: nil);
   fn_body :=
 (Ssequence
@@ -139,7 +140,8 @@ Definition composites : list composite_definition :=
 nil.
 
 Definition global_definitions : list (ident * globdef fundef type) :=
-((___compcert_va_int32,
+(
+(* (___compcert_va_int32,
    Gfun(External (EF_runtime "__compcert_va_int32"
                    (mksignature (AST.Tlong :: nil) AST.Tint cc_default))
      (Tcons (tptr tvoid) Tnil) tuint cc_default)) ::
@@ -405,11 +407,13 @@ Definition global_definitions : list (ident * globdef fundef type) :=
                    (mksignature (AST.Tint :: nil) AST.Tvoid
                      {|cc_vararg:=(Some 1); cc_unproto:=false; cc_structret:=false|}))
      (Tcons tint Tnil) tvoid
-     {|cc_vararg:=(Some 1); cc_unproto:=false; cc_structret:=false|})) ::
- (_main, Gfun(Internal f_main)) :: nil).
+     {|cc_vararg:=(Some 1); cc_unproto:=false; cc_structret:=false|})) :: *)
+ (_main, Gfun(Internal f_main)) :: nil)
+ .
 
 Definition public_idents : list ident :=
-(_main :: ___builtin_debug :: ___builtin_write32_reversed ::
+(_main ::
+ (* ___builtin_debug :: ___builtin_write32_reversed ::
  ___builtin_write16_reversed :: ___builtin_read32_reversed ::
  ___builtin_read16_reversed :: ___builtin_fnmsub :: ___builtin_fnmadd ::
  ___builtin_fmsub :: ___builtin_fmadd :: ___builtin_fmin ::
@@ -427,7 +431,7 @@ Definition public_idents : list ident :=
  ___compcert_i64_udiv :: ___compcert_i64_sdiv :: ___compcert_i64_utof ::
  ___compcert_i64_stof :: ___compcert_i64_utod :: ___compcert_i64_stod ::
  ___compcert_i64_dtou :: ___compcert_i64_dtos :: ___compcert_va_composite ::
- ___compcert_va_float64 :: ___compcert_va_int64 :: ___compcert_va_int32 ::
+ ___compcert_va_float64 :: ___compcert_va_int64 :: ___compcert_va_int32 :: *)
  nil).
 
 Definition prog : Clight.program := 

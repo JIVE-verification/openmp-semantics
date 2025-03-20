@@ -20,6 +20,11 @@ Ltac unfold_mbind_in_hyp :=
     | [ H : context[@mbind _ ?instance _ _ _] |- _] => unfold mbind in H; unfold instance in H
     end.
 
+Ltac unfold_mbind :=
+    lazymatch goal with
+    | |- context[@mbind _ ?instance _ _ _] => unfold mbind; unfold instance
+    end.
+
 (* destruct the first pattern matching in hyp *)
 Ltac destruct_match :=
     lazymatch goal with

@@ -465,7 +465,7 @@ Section EVStepFun.
             inv H
         end.
 
-    Lemma step_fun_correct: 
+    Lemma evstep_fun_correct: 
         ∀ s m T s' m', cl_evstep_fun s m = Some (s', m', T) -> cl_evstep ge s m T s' m'.
     Proof.  intro s. destruct s; intros.
     (* State case *)
