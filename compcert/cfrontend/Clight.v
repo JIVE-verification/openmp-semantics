@@ -161,7 +161,8 @@ Inductive statement : Type :=
   | Sswitch : expr -> labeled_statements -> statement  (**r [switch] statement *)
   | Slabel : label -> statement -> statement
   | Sgoto : label -> statement
-  | Spragma : pragma_label -> statement -> statement
+  (* each Spragma in the program is indexed by a uniquely natural number *)
+  | Spragma : nat -> pragma_label -> statement -> statement
 
 with labeled_statements : Type :=            (**r cases of a [switch] *)
   | LSnil: labeled_statements
@@ -566,13 +567,14 @@ Inductive state: Type :=
       (k: cont)
       (m: mem) : state
   | Pragmastate 
+      (n: nat) (* same pragma index as Spragma  *)
       (pl: pragma_label)
-      (* resumes to some State, if the metalabel does not do anything *)
+      (* the curret program state, isomorphic to a State *)
       (sp: state_params) : state.
 
 (* Clight is quantified over external_functions_sem, the external function semantics;
   we further quantify over pragma_label semantics and define it in the concurrent semantics. *)
-Variable run_pragma_label: pragma_label -> state_params -> state_params -> Prop.
+Variable run_pragma_label: nat -> pragma_label -> state_params -> state_params -> Prop.
 
 Definition state_of (p: state_params) :=
   let '(f, s, k, e, le, m) := p in
@@ -751,12 +753,12 @@ Inductive step: state -> trace -> state -> Prop :=
   | step_returnstate: forall v optid f e le k m,
       step (Returnstate v (Kcall optid f e le k) m)
         E0 (State f Sskip k e (set_opttemp optid v le) m)
-  | step_to_pragmastate: forall ml f s k e le m t,
-     step (State f (Spragma ml s) k e le m)
-        t (Pragmastate ml (f, s, k, e, le, m))
-  | step_from_pragmastate: forall ml sp sp' t,
-      run_pragma_label ml sp sp' ->
-      step (Pragmastate ml sp)
+  | step_to_pragmastate: forall ml f s k e le m t n,
+     step (State f (Spragma n ml s) k e le m)
+        t (Pragmastate n ml (f, s, k, e, le, m))
+  | step_from_pragmastate: forall n ml sp sp' t,
+      run_pragma_label n ml sp sp' ->
+      step (Pragmastate n ml sp)
          t (state_of sp').
 
 (** ** Whole-program semantics *)
@@ -784,7 +786,7 @@ Inductive final_state: state -> int -> Prop :=
 End SEMANTICS.
 
 Record pragma_label_mixin : Type := {
-  run_pragma_label: pragma_label -> state_params -> state_params -> Prop
+  run_pragma_label: nat -> pragma_label -> state_params -> state_params -> Prop
   (* properties of pragma_label? *)
 }.
 

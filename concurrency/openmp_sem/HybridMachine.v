@@ -177,20 +177,20 @@ Module DryHybridMachine.
 
     Definition transform_state_parallel (c: Clight_core.state) : option Clight_core.state :=
       match c with
-      | Clight_core.Pragmastate (OMPParallel _ _ _) (f,s,k,e,le) =>
+      | Clight_core.Pragmastate n (OMPParallel _ _ _) (f,s,k,e,le) =>
         (* need to bring threads in a `Pragmastate ParallelEnd` state to implement blocking/barrier for the parent *)
-        let s' := Ssequence s (Spragma OMPParallelEnd Sskip) in
+        let s' := Ssequence s (Spragma n OMPParallelEnd Sskip) in
         Some (Clight_core.State f s' k e le)
       | _ => None
       end.
 
     Definition transform_state_for (c: Clight_core.state) (my_workload: list chunk) (cln: CanonicalLoopNest) : option Clight_core.state :=
       match c with
-      | Clight_core.Pragmastate (OMPFor _ _) (f,s,k,e,le) =>
+      | Clight_core.Pragmastate n (OMPFor _ _) (f,s,k,e,le) =>
         (* need to bring threads in a `Pragmastate ParallelEnd` state to implement blocking/barrier for the parent *)
          let s' := Ssequence (Ssequence (transform_chunks my_workload cln)
-                                        (Spragma OMPForEnd Sskip))
-                             (Spragma OMPBarrier Sskip) in
+                                        (Spragma n OMPForEnd Sskip))
+                             (Spragma n OMPBarrier Sskip) in
         Some (Clight_core.State f s' k e le)
       | _ => None
       end.
@@ -198,42 +198,42 @@ Module DryHybridMachine.
     Definition update_le (c: state) (le': env) : option state :=
       match c with
       | State f s k le te => Some $ State f s k le' te
-      | Pragmastate ml (f,s,k,le,te) => Some $ Pragmastate ml (f,s,k,le',te)
+      | Pragmastate n ml (f,s,k,le,te) => Some $ Pragmastate n ml (f,s,k,le',te)
       | _ => None
       end.
 
     Definition update_stmt (c: state) (s': statement) : option state :=
       match c with
       | State f _ k le te => Some $ State f s' k le te
-      | Pragmastate ml (f,s',k,le,te) => Some $ Pragmastate ml (f,s',k,le,te)
+      | Pragmastate n ml (f,s',k,le,te) => Some $ Pragmastate n ml (f,s',k,le,te)
       | _ => None
       end.
 
     Definition update_stmt_le (c: state) (s': statement) (le': env) : option state :=
       match c with
       | State f _ k _ te => Some $ State f s' k le' te
-      | Pragmastate ml (f,s',k,_,te) => Some $ Pragmastate ml (f,s',k,le',te)
+      | Pragmastate n ml (f,s',k,_,te) => Some $ Pragmastate n ml (f,s',k,le',te)
       | _ => None
       end.
 
     Definition get_stmt (c: state) : option statement :=
       match c with
       | State _ s _ _ _ => Some s
-      | Pragmastate _ (_,s,_,_,_) => Some s
+      | Pragmastate _ _ (_,s,_,_,_) => Some s
       | _ => None
       end.
 
     Definition get_le (c: state) : option env :=
       match c with
       | State _ _ _ le _ => Some le
-      | Pragmastate _ (_,_,_,le,_) => Some le
+      | Pragmastate _ _ (_,_,_,le,_) => Some le
       | _ => None
       end.
 
     Definition get_te (c: state) : option temp_env :=
       match c with
       | State _ _ _ _ te => Some te
-      | Pragmastate _ (_,_,_,_,te) => Some te
+      | Pragmastate _ _ (_,_,_,_,te) => Some te
       | _ => None
       end.
 

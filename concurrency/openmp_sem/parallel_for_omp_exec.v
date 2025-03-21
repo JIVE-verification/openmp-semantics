@@ -69,6 +69,8 @@ Ltac inv' H :=
 #[local] Transparent Mem.alloc.
 #[local] Transparent Mem.drop_perm.
 
+Arguments Mem.storev: simpl never.
+Arguments Mem.alloc: simpl never.
 Ltac destruct_match_goal :=
     lazymatch goal with
     | |- context[if (decide (?x = ?y)) then _ else _] => destruct (decide (x = y)) as [->|]; try done
@@ -135,20 +137,9 @@ Proof.
     assert (cnt0: ThreadPool.containsThread tp 0) by by subst.
     unshelve eset  (_:getThreadR cnt0 = (getCurPerm m, empty_map)) as Hth0_perms.
     {  subst tp.  rewrite /getThreadR //. }
-    (* assert (HThreadR0_eq_CurPerm_m: (ThreadPool.getThreadR cnt0).1 = getCurPerm m).
-    { rewrite /=  /getThreadR. subst tp. done. } *)
-    assert ( permMapLt (getCurPerm m) (getMaxPerm m)) as LtCurMax_m.
-    { intros ??.
-      rewrite /getMaxPerm /getCurPerm.
-      rewrite -Hm1_def Heqm1_def /=.
-      rewrite /PMap.map /PMap.set.
-      rewrite /PMap.init /PTree.empty /=.
-      rewrite /openmp_sem.permissions.permMapLt.
-      rewrite /set /PTree.set /PMap.get /PTree.get /=.
-      destruct_match_goal.
-      * unfold Mem.perm_order''. destruct_match_goal. constructor.  }
 
-    unshelve eset (_: mem_compatible tp m) as Hcompat.
+    assert  (mem_compatible tp m) as Hcompat.
+    (* unshelve eset (_: mem_compatible tp m) as Hcompat. *)
     { simpl. constructor.
         - intros.
           simpl in cnt. 
@@ -158,7 +149,7 @@ Proof.
             pose proof (ProofIrrelevance.proof_irrelevance _ cnt cnt0) as ->.
             rewrite Hth0_perms /=.
             split.
-            * apply LtCurMax_m.
+            * apply cur_lt_max.
             * apply empty_LT.
           + (* tid > 0; does not exist in tp *) subst tp. done.
         - intros.
@@ -168,18 +159,13 @@ Proof.
             (* there is no lock, pmaps is empty *)
             rewrite Htp /= /lockRes /openmp_sem.addressFiniteMap.AMap.find // in H.
     }
+
     (* simplify m1_restr *)
     pose m1_restr := (restrPermMap (ssrfun.pair_of_and (Hcompat 0 cnt0)).1).
     assert (Hm1_restr_eq : m1_restr = m).
     {
-        subst Hcompat; simpl in m1_restr.
-        unfold eq_ind_r, eq_ind, eq_sym   in m1_restr.
-        remember (ProofIrrelevance.proof_irrelevance (containsThread tp 0) cnt0 cnt0) as dp_term.
-        dependent destruction dp_term. clear Heqdp_term.
-        unfold  Hth0_perms, eq_ind_r, eq_ind, eq_sym in m1_restr.
-        dependent destruction Htp.
-        pose proof (restrPermMap_eq ((proj1 (conj LtCurMax_m (empty_LT (getMaxPerm m)))))).
-        done.
+        subst tp.
+        apply (restrPermMap_eq (ssrfun.pair_of_and (Hcompat 0 cnt0)).1).
     }
 
     pose tid:nat:=0.
@@ -358,7 +344,11 @@ Proof.
         {
             apply evstep_fun_correct.
             rewrite Hc Hf /cl_evstep_fun.
-            reflexivity.
+            unfold m2.
+            Opaque Mem.alloc.
+            simpl.
+            repeat destruct_match_goal.
+            simpl.
         }
         done.
     }

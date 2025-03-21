@@ -103,9 +103,9 @@ Definition f_main := {|
 (Ssequence
   (Ssequence
     (Sassign (Evar _count tint) (Econst_int (Int.repr 0) tint))
-    (Spragma (OMPParallel 3 (PrivClause []) [])
+    (Spragma 0 (OMPParallel 3 (PrivClause []) [])
       (Ssequence
-        (Spragma (OMPFor (PrivClause [_i]) [RedClause RedIdPlus [_count]])
+        (Spragma 1 (OMPFor (PrivClause [_i]) [RedClause RedIdPlus [_count]])
             (Ssequence
               (Sassign (Evar _i tint) (Econst_int (Int.repr 0) tint))
               (Sloop

@@ -44,14 +44,14 @@ Axiom inline_external_call_mem_events:
 Section Clight_core.
 
 Definition state_params : Type := (function * statement * cont * env * temp_env).
-Variable run_pragma_label' : pragma_label -> state_params -> mem -> state_params -> mem -> Prop.
+Variable run_pragma_label' : nat -> pragma_label -> state_params -> mem -> state_params -> mem -> Prop.
 
 Inductive state : Type :=
     State : function ->
             statement -> cont -> env -> temp_env -> state
   | Callstate : fundef -> list val -> cont -> state
   | Returnstate : val -> cont -> state
-  | Pragmastate : pragma_label -> state_params -> state.
+  | Pragmastate : nat -> pragma_label -> state_params -> state.
 
 Definition CC_core := state.
 
@@ -66,7 +66,7 @@ Definition CC_core_to_CC_state (c:state) (m:mem) : Clight.state :=
      State f st k e te => Clight.State f st k e te m
   |  Callstate fd args k => Clight.Callstate fd args k m
   | Returnstate v k => Clight.Returnstate v k m
-  | Pragmastate pl sp => Clight.Pragmastate pl (sp, m)
+  | Pragmastate n pl sp => Clight.Pragmastate n pl (sp, m)
  end.
 
 Definition CC_state_to_CC_core (c:Clight.state): state * mem :=
@@ -74,7 +74,7 @@ Definition CC_state_to_CC_core (c:Clight.state): state * mem :=
      Clight.State f st k e te m => (State f st k e te, m)
   |  Clight.Callstate fd args k m => (Callstate fd args k, m)
   | Clight.Returnstate v k m => (Returnstate v k, m)
-  | Clight.Pragmastate pl sp => (Pragmastate pl (fst sp), snd sp)
+  | Clight.Pragmastate n pl sp => (Pragmastate n pl (fst sp), snd sp)
  end.
 
 Lemma  CC_core_CC_state_1: forall c m,
@@ -99,7 +99,7 @@ Lemma  CC_core_CC_state_4: forall s, exists c, exists m, s =  CC_core_to_CC_stat
              exists (State f s k e le). exists m; reflexivity.
              exists (Callstate fd args k). exists m; reflexivity.
              exists (Returnstate res k). exists m; reflexivity.
-             destruct sp as [sp m]. exists (Pragmastate pl sp). exists m; reflexivity.
+             destruct sp as [sp m]. exists (Pragmastate n pl sp). exists m; reflexivity.
   Qed.
 
 Lemma CC_core_to_CC_state_inj: forall c m c' m',
@@ -310,9 +310,9 @@ Inductive step: genv -> state -> mem -> state -> mem -> Prop :=
   | step_returnstate: forall ge v optid f e le k m,
       step ge (Returnstate v (Kcall optid f e le k)) m
            (State f Sskip k e (set_opttemp optid v le)) m
-  | step_to_metastate: forall ge pl f s k e le m,
-     step ge (State f (Spragma pl s) k e le) m
-        (Pragmastate pl (f, s, k, e, le)) m
+  | step_to_metastate: forall ge pl f s k e le m n,
+     step ge (State f (Spragma n pl s) k e le) m
+        (Pragmastate n pl (f, s, k, e, le)) m
   .
 
 Definition cl_step: genv -> CC_core -> mem -> CC_core -> mem -> Prop := step.
@@ -360,7 +360,7 @@ Qed.
 
 Definition cl_at_meta (c: CC_core) : option pragma_label :=
   match c with
-  | Pragmastate pl _ => Some pl
+  | Pragmastate n pl _ => Some pl
   | _ => None
 end.
 

@@ -352,7 +352,7 @@ Section EvalStatement.
     Context {e: env}. (* local env *)
     Context {le: temp_env}.
     Context {m: Memory.mem}.
-    Variable run_pragma_label: pragma_label -> state_params -> state_params -> Prop.
+    Variable run_pragma_label: nat -> pragma_label -> state_params -> state_params -> Prop.
     Variable function_entry: function -> list val -> mem -> env -> temp_env -> mem -> Prop.
 
     #[global]Instance typelist_eq_dec: EqDecision (typelist).
