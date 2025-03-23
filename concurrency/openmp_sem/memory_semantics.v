@@ -28,6 +28,10 @@ Require Import compcert.cfrontend.Clight.
 (** [after_external] give a way to inject the extension call results
    back into the sequential state so execution can continue. *)
 
+(** [at_pragma] gives a way to determine when the sequential
+   execution is blocked on a pragma statement, and returns
+   the pragma index and the label. *)
+
 (** [initial_core] produces the core state corresponding to an entry
    point of a module.  The arguments are the genv, a pointer to the
    function to run, and the arguments for that function. *)
@@ -48,7 +52,7 @@ Record CoreSemantics {C M : Type} : Type :=
   { initial_core : nat -> M -> C -> M -> val -> list val -> Prop
   ; at_external : C -> M -> option (external_function * list val)
   ; after_external : option val -> C -> M -> option C
-  ; at_pragma : C -> option pragma_label
+  ; at_pragma : C -> option (nat * pragma_label)
   ; halted : C -> int -> Prop
   ; corestep : C -> M -> C -> M -> Prop
   ; corestep_not_halted:

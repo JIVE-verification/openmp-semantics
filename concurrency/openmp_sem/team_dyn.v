@@ -117,33 +117,71 @@ End SiblingTree.
 Notation " x '.data' " := (data x) (at level 3).
 Notation " x '.kids' " := (kids x) (at level 3).
 
+(* contexts regarding a team are the parallel_construct_context and the team_executing_context. *)
+Variant parallel_construct_context' :=
+| team_ctx_parallel : red_vars -> (* used for the reduction at the end of the for construct *)
+                  parallel_construct_context'.
+Definition parallel_construct_context : Type := (nat * parallel_construct_context').
+            
+
+(* the context for the current team executing region.
+  Note that the parallel construct is not a team-executing construct.
+  Every team_executing_context carries a nat, it is the corresponding pragma's index.
+  The team would have to check  *)
+Variant team_executing_context' :=
+| team_ctx_for :
+            (* The team workload split. Is A partition of iterations.
+               A thread works on a chunk of iterations. *)
+           (list $ list chunk) -> 
+           red_vars -> (* used for the reduction at the end of the for construct *)
+           team_executing_context'
+| team_ctx_single : team_executing_context'
+| team_ctx_barrier : team_executing_context'
+.
+Definition team_executing_context : Type := (nat * team_executing_context').
+
+(* we assume each pragma in the program have distinct index, and two teamcontexts
+  come from the same pragma if they have the same index. *)
+Definition matching_par_ctx (c1 c2: parallel_construct_context) : bool :=
+  c1.1 =? c2.1.
+
+(* two team executing contexts are the same if they have the same index and
+   their corresponding team_executing_context' are the same. *)
+Definition matching_tm_exec_ctx (c1 c2: team_executing_context) : bool :=
+  c1.1 =? c2.1.
+ 
+
+(* a thread context is the *)
+Variant thread_context :=
+| thread_ctx_parallel : pv_map -> thread_context
+| thread_ctx_for : pv_map -> thread_context
+| thread_ctx_single : pv_map -> thread_context
+| thread_ctx_barrier : thread_context.
+
+Definition pv_of_thread_ctx (td_ctx: thread_context) : pv_map :=
+  match td_ctx with
+  | thread_ctx_parallel pvm => pvm
+  | thread_ctx_for pvm => pvm
+  | thread_ctx_single pvm => pvm
+  | thread_ctx_barrier => pvm_init (* an empty pv map *)
+  end.
+
 Section OpenMPThreads.
 
-    (* OpenMP thread info *)
-    Record ot_info := {
+    (* OpenMP context for a thread in a parallel region *)
+    Record o_ctx := {
       t_tid : nat; (* thread id *)
-      (* o_level : nat; nesting level *)
-      o_work_sharing : bool; (* is in work-sharing region; can only enter once *)
-      (* work loads of the team that is this thread spawns, i.e. the children of this node.
-         now chunk split is decided the first time a thread hits the for pragma; if need to
-         allow more flexible scheduling, when thread i hits the for pragma, maybe only
-         instantiate that thread's workload and quantify over the uninstantiated part
-         [ team_workloads[i]=something ∧ ∃ rest workloads, s.t. the workloads are still
-           consistent ] *)
-      o_team_workloads : option $ list $ list chunk;
-      (* Privatization and reduction data.
-         Each list item is: the original le at the time of privatization
-                            and the set of privatized variables.
-         the orig_le is used for looking up addr of original copies
-         of private vars, and at the end of a privatization scope, the thread's le
-         is restored to orig_le. *)
-      o_pr: list pv_map;
-      (* a stack of reduction information of kids. First thread encountering a reduction adds a stack. *)
-      o_red_stack: list red_vars
+      (* every time we run a cothe th privatized variables and their original values *)
+      o_thread_ctxs : list thread_context;
+      (* o_team_ctxs fields exists iff this node has a team of children.
+         o_team_ctxs.1 is for the parallel region enclosing the team;
+         o_team_ctxs.2 exists iff some threads in the team are working in some team executing region.
+      *)
+      o_team_ctxs : option (parallel_construct_context * option team_executing_context);
     }.
 
-    #[export] Instance settable_ot_info : Settable _ :=
-      settable! Build_ot_info <t_tid; o_work_sharing; o_team_workloads; o_pr; o_red_stack>.
+    #[export] Instance settable_o_ctx : Settable _ :=
+      settable! Build_o_ctx <t_tid; o_thread_ctxs; o_team_ctxs>.
 
     Section OpenMPTeam.
 
@@ -174,25 +212,26 @@ Section OpenMPThreads.
          and the parent thread recovers its previous state as a leaf node.
          The bookkeeping data of a team contains `Some privatized_vars` if the parallel region of the team (i.e. the lifetime
          span of the team) also contains a reduction clause. *)
-      Definition team_tree := @stree (ot_info).
+      Definition team_tree := @stree (o_ctx).
 
-      Implicit Types (pvm : pv_map) (ot: ot_info) (tree: team_tree)
+      Implicit Types (pvm : pv_map) (ot: o_ctx) (tree: team_tree)
         (i: ident) (ge orig_ge: genv) (le orig_le: env)
-        (ce:composite_env) (m: mem) (b:Values.block) (ty:type).
+        (ce:composite_env) (m: mem) (b:Values.block) (ty:type)
+        (td_ctx: thread_context) (tm_exec_ctx: team_executing_context) (par_ctx: parallel_construct_context).
 
       (* the first thread in the program *)
-      Definition ot_init (tid: nat) : ot_info := Build_ot_info tid false None [] [].
+      Definition ot_init (tid: nat) : o_ctx := Build_o_ctx tid [] None.
 
       (* a team starts with just the main thread *)
-      Definition team_init (tid: nat) : team_tree := SNode (ot_init tid) [].
+      Definition node_init (tid: nat) : team_tree := SNode (ot_init tid) [].
 
-      Definition is_tid (tid: nat) (ot: ot_info) : Prop :=
+      Definition is_tid (tid: nat) (ot: o_ctx) : Prop :=
         ot.(t_tid) = tid.
-      #[global] Instance is_tid_dec (tid: nat) (ot: ot_info) : Decision (is_tid tid ot).
+      #[global] Instance is_tid_dec (tid: nat) (ot: o_ctx) : Decision (is_tid tid ot).
       Proof. apply Nat.eq_dec. Qed.
 
       (* the list of all leaf threads *)
-      Fixpoint tree_to_list (tree: team_tree) : (list ot_info) :=
+      Fixpoint tree_to_list (tree: team_tree) : (list o_ctx) :=
         match tree with
         | SNode ot ts =>
           match ts with
@@ -207,8 +246,8 @@ Section OpenMPThreads.
       Definition has_tid' (tid: nat) (tree: team_tree) : Prop :=
         In tid $ leaf_tids tree.
         
-      (* ot_info of the (immediate) team led by root of tree; does not include subteams *)
-      Definition team_info (tree: team_tree) : list ot_info :=
+      (* o_ctx of the (immediate) team led by root of tree; does not include subteams *)
+      Definition team_info (tree: team_tree) : list o_ctx :=
         data <$> kids tree.
 
       Definition has_tid (tid: nat) (tree: team_tree) : bool :=
@@ -260,42 +299,36 @@ Section OpenMPThreads.
       Definition parent_tree_of (tid: nat) (tree: team_tree) : option tree_ref :=
         stree_lookup (λ st, decide $ is_parent_tree_of tid st) tree.
 
-      (* returns a list of team trees that corresponds to the new team that the parallel construct spawns.
-         First item in team_mates_tids should be the parent's tid, since the parent thread becomes the leader of the new team.  *)
-      Definition spawn_team' (team_mates_tids: list nat) : option $ list team_tree :=
-        foldr (λ tid tl,
-                tl ← tl;
-                let mate := SNode (Build_ot_info tid false None [] []) [] in
-                Some $ mate::tl)
-          (Some [])
-          team_mates_tids.
+      (* the parallel pragma spawns a team of threads, each gets initialized thread contexts;
+         sets team_ctxs.1. *)
+      Definition spawn_team (tid: nat) (team_mates: list nat) rvs (spar_index:nat) (tree: team_tree) : option team_tree :=
+        update_tid tid tree (λ leaf, Some $ leaf <| kids := map node_init (tid::team_mates) |>
+                                                 <| data; o_team_ctxs := Some ((spar_index, team_ctx_parallel rvs), None) |>).
+      
+      (* t must be a leaf node for that thread.
+         append a of thread context to t. *)
+      Definition leaf_add_td_ctx (t: team_tree) td_ctx : team_tree :=
+        t <| data; o_thread_ctxs ::= cons td_ctx |>.
 
-      Definition spawn_team (tid: nat) (team_mates: list nat) (tree: team_tree) : option team_tree :=
-        update_tid tid tree (λ leaf,
-          mates ← spawn_team' (tid::team_mates);
-          Some $ leaf <| kids := mates |>).
+      Definition mate_add_td_ctx (tid:nat) (td_ctx: thread_context) (tree: team_tree) : option team_tree :=
+        update_tid tid tree (λ leaf, Some $ leaf_add_td_ctx leaf td_ctx).
 
-      (* t must be a leaf node for that thread. *)
-      Definition team_pr_add_pvm (t: team_tree) pvm orig_le: team_tree :=
-        t <| data; o_pr ::= cons pvm |>.
-
-      (* start a new privatization&reduction scope.
-         register pvm, original local env and reduction clauses for a thread.
-         Assume ge is invariant during the scope.
-         tree is the whole team tree. Start reduction scope for the parent thread;
-        if parent haven't had reduction information registered, add that to parent's o_red_stack. *)
-      Definition team_pr_start_tid (tree: team_tree) (tid: nat) pvm ge orig_le m (rcs: list reduction_clause_type) : option team_tree :=
-        t ← update_tid tid tree (λ leaf, Some $ team_pr_add_pvm leaf pvm orig_le);
-        (* if parent's reduction info stack size is less than the kid's reduction info (by 1), that means the
-           kid is the first to encounter the reduction region and registers the info for parent node. *)
+      (* Maintenance of the team context when tid enters a team executing construct.
+          if it is the first thread in the team that enters this construct <-> data.o_team_ctxs.2 is None,
+          it sets data.o_team_ctxs.2 according to (idx, pragma);
+          otherwise, someone else in the team has already entered a team executing construct, 
+          and it must enter the same construct, so it checks whether (idx, pragma) corresponds to data.o_team_ctxs.2. *)
+      Definition mate_maybe_add_team_exec_ctx (tree: team_tree) tid tm_exec_ctx : option (team_tree * team_executing_context) :=
         pref ← parent_tree_of tid tree;
-        ref ← lookup_tid tid tree;
-        let red_stack_depth := length pref.1.data.(o_red_stack) in
-        let o_pr_depth := length ref.1.data.(o_pr) in
-        if red_stack_depth <? o_pr_depth then
-          rvs ← init_rvs rcs ge orig_le m;
-          Some $ of_tref $ pref  <| fst; data; o_red_stack ::= cons rvs |>
-        else Some t
+        tm_ctx ← pref.1.data.(o_team_ctxs);
+        match tm_ctx.2 with
+        | Some tm_exec_ctx' => 
+          if matching_tm_exec_ctx tm_exec_ctx tm_exec_ctx' 
+          then Some (tree, tm_exec_ctx')
+          else None
+        | None => let tree' := of_tref $ pref <| fst; data; o_team_ctxs := Some (tm_ctx.1, Some tm_exec_ctx) |> in
+          Some (tree', tm_exec_ctx)
+        end
       .
 
       (* find tid's teammates' thread ids, including tid.
@@ -306,32 +339,53 @@ Section OpenMPThreads.
       | Some pref => map (λ kid, kid.data.(t_tid)) pref.1.kids
       end.
 
-      (* End a privatization & reduction scope for a thread.
-         t must be a leaf node for that thread.
-         pop a stack in o_pr, deallocate privatized copies in le, restore local to orig_le. *)
-      Definition team_pr_end (t: team_tree) ce m le: option (team_tree * env * mem) :=
-        match t.data.(o_pr) with
-        | [] => None
-        | pvm::tl =>
-          m' ← pvm_free_private pvm ce m le;
-          le' ← pvm_restore_le pvm le;
-          let t' := t <| data; o_pr := tl |> in
-          Some (t', le', m')
-        end
-        .
-
-      Definition team_pr_end_tid (tree: team_tree) (tid: nat) ce m le : option (team_tree * env * mem) :=
+      Definition mate_pop_thread_context (tree: team_tree) (tid: nat) : option (team_tree * thread_context) :=
         ref ← lookup_tid tid tree;
-        subtree'_le'_m' ← team_pr_end ref.1 ce m le;
-        let '(subtree', le', m') := (subtree'_le'_m': (team_tree * env * mem)) in
-        Some $ (ref.2 subtree', le', m').
+        match ref.1.data.(o_thread_ctxs) with
+        | [] => None
+        | th_ctx::tl =>
+          let t' := of_tref $ ref <| fst; data; o_thread_ctxs := tl |> in
+          Some (t', th_ctx)
+        end.
+
+      (* pop the team executing context for the team that tid is in *)
+      Definition team_pop_team_exec_context (tree: team_tree) (tid: nat) : option (team_tree * team_executing_context) :=
+        pref ← parent_tree_of tid tree;
+        tm_ctxs ← pref.1.data.(o_team_ctxs);
+        tm_exec_ctx ← tm_ctxs.2;
+        Some (of_tref $ pref <| fst; data; o_team_ctxs := Some (tm_ctxs.1, None) |>, tm_exec_ctx).
       
-      (** assume tid is the primary thread of some team, turn that TeamNode to TeamLeaf,
-          set pv to None (since reduction is finished)
-       * Happens when all threads, including primary, are done in this team.
-      *)
-      Definition fire_team (tid: nat) (tree: team_tree) : option team_tree :=
-        update_tid tid tree (λ leaf, Some $ leaf <| kids := [] |>).
+      (*** ending a parallel construct ***)
+      (* pop the parallel context for the team that tid is in *)
+      Definition team_pop_parallel_context (tree: team_tree) (tid: nat) : option (team_tree * parallel_construct_context) :=
+        pref ← parent_tree_of tid tree;
+        tm_ctxs ← pref.1.data.(o_team_ctxs);
+        (* must not have a team_executing context *)
+        match tm_ctxs.2 with
+        | Some _ => None
+        | None => Some (of_tref $ pref <| fst; data; o_team_ctxs := None |>, tm_ctxs.1) end.
+
+      (* all teammates of tid have no thread context left *)
+      Definition thread_context_resolved (tree: team_tree) (tid: nat) : bool :=
+        match parent_tree_of tid tree with
+        | Some pref => forallb (λ kid, decide (kid.data.(o_thread_ctxs) = [])) pref.1.kids
+        | None => false
+        end.
+
+      (* there is no team context for the team of tid *)
+      Definition team_context_resolved (tree: team_tree) (tid: nat) : bool :=
+        match parent_tree_of tid tree with
+        | Some pref => decide (pref.1.data.(o_team_ctxs) = None)
+        | None => false
+        end.
+
+      (* finish a team when there is no team or thread context left to resolve *)
+      Definition team_fire (tid: nat) (tree: team_tree) : option team_tree :=
+        if thread_context_resolved tree tid &&
+           team_context_resolved tree tid
+        then pref ← parent_tree_of tid tree;
+             Some $ of_tref (pref <| fst; kids := [] |>)
+        else None.
 
       (* returns the first i if f(l[i])=true. *)
       Fixpoint find_index {A:Type} (f: A->bool) (l:list A) : option nat :=
@@ -348,14 +402,6 @@ Section OpenMPThreads.
       Definition get_thread_num tid tree : option nat :=
         ref ← parent_tree_of tid tree;
         find_index (is_leaf_tid tid) ref.1.kids.
-
-      (* rvs for a leaf tid is stored at its parent's node. *)
-      Definition team_pop_rvs tid tree: option (team_tree * red_vars) :=
-        ref ← parent_tree_of tid tree;
-        match ref.1.data.(o_red_stack) with
-        | [] => None
-        | rvs::tl => Some (of_tref $ ref <| fst; data; o_red_stack := tl |>, rvs)
-        end.
 
       (* tid is a leader of its current team if it's parent node has the same tid. *)
       Definition is_leader (tid: nat) (tree: team_tree) : bool :=

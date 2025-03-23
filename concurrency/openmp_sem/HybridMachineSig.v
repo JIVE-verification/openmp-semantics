@@ -417,7 +417,7 @@ Module HybridMachineSig.
       option (MachState) := None.
     
     Definition at_pragma_mach (st : MachState)
-      : option (Clight.pragma_label) := None.
+      : option (nat * Clight.pragma_label) := None.
     
     (*not clear what the value of halted should be*)
     (*Nick: IMO, the machine should be halted when the schedule is empty.
@@ -436,7 +436,7 @@ Module HybridMachineSig.
     Definition init_machine (U:schedule) (r : option res) (m: mem)
                (st : MachState) (m': mem) (f : val) (args : list val)
       : Prop :=
-      match st with (U', [::], c, ttree) => U' = U /\ init_mach r m c m' f args /\ ttree = team_init 0 | _ => False end.
+      match st with (U', [::], c, ttree) => U' = U /\ init_mach r m c m' f args /\ ttree = node_init 0 | _ => False end.
 
     Program Definition MachineCoreSemantics (U:schedule) (r : option res):
       CoreSemantics MachState mem.

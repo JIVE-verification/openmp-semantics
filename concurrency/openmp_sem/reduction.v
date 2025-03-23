@@ -140,11 +140,12 @@ From stdpp Require Import base list.
         {
             red_op: reduction_identifier_type; (* reduction operator *)
             b_ty: Values.block * type; (* block and type of the original copy *)
-            orig_val: val; (* original value before reduction *)
         }.
-        #[export] Instance settable_red_var : Settable _ := settable! Build_red_var <red_op; b_ty; orig_val>.
+        #[export] Instance settable_red_var : Settable _ := settable! Build_red_var <red_op; b_ty>.
 
         Definition red_vars : Type := PTree.t red_var.
+
+        Definition rv_empty : red_vars := @PTree.empty red_var.
 
         (* the initial value for reduction operation `red_id_type` and ctype `ty` is `v` *)
         Definition init_val ge le te m red_id_type ty : option val :=   
@@ -157,8 +158,7 @@ From stdpp Require Import base list.
                 foldr (λ i maybe_rvs,
                         rvs ← maybe_rvs;
                         b_ty ← get_b_ty ge le i;
-                        orig_val ← deref ge le i m;
-                        let rv := Build_red_var red_op b_ty orig_val in
+                        let rv := Build_red_var red_op b_ty in
                         Some $ PTree.set i rv rvs)
                         (Some rvs) red_var_names
             end.
@@ -183,7 +183,8 @@ From stdpp Require Import base list.
             PTree.fold (λ maybe_m i rv,
                 m ← maybe_m;
                 let '(b, ty) := rv.(b_ty) in
-                final_v ← combine_one_var i rv.(red_op) rv.(orig_val) ty ce m le_lst;
+                orig_val ← deref_loc_fun ty m b Ptrofs.zero Full;
+                final_v ← combine_one_var i rv.(red_op) orig_val ty ce m le_lst;
                 write_v ce b ty m final_v) rvs (Some m).
 
     End REDUCTION.

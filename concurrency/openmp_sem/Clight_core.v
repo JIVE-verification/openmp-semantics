@@ -358,9 +358,9 @@ unfold cl_after_external in H.
 destruct q; inv H. destruct f; inv H1. reflexivity.
 Qed.
 
-Definition cl_at_meta (c: CC_core) : option pragma_label :=
+Definition cl_at_meta (c: CC_core) : option (nat * pragma_label) :=
   match c with
-  | Pragmastate n pl _ => Some pl
+  | Pragmastate n pl _ => Some (n, pl)
   | _ => None
 end.
 
