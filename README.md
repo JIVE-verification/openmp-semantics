@@ -1,7 +1,7 @@
 ## TODO list
-**Example execution**
-executable semantics (maybe in K)
-investigate compiler correctness either to CPM or sequential program
+- **Example execution**
+- executable semantics (maybe in K)
+- investigate compiler correctness either to CPM or sequential program
 
 
 ![Verified Software Toolchain](chain.jpg)
