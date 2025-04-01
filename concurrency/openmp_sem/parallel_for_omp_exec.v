@@ -5,7 +5,7 @@ From VST.concurrency.openmp_sem Require Import permissions HybridMachineSig Hybr
 Import HybridMachineSig.
 Import ThreadPool. Import OrdinalPool.
 From VST.concurrency.openmp_sem Require Import parallel_for_omp.
-From stdpp Require Import base tactics.
+From stdpp Require Import base tactics option.
 From Coq Require Import Relations.Relation_Operators Numbers.BinNums.
 From mathcomp.ssreflect Require Import ssreflect.
 From Hammer Require Import Tactics.
@@ -24,7 +24,7 @@ Definition init_Ostate (os:@Ostate ge OrdinalPool.OrdinalThreadPool) : Prop :=
     Genv.init_mem prog = Some m ∧
     Genv.find_symbol (Genv.globalenv prog) (prog_main prog) = Some b ∧
     OpenMP_semantics.(init_mach) None m q m (Vptr b Ptrofs.zero) nil ∧
-    os = ((U, [], q, team_init 0), m).
+    os = ((U, [], q, node_init 0), m).
 
 Ltac evar_same_type_as i j :=
         match type of j with | ?Tj => evar (i: Tj) end.
@@ -71,6 +71,7 @@ Ltac inv' H :=
 
 Arguments Mem.storev: simpl never.
 Arguments Mem.alloc: simpl never.
+
 Ltac destruct_match_goal :=
     lazymatch goal with
     | |- context[if (decide (?x = ?y)) then _ else _] => destruct (decide (x = y)) as [->|]; try done
@@ -91,7 +92,7 @@ Proof.
     destruct Hinit as (c&Hc&Hq). simpl in Hc. destruct_match! in Hc. clear e.
     destruct Hc as [Hc _]. destruct_match in Hc. rename Heqo into Hf. rename Hq into Htp.
     inv' Hc.
-    remember (team_init 0) as ttree.
+    remember (node_init 0) as ttree.
 
     destruct os1 as ((((U1 & tr1) & tp1) & ttree1) & m1) eqn: Hos1.
     simpl in HU. inversion Hos as [[HU1 Htr1 Htp1 Httree1 Hm1]].
@@ -176,112 +177,19 @@ Proof.
     pose le2:=(set _i (BinPos.Pos.succ (Mem.nextblock m1), Ctypesdefs.tint)
               (set _count (Mem.nextblock m1, Ctypesdefs.tint) empty_env)).
     pose te2:=(set _t'3 Vundef (set _t'2 Vundef (set _t'1 Vundef (PTree.empty val)))).
-    pose m2:= {|
-        Mem.mem_contents :=
-          PMap.set (BinPos.Pos.succ (Mem.nextblock m)) (ZMap.init Undef) (PMap.set (Mem.nextblock m) (ZMap.init Undef) (Mem.mem_contents m));
-        Mem.mem_access :=
-          PMap.set (BinPos.Pos.succ (Mem.nextblock m))
-            (λ (ofs : Z) (_ : perm_kind),
-               if Coqlib.proj_sumbool (Coqlib.zle Z0 ofs) && Coqlib.proj_sumbool (Coqlib.zlt ofs (Zpos (xO (xO xH)))) then Some Freeable else None)
-            (PMap.set (Mem.nextblock m)
-               (λ (ofs : Z) (_ : perm_kind),
-                  if Coqlib.proj_sumbool (Coqlib.zle Z0 ofs) && Coqlib.proj_sumbool (Coqlib.zlt ofs (Zpos (xO (xO xH)))) then Some Freeable else None)
-               (λ (ofs : Z) (k : perm_kind), match k with
-                                             | Max => (Mem.mem_access m).1 ofs k
-                                             | Cur => None
-                                             end,
-                PTree.map
-                  (λ (b0 : positive) (f0 : Z → perm_kind → option permission) (ofs : Z) (k : perm_kind),
-                     match k with
-                     | Max => f0 ofs Max
-                     | Cur => ((getThreadR cnt0).1) !!!! b0 ofs
-                     end) (Mem.mem_access m).2));
-        Mem.nextblock := BinPos.Pos.succ (BinPos.Pos.succ (Mem.nextblock m));
-        Mem.access_max :=
-          λ (b0 : positive) (ofs : Z),
-            Memory.Mem.alloc_obligation_1
-              {|
-                Mem.mem_contents := PMap.set (Mem.nextblock m) (ZMap.init Undef) (Mem.mem_contents m);
-                Mem.mem_access :=
-                  PMap.set (Mem.nextblock m)
-                    (λ (ofs0 : Z) (_ : perm_kind),
-                       if Coqlib.proj_sumbool (Coqlib.zle Z0 ofs0) && Coqlib.proj_sumbool (Coqlib.zlt ofs0 (Zpos (xO (xO xH))))
-                       then Some Freeable
-                       else None)
-                    (λ (ofs0 : Z) (k : perm_kind), match k with
-                                                   | Max => (Mem.mem_access m).1 ofs0 k
-                                                   | Cur => None
-                                                   end,
-                     PTree.map
-                       (λ (b1 : positive) (f0 : Z → perm_kind → option permission) (ofs0 : Z) (k : perm_kind),
-                          match k with
-                          | Max => f0 ofs0 Max
-                          | Cur => ((getThreadR cnt0).1) !!!! b1 ofs0
-                          end) (Mem.mem_access m).2);
-                Mem.nextblock := BinPos.Pos.succ (Mem.nextblock m);
-                Mem.access_max := λ (b1 : positive) (ofs0 : Z), Memory.Mem.alloc_obligation_1 m1_restr Z0 (Zpos (xO (xO xH))) b1 ofs0;
-                Mem.nextblock_noaccess :=
-                  λ (b1 : positive) (ofs0 : Z) (k : perm_kind) (H : ¬ Coqlib.Plt b1 (BinPos.Pos.succ (Mem.nextblock m))),
-                    Memory.Mem.alloc_obligation_2 m1_restr Z0 (Zpos (xO (xO xH))) b1 ofs0 k H;
-                Mem.contents_default := λ b1 : positive, Memory.Mem.alloc_obligation_3 m1_restr b1
-              |} Z0 (Zpos (xO (xO xH))) b0 ofs;
-        Mem.nextblock_noaccess :=
-          λ (b0 : positive) (ofs : Z) (k : perm_kind) (H : ¬ Coqlib.Plt b0 (BinPos.Pos.succ (BinPos.Pos.succ (Mem.nextblock m)))),
-            Memory.Mem.alloc_obligation_2
-              {|
-                Mem.mem_contents := PMap.set (Mem.nextblock m) (ZMap.init Undef) (Mem.mem_contents m);
-                Mem.mem_access :=
-                  PMap.set (Mem.nextblock m)
-                    (λ (ofs0 : Z) (_ : perm_kind),
-                       if Coqlib.proj_sumbool (Coqlib.zle Z0 ofs0) && Coqlib.proj_sumbool (Coqlib.zlt ofs0 (Zpos (xO (xO xH))))
-                       then Some Freeable
-                       else None)
-                    (λ (ofs0 : Z) (k0 : perm_kind), match k0 with
-                                                    | Max => (Mem.mem_access m).1 ofs0 k0
-                                                    | Cur => None
-                                                    end,
-                     PTree.map
-                       (λ (b1 : positive) (f0 : Z → perm_kind → option permission) (ofs0 : Z) (k0 : perm_kind),
-                          match k0 with
-                          | Max => f0 ofs0 Max
-                          | Cur => ((getThreadR cnt0).1) !!!! b1 ofs0
-                          end) (Mem.mem_access m).2);
-                Mem.nextblock := BinPos.Pos.succ (Mem.nextblock m);
-                Mem.access_max := λ (b1 : positive) (ofs0 : Z), Memory.Mem.alloc_obligation_1 m1_restr Z0 (Zpos (xO (xO xH))) b1 ofs0;
-                Mem.nextblock_noaccess :=
-                  λ (b1 : positive) (ofs0 : Z) (k0 : perm_kind) (H0 : ¬ Coqlib.Plt b1 (BinPos.Pos.succ (Mem.nextblock m))),
-                    Memory.Mem.alloc_obligation_2 m1_restr Z0 (Zpos (xO (xO xH))) b1 ofs0 k0 H0;
-                Mem.contents_default := λ b1 : positive, Memory.Mem.alloc_obligation_3 m1_restr b1
-              |} Z0 (Zpos (xO (xO xH))) b0 ofs k H;
-        Mem.contents_default :=
-          λ b0 : positive,
-            Memory.Mem.alloc_obligation_3
-              {|
-                Mem.mem_contents := PMap.set (Mem.nextblock m) (ZMap.init Undef) (Mem.mem_contents m);
-                Mem.mem_access :=
-                  PMap.set (Mem.nextblock m)
-                    (λ (ofs : Z) (_ : perm_kind),
-                       if Coqlib.proj_sumbool (Coqlib.zle Z0 ofs) && Coqlib.proj_sumbool (Coqlib.zlt ofs (Zpos (xO (xO xH))))
-                       then Some Freeable
-                       else None)
-                    (λ (ofs : Z) (k : perm_kind), match k with
-                                                  | Max => (Mem.mem_access m).1 ofs k
-                                                  | Cur => None
-                                                  end,
-                     PTree.map
-                       (λ (b1 : positive) (f0 : Z → perm_kind → option permission) (ofs : Z) (k : perm_kind),
-                          match k with
-                          | Max => f0 ofs Max
-                          | Cur => ((getThreadR cnt0).1) !!!! b1 ofs
-                          end) (Mem.mem_access m).2);
-                Mem.nextblock := BinPos.Pos.succ (Mem.nextblock m);
-                Mem.access_max := λ (b1 : positive) (ofs : Z), Memory.Mem.alloc_obligation_1 m1_restr Z0 (Zpos (xO (xO xH))) b1 ofs;
-                Mem.nextblock_noaccess :=
-                  λ (b1 : positive) (ofs : Z) (k : perm_kind) (H : ¬ Coqlib.Plt b1 (BinPos.Pos.succ (Mem.nextblock m))),
-                    Memory.Mem.alloc_obligation_2 m1_restr Z0 (Zpos (xO (xO xH))) b1 ofs k H;
-                Mem.contents_default := λ b1 : positive, Memory.Mem.alloc_obligation_3 m1_restr b1
-              |} b0
-      |}.
+    
+    pose σ2:=(clight_evsem_fun.alloc_variablesT_fun ge empty_env m1_restr (fn_vars f_main)
+      ≫=@{option_bind} (λ '(y, T),
+            let
+            '(e, m0) := y in
+            bind_parameter_temps (fn_params f_main) [] (create_undef_temps (fn_temps f_main))
+            ≫=@{option_bind} λ le : temp_env, Some (Clight_core.State f_main (fn_body f_main) Kstop e le, m0, T))).
+
+    pose m2:= match σ2 with
+              | Some (_, m2, _) => m2
+              | None => m (* this should not happen *)
+              end.
+
     pose tp2 : ThreadPool.t := ThreadPool.updThread cnt0
         (Krun
         (Clight_core.State f_main (fn_body f_main) Kstop
@@ -344,11 +252,7 @@ Proof.
         {
             apply evstep_fun_correct.
             rewrite Hc Hf /cl_evstep_fun.
-            unfold m2.
-            Opaque Mem.alloc.
-            simpl.
-            repeat destruct_match_goal.
-            simpl.
+            done.
         }
         done.
     }
