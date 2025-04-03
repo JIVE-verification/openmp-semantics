@@ -137,10 +137,8 @@ Proof.
 
     (* simplify m1_restr *)
     pose m1_restr := (restrPermMap (ssrfun.pair_of_and (Hcompat 0 cnt0)).1).
-    assert (Hm1_restr_eq : m1_restr = m).
-    {
-        subst tp.
-        apply (restrPermMap_eq (ssrfun.pair_of_and (Hcompat 0 cnt0)).1).
+    assert (Hm1_restr : m1_restr = m). {
+     subst tp; apply (restrPermMap_eq (ssrfun.pair_of_and (Hcompat 0 cnt0)).1).
     }
 
     pose tid:nat:=0.
@@ -152,7 +150,7 @@ Proof.
               (set _count (Mem.nextblock m1, Ctypesdefs.tint) empty_env)).
     pose te2:=(set _t'3 Vundef (set _t'2 Vundef (set _t'1 Vundef (PTree.empty val)))). *)
     
-    pose σ2:=(clight_evsem_fun.alloc_variablesT_fun ge empty_env m1_restr (fn_vars f_main)
+    pose σ2:=(clight_evsem_fun.alloc_variablesT_fun ge empty_env m (fn_vars f_main)
       ≫=@{option_bind} (λ '(y, T),
             let
             '(e, m0) := y in
@@ -194,6 +192,7 @@ Proof.
         {
             apply evstep_fun_correct.
             rewrite Hc Hf /cl_evstep_fun.
+            rewrite Hm1_restr.
             done.
         }
         done.
@@ -355,9 +354,15 @@ Proof.
             rewrite /cl_evstep_fun.
             (* TODO simplify the rewrite *)
             simpl. destruct decide; try done.
-            unfold_mbind. rewrite Hm4_restr /m4 /m3 /m2 /σ2 /=.
+            unfold_mbind.
+            rewrite Cop.cast_val_casted; last by constructor.
+            simpl.
+            rewrite Hm4_restr /m4 /m3 /m2 /σ2 -Hm1_def.
+            (* FIXME why is this stuck? *)
+            (* rewrite Heqm1_def /=.  *)
+              
             
-            unfold Coq.sem_cast.
+
             
         }
         done.
