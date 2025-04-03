@@ -1012,3 +1012,41 @@ Module DryHybridMachine.
 End DryHybridMachine.
 
 Export DryHybridMachine.
+
+Definition one_thread_tp {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) OrdinalPool.OrdinalThreadPool) :=
+  tp.(OrdinalPool.num_threads) = OrdinalPool.one_pos.
+Definition one_thread_tp' {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) OrdinalPool.OrdinalThreadPool) :=
+  forall i j (cnti:ThreadPool.containsThread tp i) (cntj:ThreadPool.containsThread tp j),
+    i=j.
+Lemma one_thread_tp'_equiv {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) OrdinalPool.OrdinalThreadPool) :
+  one_thread_tp tp -> one_thread_tp' tp.
+Proof.
+  intros. unfold one_thread_tp'. unfold one_thread_tp in H. intros.
+  destruct tp; simpl in *.
+  rewrite /OrdinalPool.containsThread /= H /= in cntj, cnti; destruct i,j; done.
+Qed.
+
+Definition no_lock_res {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) OrdinalPool.OrdinalThreadPool) :=
+  forall (addr:Address.address),
+  ThreadPool.lockRes tp addr = None.
+Definition lock_perm_empty {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) OrdinalPool.OrdinalThreadPool) :=
+  forall i (cnti:ThreadPool.containsThread tp i),
+    (ThreadPool.getThreadR cnti).2 =empty_map.
+
+Lemma one_thread_tp_inv : forall {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) OrdinalPool.OrdinalThreadPool), 
+  one_thread_tp tp ->
+  no_lock_res tp ->
+  lock_perm_empty tp ->
+  DryHybridMachine.invariant tp.
+Proof.
+  intros.
+  apply one_thread_tp'_equiv in H.
+  constructor; intros.
+  - specialize (H _ _ cnti cntj). done.
+  - specialize (H0 laddr1). rewrite H0 in Hres1; done.
+  - specialize (H0 laddr). rewrite H0 in Hres; done.
+  - specialize (H1 i cnti) as ->. split; intros; apply permCoh_empty'.
+  - specialize (H0 laddr). rewrite H0 in Hres; done.
+  - rewrite /ThreadPool.lr_valid /=  /OrdinalPool.lr_valid. 
+    intros. unfold no_lock_res in H0. simpl in H0. rewrite H0 //.
+Qed.

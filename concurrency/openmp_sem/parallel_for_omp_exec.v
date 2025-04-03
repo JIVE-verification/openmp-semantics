@@ -30,18 +30,6 @@ Ltac evar_same_type_as i j :=
         match type of j with | ?Tj => evar (i: Tj) end.
 Tactic Notation "evar!" ident(i) "type" "of" ident(j) := evar_same_type_as i j.
 
-Lemma exist_modus_ponens {A:Type} (P Q:A->Prop):
-    (∀ x, P x -> Q x) ->
-    (∃ a, P a) ->
-    ∃ a, Q a.
-Proof.
-    intros.
-    destruct H0 as [a Ha].
-    exists a.
-    apply H.
-    apply Ha.
-Qed.
-
 Instance DilMem : DiluteMem := HybridCoarseMachine.DilMem.
 Arguments DilMem: simpl never.
 Arguments diluteMem : simpl never.
@@ -175,13 +163,6 @@ Proof.
               | Some (_, m2, _) => m2
               | None => m (* this should not happen *)
               end.
-
-    pose tp2 : ThreadPool.t := ThreadPool.updThread cnt0
-        (Krun
-        (Clight_core.State f_main (fn_body f_main) Kstop
-            (set _i (BinPos.Pos.succ (Mem.nextblock m), Ctypesdefs.tint)
-                (set _count (Mem.nextblock m, Ctypesdefs.tint) empty_env)) (create_undef_temps (fn_temps f_main))))
-        (getCurPerm m2, (ThreadPool.getThreadR cnt0).2).
   
     assert (H_lock_res_empty : forall i, forall cnti: containsThread tp i, (ThreadPool.getThreadR cnti).2 = empty_map).
     { intros i cnti. subst tp.
@@ -208,32 +189,7 @@ Proof.
         (* TODO simplify (restrPermMap (ssrfun.pair_of_and (Hcompat 0 cnt0)).1) *)
         eapply (step_dry(m:=m) _ Hcompat _ c m1_restr  _ _ _).
         {  done. }
-        { econstructor.
-          - intros.
-            destruct i.
-            + (* i=0 *)
-              destruct j; first done.
-              clear -cntj Htp.
-              subst tp.
-              simpl in cntj. unfold containsThread in cntj.
-              simpl in cntj. done.
-            + (* tid = 0 *)
-              clear -cnti Htp.
-              subst tp.
-              simpl in cnti. unfold containsThread in cnti. simpl in cnti. done.
-          - intros ????? Hres1 Hres2.
-            rewrite H_lockRes_empty // in Hres2.
-          - intros ???? Hres.
-            rewrite H_lockRes_empty // in Hres.
-          - intros. split; intros;
-              rewrite H_lock_res_empty;
-              apply permCoh_empty'.
-          - intros.
-            rewrite H_lockRes_empty // in Hres.
-          - rewrite /ThreadPool.lr_valid /OrdinalThreadPoolInst /OrdinalThreadPool /lr_valid.
-            intros.
-            rewrite H_lockRes_empty //.
-        }
+        { eapply one_thread_tp_inv; subst tp; done. }
         { rewrite /= /getThreadC. subst tp; done. }
         {
             apply evstep_fun_correct.
@@ -243,7 +199,9 @@ Proof.
         done.
     }
     simpl.
-    (* TODO remember this as vars *)            
+    match goal with
+    |  |- clos_refl_trans_1n _ _ (_, ?tp, _, _) _ => pose (tp:ThreadPool.t) as tp2 end.
+
 
     (** take 2nd step *)
     assert (cnt2: ThreadPool.containsThread tp2 0) by by subst.
@@ -257,14 +215,12 @@ Proof.
             * apply cur_lt_max.
             * rewrite Hth0_perms. apply empty_LT.
           + (* tid > 0; does not exist in tp *) subst tp. done.
+        - intros.  
+          (* there is no lock, pmaps is empty *)
+          rewrite /tp2 /ThreadPool.updThread /=  /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.
         - intros.
-           
-            (* there is no lock, pmaps is empty *)
-            rewrite /tp2 /ThreadPool.updThread /=  /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.
-            
-        - intros.
-            (* there is no lock, pmaps is empty *)
-            rewrite /tp2 /ThreadPool.updThread /=  /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.
+          (* there is no lock, pmaps is empty *)
+          rewrite /tp2 /ThreadPool.updThread /=  /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.
     }
 
     pose m2_restr := (restrPermMap (ssrfun.pair_of_and (Hcompat2 0 cnt2)).1).
@@ -277,8 +233,6 @@ Proof.
     { intros. subst tp2 tp. rewrite /getThreadR /=  /ThreadPool.lockRes /lockRes  /= find_empty //.  }
       eapply (rt1n_trans Ostate Ostep _ (U3, _, _:ThreadPool.t, ttree, diluteMem _)).
     { 
-        (* build preconditions for evstep *)
-
         (* take a threadStep *)
         rewrite /Ostep /MachStep /=.
         rewrite /U3.
@@ -287,32 +241,64 @@ Proof.
         (* TODO simplify (restrPermMap (ssrfun.pair_of_and (Hcompat 0 cnt0)).1) *)
         eapply (step_dry(m:=m2) cnt2 Hcompat2 _ _ m2_restr _ _ _).
         {  done. }
-        { econstructor.
-          - intros.
-            destruct i.
-            + (* i=0 *)
-              destruct j; first done.
-              clear -cntj Htp.
-              subst tp.
-              simpl in cntj. unfold containsThread in cntj.
-              simpl in cntj. done.
-            + (* tid = 0 *)
-              clear -cnti Htp.
-              subst tp.
-              simpl in cnti. unfold containsThread in cnti. simpl in cnti. done.
-          - intros ????? Hres1 Hres2.
-            rewrite H_lockRes_empty2 // in Hres2.
-          - intros ???? Hres.
-            rewrite H_lockRes_empty2 // in Hres.
-          - intros. split; intros;
-              rewrite H_lock_res_empty2;
-              apply permCoh_empty'.
-          - intros.
-            rewrite H_lockRes_empty2 // in Hres.
-          - rewrite /ThreadPool.lr_valid /OrdinalThreadPoolInst /OrdinalThreadPool /lr_valid.
-            intros.
-            rewrite H_lockRes_empty2 //.
+        { eapply one_thread_tp_inv; subst tp; done. }
+        { rewrite /= /getThreadC. done. }
+        {
+            apply evstep_fun_correct.
+            rewrite /cl_evstep_fun.
+            done.
         }
+        done.
+      }
+    (* simplify m3 *)
+    rewrite /diluteMem /=.
+    match goal with
+    |  |- clos_refl_trans_1n _ _ (_, ?tp, _, _) _ => pose (tp:ThreadPool.t) as tp3 end.
+
+    assert (m2_restr = m2) as ->.
+    {
+        apply (restrPermMap_eq (proj1 (Hcompat2 0 cnt2))).
+    }
+
+    (** take 3rd step *)
+    pose m3:=m2.
+    pose U4:=@yield scheduler U3.
+    assert (cnt3: ThreadPool.containsThread tp3 0) by by subst.
+    assert (mem_compatible tp3 m3) as Hcompat3.
+    { rewrite /m3 /=.  constructor.
+        - intros tid' cnt.
+          destruct tid' eqn:?.
+          +  (* tid = 0 *)
+            simpl. 
+            split.
+            * apply cur_lt_max.
+            * rewrite Hth0_perms. apply empty_LT.
+          + (* tid > 0; does not exist in tp *) subst tp. done.
+        - intros.
+          (* there is no lock, pmaps is empty *)
+          rewrite /tp3 /ThreadPool.updThread /=  /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.  
+        - intros.
+          (* there is no lock, pmaps is empty *)
+          rewrite /tp3 /ThreadPool.updThread /=  /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.
+    }
+
+    pose m3_restr := (restrPermMap (ssrfun.pair_of_and (Hcompat3 0 cnt3)).1).
+    assert (H_lock_res_empty3 : forall i, forall cnti: containsThread tp3 i, (ThreadPool.getThreadR cnti).2 = empty_map).
+    { intros i cnti. subst tp2 tp.
+      rewrite /=. destruct i; done. }
+    assert (H_lockRes_empty3: forall laddr, ThreadPool.lockRes tp3 laddr = None).
+    { intros. subst tp3 tp2 tp. rewrite /getThreadR /=  /ThreadPool.lockRes /lockRes  /= find_empty //.  }
+      eapply (rt1n_trans Ostate Ostep _ (U3, _, _:ThreadPool.t, ttree, diluteMem _)).
+    { 
+        (* take a threadStep *)
+        rewrite /Ostep /MachStep /=.
+        rewrite /U3.
+        eapply (thread_step 0 U4 tp3 _ m3 _ _ _ ttree _ cnt3 Hcompat3).
+        rewrite /= /DryHybridMachine.threadStep.
+        (* TODO simplify (restrPermMap (ssrfun.pair_of_and (Hcompat 0 cnt0)).1) *)
+        eapply (step_dry(m:=m3) cnt3 Hcompat3 _ _ m3_restr _ _ _).
+        {  done. }
+        { eapply one_thread_tp_inv; subst tp; done. }
         { rewrite /= /getThreadC. done. }
         {
             apply evstep_fun_correct.
@@ -321,7 +307,7 @@ Proof.
         }
         done.
     }
-    
 
+  
 
 Admitted.
