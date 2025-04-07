@@ -136,39 +136,53 @@ Section MemOps.
         Some (le', m').
 End MemOps.
 
-Unset Guard Checking.
 Section EvalExprFun.
     Context (ge: genv).
     Context (le: env).
     Context (te: temp_env).
     Context (m: Memory.mem).
 
-    (* 
-    probably a bad solution that does not make correctness proof easier
-    From Coq Require Import Arith Lia Program.
-    From Equations Require Import Equations.
+    Definition eval_lvalue_fun' (eval_expr_fun: expr -> option val) (exp:expr) : option (Values.block * ptrofs * bitfield) :=
+        match exp with
+        | (Evar id ty) =>
+            match le ! id with
+            | Some (l, ty') => if decide (ty'=ty) then Some (l, Ptrofs.zero, Full) else None (* eval_Evar_local *)
+            | None => (* eval_Evar_global *)
+                    l ← Globalenvs.Genv.find_symbol ge id;
+                    Some (l, Ptrofs.zero, Full)
+            end
+        | (Ederef a ty) => 
+            v ← eval_expr_fun a;
+            match v with
+            | (Vptr l ofs) => Some (l, ofs, Full)
+            | _ => None
+            end
+        | (Efield a i ty) => 
+            v ← eval_expr_fun a;
+            match v with
+            | (Vptr l ofs) => 
+                match typeof a with
+                | Tstruct id att => 
+                    (* eval_Efield_struct *)
+                    co ← ge.(genv_cenv) ! id;
+                    match field_offset ge i (co_members co) with
+                    | Errors.OK (delta, bf) => Some (l, (Ptrofs.add ofs (Ptrofs.repr delta)), bf)
+                    | _ => None
+                    end
+                | Tunion id att => 
+                    (* eval_Efield_union *)
+                    co ← ge.(genv_cenv) ! id;
+                    match union_field_offset ge i (co_members co) with
+                    | Errors.OK (delta, bf) => Some (l, (Ptrofs.add ofs (Ptrofs.repr delta)), bf)
+                    | _ => None
+                    end
+                | _ => None
+                end
+            | _ => None
+            end
+        | _ => None 
+        end .
 
-    Derive NoConfusion NoConfusionHom for expr.
-    Derive Subterm for expr.
-
-    Equations eval_expr_fun (exp: expr) : option val :=
-    eval_expr_fun (Econst_int i ty) := Some (Vint i);
-    eval_expr_fun a := l ← eval_lvalue_fun a;
-                        let '(loc, ofs, bf) := l in
-                        deref_loc_fun (typeof a) m loc ofs bf
-
-    where eval_lvalue_fun (exp:expr) : option (Values.block * ptrofs * bitfield) :=
-    eval_lvalue_fun (Evar id ty) :=
-        match e ! id with
-        | Some (l, ty') => if decide (ty'=ty) then Some (l, Ptrofs.zero, Full) else None (* eval_Evar_local *)
-        | None => (* eval_Evar_global *)
-                l ← Globalenvs.Genv.find_symbol ge id;
-                Some (l, Ptrofs.zero, Full)
-        end;
-    eval_lvalue_fun _ := None. *)
-
-    (* FIXME this fixpoint is not strictly structurally decreasing in the last case of eval_expr_fun;
-       maybe inline eval_lvalue_fun and fix the correctness proof. *)
     Fixpoint eval_expr_fun (exp: expr) : option val :=
     match exp with
     | (Econst_int i ty) => Some (Vint i)
@@ -176,7 +190,7 @@ Section EvalExprFun.
     | (Econst_single f ty) => Some (Vsingle f)
     | (Econst_long i ty) => Some (Vlong i)
     | (Etempvar id ty) => v ← te ! id; Some v
-    | (Eaddrof a ty) => match eval_lvalue_fun a  with
+    | (Eaddrof a ty) => match eval_lvalue_fun' eval_expr_fun a with
                     | Some (loc, ofs, Full) => Some (Vptr loc ofs)
                     | _ => None
                     end
@@ -190,52 +204,14 @@ Section EvalExprFun.
     | (Esizeof ty1 ty) => Some (Vptrofs (Ptrofs.repr (sizeof ge ty1)))
     | (Ealignof ty1 ty) => Some (Vptrofs (Ptrofs.repr (alignof ge ty1)))
     (* otherwise, an lvalue; eval_Elvalue *)
-    | a => l ← eval_lvalue_fun a;
+    | a => l ← eval_lvalue_fun' eval_expr_fun a;
         let '(loc, ofs, bf) := l in
         deref_loc_fun (typeof a) m loc ofs bf
     end
-
-    with eval_lvalue_fun (exp:expr) : option (Values.block * ptrofs * bitfield) :=
-    match exp with
-    | (Evar id ty) =>
-        match le ! id with
-        | Some (l, ty') => if decide (ty'=ty) then Some (l, Ptrofs.zero, Full) else None (* eval_Evar_local *)
-        | None => (* eval_Evar_global *)
-                l ← Globalenvs.Genv.find_symbol ge id;
-                Some (l, Ptrofs.zero, Full)
-        end
-    | (Ederef a ty) => 
-        v ← eval_expr_fun a;
-        match v with
-        | (Vptr l ofs) => Some (l, ofs, Full)
-        | _ => None
-        end
-    | (Efield a i ty) => 
-        v ← eval_expr_fun a;
-        match v with
-        | (Vptr l ofs) => 
-            match typeof a with
-            | Tstruct id att => 
-                (* eval_Efield_struct *)
-                co ← ge.(genv_cenv) ! id;
-                match field_offset ge i (co_members co) with
-                | Errors.OK (delta, bf) => Some (l, (Ptrofs.add ofs (Ptrofs.repr delta)), bf)
-                | _ => None
-                end
-            | Tunion id att => 
-                (* eval_Efield_union *)
-                co ← ge.(genv_cenv) ! id;
-                match union_field_offset ge i (co_members co) with
-                | Errors.OK (delta, bf) => Some (l, (Ptrofs.add ofs (Ptrofs.repr delta)), bf)
-                | _ => None
-                end
-            | _ => None
-            end
-        | _ => None
-        end
-    | _ => None 
-    end 
     .
+
+    Definition eval_lvalue_fun := eval_lvalue_fun' eval_expr_fun.
+
 End EvalExprFun.
 
 Set Guard Checking.

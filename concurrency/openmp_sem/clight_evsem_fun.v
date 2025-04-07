@@ -133,15 +133,55 @@ Section MemOpsT.
     Qed.
 End MemOpsT.
 
-Unset Guard Checking.
 Section EvalExprTFun.
     Context (ge: genv).
     Context (le: env).
     Context (te: temp_env).
     Context (m: Memory.mem).
 
-    (* FIXME this fixpoint is not strictly structurally decreasing in the last case of eval_expr_fun;
-       maybe inline eval_lvalueT_fun and fix the correctness proof. *)
+    Definition eval_lvalueT_fun' eval_exprT_fun (exp:expr) : option (Values.block * ptrofs * bitfield * list mem_event) :=
+        match exp with
+        | Evar id ty =>
+            match le ! id with
+            | Some (l, ty') => if decide (ty'=ty) then Some (l, Ptrofs.zero, Full, nil) else None (* eval_Evar_local *)
+            | None => (* eval_Evar_global *)
+                    l ← Globalenvs.Genv.find_symbol ge id;
+                    Some (l, Ptrofs.zero, Full, nil)
+            end
+        | Ederef a ty => 
+            v_T ← eval_exprT_fun a;
+            let '(v, T) := v_T in
+            match v with
+            | Vptr l ofs => Some (l, ofs, Full, T)
+            | _ => None
+            end
+        | Efield a i ty => 
+            v_T ← eval_exprT_fun a;
+            let '(v, T) := v_T in
+            match v with
+            | Vptr l ofs => 
+                match typeof a with
+                | Tstruct id att => 
+                    (* eval_Efield_struct *)
+                    co ← ge.(genv_cenv) ! id;
+                    match field_offset ge i (co_members co) with
+                    | Errors.OK (delta, bf) => Some (l, (Ptrofs.add ofs (Ptrofs.repr delta)), bf, T)
+                    | _ => None
+                    end
+                | Tunion id att => 
+                    (* eval_Efield_union *)
+                    co ← ge.(genv_cenv) ! id;
+                    match union_field_offset ge i (co_members co) with
+                    | Errors.OK (delta, bf) => Some (l, (Ptrofs.add ofs (Ptrofs.repr delta)), bf, T)
+                    | _ => None
+                    end
+                | _ => None
+                end
+            | _ => None
+            end
+        | _ => None 
+        end.
+
     Fixpoint eval_exprT_fun (exp: expr) : option (val * list mem_event) :=
     match exp with
     | Econst_int i ty => Some (Vint i, nil)
@@ -149,7 +189,7 @@ Section EvalExprTFun.
     | Econst_single f ty => Some (Vsingle f, nil)
     | Econst_long i ty => Some (Vlong i, nil)
     | Etempvar id ty => v ← te ! id; Some (v, nil)
-    | Eaddrof a ty => match eval_lvalueT_fun a  with
+    | Eaddrof a ty => match eval_lvalueT_fun' eval_exprT_fun a  with
                     | Some (loc, ofs, Full, T) => Some (Vptr loc ofs, T)
                     | _ => None
                     end
@@ -163,65 +203,22 @@ Section EvalExprTFun.
                               let '(v2, T2) := v2_T2 in
                               v ← sem_binary_operation ge op v1 (typeof a1) v2 (typeof a2) m;
                               Some (v, T1 ++ T2)
-    | Ecast a ty => v1_T ← eval_exprT_fun a;
+    | Ecast a ty => v1_T ← eval_exprT_fun  a;
                       let '(v1, T) := v1_T in
                       v ← sem_cast v1 (typeof a) ty m;
                       Some (v, T)
     | Esizeof ty1 ty => Some (Vptrofs (Ptrofs.repr (@sizeof ge ty1)), nil)
     | Ealignof ty1 ty => Some (Vptrofs (Ptrofs.repr (@alignof ge ty1)), nil)
     (* otherwise, an lvalue; eval_Elvalue *)
-    | a => res ← eval_lvalueT_fun a;
+    | a => res ← eval_lvalueT_fun' eval_exprT_fun a;
         let '(loc, ofs, bf, T1) := res in
         v_T2 ← deref_locT_fun (typeof a) m loc ofs bf;
         let '(v, T2) := v_T2 in
         Some (v, T1 ++ T2)
-    end
+    end.
 
-    with eval_lvalueT_fun (exp:expr) : option (Values.block * ptrofs * bitfield * list mem_event) :=
-    match exp with
-    | Evar id ty =>
-        match le ! id with
-        | Some (l, ty') => if decide (ty'=ty) then Some (l, Ptrofs.zero, Full, nil) else None (* eval_Evar_local *)
-        | None => (* eval_Evar_global *)
-                l ← Globalenvs.Genv.find_symbol ge id;
-                Some (l, Ptrofs.zero, Full, nil)
-        end
-    | Ederef a ty => 
-        v_T ← eval_exprT_fun a;
-        let '(v, T) := v_T in
-        match v with
-        | Vptr l ofs => Some (l, ofs, Full, T)
-        | _ => None
-        end
-    | Efield a i ty => 
-        v_T ← eval_exprT_fun a;
-        let '(v, T) := v_T in
-        match v with
-        | Vptr l ofs => 
-            match typeof a with
-            | Tstruct id att => 
-                (* eval_Efield_struct *)
-                co ← ge.(genv_cenv) ! id;
-                match field_offset ge i (co_members co) with
-                | Errors.OK (delta, bf) => Some (l, (Ptrofs.add ofs (Ptrofs.repr delta)), bf, T)
-                | _ => None
-                end
-            | Tunion id att => 
-                (* eval_Efield_union *)
-                co ← ge.(genv_cenv) ! id;
-                match union_field_offset ge i (co_members co) with
-                | Errors.OK (delta, bf) => Some (l, (Ptrofs.add ofs (Ptrofs.repr delta)), bf, T)
-                | _ => None
-                end
-            | _ => None
-            end
-        | _ => None
-        end
-    | _ => None 
-    end 
-    .
+    Definition eval_lvalueT_fun := eval_lvalueT_fun' eval_exprT_fun.
 End EvalExprTFun.
-Set Guard Checking.
 
 Ltac fun_correct_tac :=
     lazymatch goal with
