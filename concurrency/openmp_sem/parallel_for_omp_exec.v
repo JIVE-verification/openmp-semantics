@@ -173,6 +173,11 @@ Proof.
       unfold ThreadPool.getThreadR. done. }
     assert (H_lockRes_empty: forall laddr, ThreadPool.lockRes tp laddr = None).
     { intros. subst tp. rewrite /getThreadR /=  /ThreadPool.lockRes /lockRes  /= find_empty //.  }
+    (* unfold OpenMP_steps.
+    Print Ostep_refl_trans_closure.
+    unfold Ostep_refl_trans_closure.
+    Print clos_refl_trans_1n.
+    eapply rt1n_trans. *)
     eapply (rt1n_trans Ostate Ostep _ (U2, _, _:ThreadPool.t, ttree, diluteMem m2)).
     { 
         (* build preconditions for evstep *)
@@ -187,11 +192,14 @@ Proof.
         (* take a threadStep *)
         rewrite /Ostep /MachStep /=.
         rewrite Htr1 /U2.
+        Print machine_step.
         (* subst tr2 tr1 U2. *)
         eapply (thread_step 0 U tp _ _ _ _ [] ttree _ cnt0 Hcompat).
         rewrite /= /DryHybridMachine.threadStep.
+        Print dry_step.
         (* TODO simplify (restrPermMap (ssrfun.pair_of_and (Hcompat 0 cnt0)).1) *)
         eapply (step_dry _ _ _ _ m1_restr _ _ _).
+        Print step_dry.
         {  done. }
         { eapply one_thread_tp_inv; subst tp; done. }
         { rewrite /= /getThreadC. subst tp; done. }
@@ -200,7 +208,7 @@ Proof.
             apply evstep_fun_correct.
             rewrite Hc Hf /cl_evstep_fun.
             simpl decide; unfold decide.
-            cbn. rewrite Hm2_0 Hm2_1 /=. done.
+            cbn.  unfold_mbind. rewrite Hm2_0 Hm2_1 /=. done.
         }
         done.
     }
@@ -436,5 +444,16 @@ Proof.
         }
         done.
     }
+eapply (rt1n_trans Ostate Ostep _ (U6, _, _:ThreadPool.t, ttree, diluteMem m2)).
+{
+  eapply (pragma_step).
+  {
+    unfold schedPeek. simpl. rewrite /U5. rewrite /U4. rewrite /U3. rewrite /U2. simpl. rewrite HU in HU1. symmetry in HU1. rewrite HU1. reflexivity. 
+  }
+  {
+    rewrite /= /DryHybridMachine.pragmaStep.
+    admit.
+  }
+}
 
 Admitted.
