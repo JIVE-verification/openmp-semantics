@@ -452,7 +452,44 @@ eapply (rt1n_trans Ostate Ostep _ (U6, _, _:ThreadPool.t, ttree, diluteMem m2)).
   }
   {
     rewrite /= /DryHybridMachine.pragmaStep.
-    eapply (step_parallel); try easy; admit.
+    eapply (step_parallel); try easy.
+    {
+     eapply one_thread_tp_inv; subst tp; try done.
+     Check lock_perm_empty. admit.
+    }
+    {
+      rewrite /= /getThreadC. admit.
+    }
+    {
+      admit.
+    }
+    {
+      admit.
+    }
+    {
+      admit.
+    }
+    {
+      admit.
+    }
+    {
+      admit.
+    }
+    {
+      admit.
+    }
+    {
+      admit.
+    }
+    {
+      admit.
+    }
+    {
+      admit.
+    }
+    {
+      admit.
+    }
   }
 }
 Admitted.
