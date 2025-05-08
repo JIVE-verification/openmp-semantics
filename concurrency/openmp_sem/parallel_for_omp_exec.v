@@ -461,7 +461,7 @@ eapply (rt1n_trans Ostate Ostep _ (U6, _, _:ThreadPool.t, ttree, diluteMem m2)).
       rewrite /= /getThreadC. admit.
     }
     {
-      admit.
+      simpl. subst c. simpl. admit.
     }
     {
       admit.
@@ -470,7 +470,16 @@ eapply (rt1n_trans Ostate Ostep _ (U6, _, _:ThreadPool.t, ttree, diluteMem m2)).
       admit.
     }
     {
-      admit.
+      subst c. simpl. unfold get_le. simpl. admit.
+    }
+    {
+      subst c. admit.
+    }
+    {
+      subst c.  simpl. admit.
+    }
+    {
+      subst tp. simpl. admit.
     }
     {
       admit.
@@ -479,16 +488,7 @@ eapply (rt1n_trans Ostate Ostep _ (U6, _, _:ThreadPool.t, ttree, diluteMem m2)).
       admit.
     }
     {
-      admit.
-    }
-    {
-      admit.
-    }
-    {
-      admit.
-    }
-    {
-      admit.
+      subst tp. admit.
     }
     Unshelve.
     -done.
@@ -497,24 +497,24 @@ eapply (rt1n_trans Ostate Ostep _ (U6, _, _:ThreadPool.t, ttree, diluteMem m2)).
     -rewrite /U4. simpl. rewrite /U3. simpl. rewrite /U2. simpl. symmetry in HU1. rewrite HU1. rewrite HU. done.
     -rewrite /U5. rewrite /U4. simpl. rewrite /U3. simpl. rewrite /U2. simpl. symmetry in HU1. rewrite HU1. rewrite HU. done.
     -rewrite /U6. rewrite /U5. rewrite /U4. simpl. rewrite /U3. simpl. rewrite /U2. simpl. symmetry in HU1. rewrite HU1. rewrite HU. done.
-    -apply tp1. 
-    -apply cnt5.
     -admit.
-    -apply tp1. 
+    -admit.
+    -admit.
     -apply c. 
+    -apply tid. 
     -admit.
     -admit.
     -admit.
     -admit.
-    -apply m.
-    -admit.
-    -admit.
-    -apply ttree.
-    -apply tid.
     -admit.
     -admit.
     -admit.
-    -apply tid.
+    -admit.
+    -admit.
+    -admit.
+    -admit.
+    -admit.
+    -admit.
     -admit.
     -admit.
   }
