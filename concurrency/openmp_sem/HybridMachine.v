@@ -257,6 +257,9 @@ Module DryHybridMachine.
       permMapJoin pmap1.1 pmap2.1 pmap3.1 ∧
       permMapJoin pmap1.2 pmap2.2 pmap3.2.
 
+    Definition permMapJoin_list pmaps pmap : Prop :=
+      
+
     Definition permMapJoinPair_n_times pmap1 n pmap2 : Prop :=
       permMapJoin_n_times pmap1.1 n pmap2.1 ∧
       permMapJoin_n_times pmap1.2 n pmap2.2.
