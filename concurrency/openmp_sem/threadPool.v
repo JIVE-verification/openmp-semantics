@@ -60,7 +60,7 @@ Module ThreadPool.
 (*         extraRes : t -> res; (* extra resources not held by any thread or lock *) *)
         (* addThread : t -> val -> val -> res -> t; *)
         addThread : t -> semC -> res -> t;
-        addThreads : t -> semC -> res -> nat (* num of new threads to fork *) -> list pos (* new threads' tids *) * t;
+        addThreads : t -> semC -> list res -> list pos (* new threads' tids *) * t;
         updThreadC : forall {tid tp}, containsThread tp tid -> ctl -> t;
         updThreadR : forall {tid tp}, containsThread tp tid -> res -> t;
         updThread : forall {tid tp}, containsThread tp tid -> ctl -> res -> t;
@@ -681,14 +681,13 @@ Module OrdinalPool.
     Definition addThread (tp : t) (c : semC) (pmap : res) : t :=
       (addThread' tp c pmap).2.
 
-    (* spawn to_spawn threads, return the new tids and the new tp *)
-    Definition addThreads (tp : t) (c : semC) (pmap : res) (to_spawn: nat) : list pos * t :=
-      let init := (@nil pos, tp) in
-      Z.iter (Z.of_nat to_spawn) 
-             (fun x =>
-              let (new_tid, tp') := addThread' x.2 c pmap in
-              (new_tid::x.1, tp'))
-             ([], tp).
+    (* spawn threads, each has a different permission in pmaps, return the new tids and the new tp *)
+    Definition addThreads (tp : t) (c : semC) (pmaps : list res) : list pos * t :=
+      fold_right (fun perm_i x =>
+        let tp := x.2 in
+        let tids := x.1 in
+        let (new_tid, tp') := addThread' tp c perm_i in
+        (new_tid::tids, tp')) ([], tp) pmaps.
 
     Definition updLockSet tp (add:address) (lf:lock_info) : t :=
       mk (num_threads tp)

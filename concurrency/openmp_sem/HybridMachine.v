@@ -181,12 +181,12 @@ Module DryHybridMachine.
       | _ => None
       end.
 
-    Definition transform_state_parallel (c: Clight_core.state) (is_leader:bool) : option Clight_core.state :=
+    Definition transform_state_parallel (c: Clight_core.state) : option Clight_core.state :=
       match c with
       | Clight_core.Pragmastate n (OMPParallel _ _ _) (f,s,k,e,le) =>
         (* need to bring threads in a `Pragmastate ParallelEnd` state to implement blocking/barrier for the parent *)
         let s' := Ssequence s (Spragma n OMPParallelEnd Sskip) in
-        Some (Clight_core.State f s' (if is_leader then k else Kstop) e le)
+        Some (Clight_core.State f s' k e le)
       | _ => None
       end.
 
@@ -257,51 +257,42 @@ Module DryHybridMachine.
       permMapJoin pmap1.1 pmap2.1 pmap3.1 ∧
       permMapJoin pmap1.2 pmap2.2 pmap3.2.
 
-    Definition permMapJoin_list pmaps pmap : Prop :=
-      
-
-    Definition permMapJoinPair_n_times pmap1 n pmap2 : Prop :=
-      permMapJoin_n_times pmap1.1 n pmap2.1 ∧
-      permMapJoin_n_times pmap1.2 n pmap2.2.
-
     Definition emptyPerm: res := (empty_map, empty_map).
+    Definition permMapJoin_list pmaps pmap : Prop :=
+      sepalg_list.fold_rel permMapJoinPair emptyPerm pmaps pmap.
 
     Inductive pragma_step {tid0 tp m} {ttree: team_tree}
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
       thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=
     | step_parallel :
-        forall (tp_upd tp' tp'':thread_pool) c c' c'_follower ge le m1 m' m'' virtue1 virtue2 
+        forall (tp' tp'' tp''':thread_pool) c c' ge le m1 m' m''
           ttree' ttree'' (num_threads:nat) pc rcs new_tids idx rvs
-          newThreadPermSum,
-          let threadPerm' := (computeMap (getThreadR cnt0).1 virtue1.1,
-                              computeMap (getThreadR cnt0).2 virtue1.2) in
-          let newThreadPerm := (computeMap empty_map virtue2.1,
-                                computeMap empty_map virtue2.2) in
+          perm (perms:list res),
           forall
             (* TODO num_thread at least 2? *)
             (Hinv : invariant tp)
-            (Hcode: getThreadC cnt0 = Kblocked c)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
-            (* (Hrestrict_pmap_arg: restrPermMap (Hcompat tid0 cnt0).1 = marg) *)
             (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m1)
             (Hat_meta: at_pragma semSem c = Some (idx, OMPParallel num_threads pc rcs))
-            (HnewThreadPermSum1: permMapJoinPair_n_times newThreadPerm (num_threads-1) newThreadPermSum)
-            (Hangel: permMapJoinPair newThreadPermSum threadPerm' (getThreadR cnt0))
-            (* 1. spawn new threads as fork, add them to team. *)
+            (* 1. spawn new threads as fork, add them to team, and split permissions angelically*)
+            (Hnum_threads: num_threads > 0)
+            (Hperm: perm = getThreadR cnt0)
+            (* perms is an angelic split of the original permission perm *)
+            (HangleSplit: permMapJoin_list perms perm)
+            (Hperms_length: length perms = num_threads)
+            (Htp': ∃ perm_0, nth_error perms 0 = Some perm_0 ∧
+                             tp' = updThreadR cnt0 perm_0)
+            (Hc': Some c' = transform_state_parallel c)
+            (Htp'': (new_tids, tp'') = addThreads tp c (tl perms))
+            (* 2. add new team to team_tree, sets info aobut parallel construct as a team context *)
             (Hle : Some le = get_le c)
-            (Hc': Some c' = transform_state_parallel c true)
-            (Hc'_follower: Some c'_follower = transform_state_parallel c false)
-            (HaddThreads: (new_tids, tp') = let tp' := (updThread cnt0 (Krun c') threadPerm') in
-                                            addThreads tp' c'_follower newThreadPerm (num_threads-1))
-
-            (*  add new team to team_tree, sets info aobut parallel construct as a team context *)
             (Hrvs: Some rvs = init_rvs rcs ge le m)
             (Htree': Some ttree' = spawn_team tid0 (map pos.n new_tids) rvs idx ttree),
-            (* 2. after spawning new threads, all the threads are Krun.
+            (* 3. after spawning new threads, all the threads are Krun.
                for each thread in team, do privatization, and add pv_map as thread context. *)
             let team_tids := tid0::(map pos.n new_tids) in
             forall
-            (Htree'': Some (tp'', m'', ttree'') = foldr (
+            (Htree'': Some (tp''', m'', ttree'') = foldr (
                 λ tid maybe_tp_m_ttree,
                 tp_m_ttree ← maybe_tp_m_ttree;
                 let '(tp, m, ttree) := tp_m_ttree in
@@ -316,8 +307,8 @@ Module DryHybridMachine.
                 c' ← update_stmt_le c Sskip le';
                 let tp' := updThreadC cnt_i (Krun c') in
                 Some (tp', m', ttree')
-              ) (Some (tp', m', ttree')) team_tids),
-              pragma_step cnt0 Hcompat tp'' m'' ttree''
+              ) (Some (tp'', m', ttree')) team_tids),
+              pragma_step cnt0 Hcompat tp''' m'' ttree''
     (* End of a parallel region. 
        End a privatization and reduction scope, combine results to memory.
        Collect permission for threads at the end of its parallel region and transfer to parent.

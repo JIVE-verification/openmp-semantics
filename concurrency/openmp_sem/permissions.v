@@ -2375,10 +2375,6 @@ Proof.*)
     forall b ofs,
       permjoin ((pmap1 !! b) ofs) ((pmap2 !! b) ofs) ((pmap3 !! b) ofs).
 
-  Definition permMapJoin_list (pmaps: list access_map) pmap :=
-    ∃ accu : list access_map,
-      nth i pmaps 
-
   (* pmap1 * n + pmap2 = pmap3 *)
   Fixpoint permMapJoin_n_times pmap1 (n:nat) pmap2 :=
     exists pmap2', (* running total *)
