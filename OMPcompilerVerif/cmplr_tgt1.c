@@ -34,7 +34,7 @@ void * _par_routine1(void* __par_routine1_data){
 
     // do reduction
     pthread_mutex_lock(&reduction_mutex_1); // reduction start
-     ->k = _par_routine1_data->k + k; // increment k
+    _par_routine1_data->k = _par_routine1_data->k + k; // increment k
     pthread_mutex_unlock(&reduction_mutex_1); // reduction end
 
     return NULL;
@@ -58,12 +58,13 @@ int main() {
 
     /* parallel region start */
     pthread_t t1,t2;
-    _par_routine1_data_ty __par_routine1_data_1 = {&i, &k};
-    pthread_create(&t1, NULL, _par_routine1, (void *)&__par_routine1_data_1);
+
     _par_routine1_data_ty __par_routine1_data_2 = {&i, &k};
     pthread_create(&t2, NULL, _par_routine1, (void *)&__par_routine1_data_1);
+    
+    _par_routine1(__par_routine1_data_1);
+
     // wait for threads to finish
-    pthread_join(t1, NULL);
     pthread_join(t2, NULL);
     /* parallel region end */
 
@@ -79,3 +80,5 @@ int main() {
 
     return 0;
 }
+
+// pass 1: figure out the temp vars that are supposed to be shared, change to locals
