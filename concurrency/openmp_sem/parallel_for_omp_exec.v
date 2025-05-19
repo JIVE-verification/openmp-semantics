@@ -83,17 +83,12 @@ Proof.
     rewrite /Genv.init_mem /= in Hm.
   
     (* FIXME simplify the revert *)
-    (* simplify mem_access *)
     revert Hm.
     set (PMap.set xH (λ (ofs : Z) (_ : perm_kind), if Coqlib.proj_sumbool (Coqlib.zle Z0 ofs) && Coqlib.proj_sumbool (Coqlib.zlt ofs (Zpos xH)) then Some Freeable else None)
         (PMap.init (λ (_ : Z) (_ : perm_kind), None))) as m1_mem_access.
-    (* unfold PMap.set in m1_mem_access. simpl in m1_mem_access.
-    unfold PTree.empty in m1_mem_access.
-    unfold set, set0 in m1_mem_access. *)
     match goal with |  |- context [Mem.drop_perm ?m_term _ _ _ _] => set m_term as m_init end.
     intro Hm.
 
-    (* simplify drop_perm *)
     rewrite /Mem.drop_perm in Hm.
     repeat destruct_match_q Hm.
     inversion Hm; subst m0.
@@ -115,7 +110,6 @@ Proof.
     {  subst tp.  rewrite /getThreadR //. }
 
     assert  (mem_compatible tp m) as Hcompat.
-    (* unshelve eset (_: mem_compatible tp m) as Hcompat. *)
     { simpl. constructor.
         - intros.
           simpl in cnt. 
@@ -139,7 +133,7 @@ Proof.
     (* simplify m1_restr *)
     pose m1_restr := (restrPermMap (ssrfun.pair_of_and (Hcompat 0 cnt0)).1).
     assert (Hm1_restr : m1_restr = m). {
-     subst tp; apply (restrPermMap_eq (ssrfun.pair_of_and (Hcompat 0 cnt0)).1).
+      subst tp; apply (restrPermMap_eq (ssrfun.pair_of_and (Hcompat 0 cnt0)).1).
     }
 
     rewrite /m_init /= -/m_init in Hm1_def.
@@ -173,11 +167,6 @@ Proof.
       unfold ThreadPool.getThreadR. done. }
     assert (H_lockRes_empty: forall laddr, ThreadPool.lockRes tp laddr = None).
     { intros. subst tp. rewrite /getThreadR /=  /ThreadPool.lockRes /lockRes  /= find_empty //.  }
-    (* unfold OpenMP_steps.
-    Print Ostep_refl_trans_closure.
-    unfold Ostep_refl_trans_closure.
-    Print clos_refl_trans_1n.
-    eapply rt1n_trans. *)
     eapply (rt1n_trans Ostate Ostep _ (U2, _, _:ThreadPool.t, ttree, diluteMem m2)).
     { 
         (* build preconditions for evstep *)
@@ -191,15 +180,10 @@ Proof.
 
         (* take a threadStep *)
         rewrite /Ostep /MachStep /=.
-        rewrite Htr1 /U2.
-        Print machine_step.
-        (* subst tr2 tr1 U2. *)
+        rewrite Htr1 /U1.
         eapply (thread_step 0 U tp _ _ _ _ [] ttree _ cnt0 Hcompat).
         rewrite /= /DryHybridMachine.threadStep.
-        Print dry_step.
-        (* TODO simplify (restrPermMap (ssrfun.pair_of_and (Hcompat 0 cnt0)).1) *)
         eapply (step_dry _ _ _ _ m1_restr _ _ _).
-        Print step_dry.
         {  done. }
         { eapply one_thread_tp_inv; subst tp; done. }
         { rewrite /= /getThreadC. subst tp; done. }
@@ -319,8 +303,7 @@ Proof.
     match goal with
     |  |- clos_refl_trans_1n _ _ (_, ?tp, _, _) _ => pose (tp:ThreadPool.t) as tp4 end.
     assert (m3_restr = m3) as -> by apply (restrPermMap_eq (proj1 (Hcompat3 0 cnt3))).
-  
-    (** take 3rd step *)
+
     pose m4:=m3.
     pose U5:=@yield scheduler U4.
     assert (cnt4: ThreadPool.containsThread tp4 0) by by subst tp4.
@@ -398,8 +381,7 @@ Proof.
     (* take 5th step *)
     match goal with
     |  |- clos_refl_trans_1n _ _ (_, ?tp, _, _) _ => pose (tp:ThreadPool.t) as tp5 end.
-  
-    (** take 3rd step *)
+
     pose U6:=@yield scheduler U5.
     assert (cnt5: ThreadPool.containsThread tp5 0) by by subst tp5.
     assert (mem_compatible tp5 m5) as Hcompat5.
@@ -421,7 +403,6 @@ Proof.
     }
 
     pose m5_restr := (restrPermMap (ssrfun.pair_of_and (Hcompat5 0 cnt5)).1).
-    assert (m5_restr = m5) as Hm5_restr by apply (restrPermMap_eq (proj1 (Hcompat5 0 cnt5))) .
     assert (H_lock_res_empty5 : forall i, forall cnti: containsThread tp5 i, (ThreadPool.getThreadR cnti).2 = empty_map).
     { intros i cnti. subst tp2 tp.
       rewrite /=. destruct i; done. }
@@ -444,79 +425,53 @@ Proof.
         }
         done.
     }
-eapply (rt1n_trans Ostate Ostep _ (U6, _, _:ThreadPool.t, ttree, diluteMem m2)).
-{
-  eapply (pragma_step).
-  {
-    unfold schedPeek. simpl. rewrite /U5. rewrite /U4. rewrite /U3. rewrite /U2. simpl. rewrite HU in HU1. symmetry in HU1. rewrite HU1. reflexivity. 
-  }
-  {
-    rewrite /= /DryHybridMachine.pragmaStep.
-    eapply (step_parallel); try easy.
-    {
-     eapply one_thread_tp_inv; subst tp; try done.
-     Check lock_perm_empty. admit.
+
+    (* take 6th step *)
+      
+    match goal with
+    |  |- clos_refl_trans_1n _ _ (_, ?tp, _, _) _ => pose (tp:ThreadPool.t) as tp6 end.
+    simpl.
+    assert (m5_restr = m5) as -> by apply (restrPermMap_eq (proj1 (Hcompat5 0 cnt5))).
+    pose m6:=m5.
+    pose U7:=@yield scheduler U6.
+    assert (cnt6: ThreadPool.containsThread tp6 0) by by subst tp6.
+
+    assert (mem_compatible tp6 m6) as Hcompat6.
+    { rewrite /=. constructor.
+        - intros tid' cnt.
+          destruct tid' eqn:?.
+          +  (* tid = 0 *)
+            simpl. 
+            split.
+            * rewrite /m6. apply cur_lt_max.
+            * rewrite Hth0_perms. apply empty_LT.
+          + (* tid > 0; does not exist in tp *) subst tp. done.
+        - intros.
+          (* there is no lock, pmaps is empty *)
+          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.  
+        - intros.
+          (* there is no lock, pmaps is empty *)
+          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.
     }
-    {
-      rewrite /= /getThreadC. admit.
+
+    pose m6_restr := (restrPermMap (ssrfun.pair_of_and (Hcompat6 0 cnt6)).1).
+    assert (m6_restr = m6) as Hm6_restr by apply (restrPermMap_eq (proj1 (Hcompat6 0 cnt6))).
+    assert (H_lock_res_empty6 : forall i, forall cnti: containsThread tp6 i, (ThreadPool.getThreadR cnti).2 = empty_map).
+    { intros i cnti. subst tp2 tp.
+      rewrite /=. destruct i; done. }
+    assert (H_lockRes_empty6: forall laddr, ThreadPool.lockRes tp6 laddr = None).
+    { intros. subst tp6 tp5 tp4 tp3 tp2 tp. rewrite /getThreadR /=  /ThreadPool.lockRes /lockRes  /= find_empty //.  }
+
+    (* TODO pose m7:= ... *)
+    (* TODO pose tp7:= ... *)
+      eapply (rt1n_trans Ostate Ostep _ (U5, _, _:ThreadPool.t, ttree, diluteMem _)).
+    { 
+        (* run parallel pragma *)
+        rewrite /Ostep /MachStep /=.
+        eapply (pragma_step _ U7 tp6 (* tp7 *) _ m6 (* m7 *)).
+        { cbn. rewrite -HU1 HU. done. }
+        eapply step_parallel.
     }
-    {
-      simpl. subst c. simpl. admit.
-    }
-    {
-      admit.
-    }
-    {
-      admit.
-    }
-    {
-      subst c. simpl. unfold get_le. simpl. admit.
-    }
-    {
-      subst c. admit.
-    }
-    {
-      subst c.  simpl. admit.
-    }
-    {
-      subst tp. simpl. admit.
-    }
-    {
-      admit.
-    }
-    {
-      admit.
-    }
-    {
-      subst tp. admit.
-    }
-    Unshelve.
-    -done.
-    -symmetry in HU1. rewrite HU1. rewrite HU. done.
-    -rewrite /U2. simpl. symmetry in HU1. rewrite HU1. rewrite HU. done.
-    -rewrite /U4. simpl. rewrite /U3. simpl. rewrite /U2. simpl. symmetry in HU1. rewrite HU1. rewrite HU. done.
-    -rewrite /U5. rewrite /U4. simpl. rewrite /U3. simpl. rewrite /U2. simpl. symmetry in HU1. rewrite HU1. rewrite HU. done.
-    -rewrite /U6. rewrite /U5. rewrite /U4. simpl. rewrite /U3. simpl. rewrite /U2. simpl. symmetry in HU1. rewrite HU1. rewrite HU. done.
-    -admit.
-    -admit.
-    -admit.
-    -apply c. 
-    -apply tid. 
-    -admit.
-    -admit.
-    -admit.
-    -admit.
-    -admit.
-    -admit.
-    -admit.
-    -admit.
-    -admit.
-    -admit.
-    -admit.
-    -admit.
-    -admit.
-    -admit.
-    -admit.
-  }
-}
-Admitted.
+
+
+
