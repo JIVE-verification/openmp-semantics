@@ -247,7 +247,7 @@ Module DryHybridMachine.
 
     Parameter permJoinFun : res -> res -> option res.
 
-    Definition blocked_at (ct:ctl) : option C :=
+    Definition Kblocked_at (ct:ctl) : option C :=
        match ct with
       | Kblocked c => Some c
       | _ => None
@@ -273,6 +273,7 @@ Module DryHybridMachine.
             (Hinv : invariant tp)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m1)
+            (Hc: getThreadC cnt0 = Krun c)
             (Hat_meta: at_pragma semSem c = Some (idx, OMPParallel num_threads pc rcs))
             (* 1. spawn new threads as fork, add them to team, and split permissions angelically*)
             (Hnum_threads: num_threads > 0)
@@ -297,7 +298,7 @@ Module DryHybridMachine.
                 tp_m_ttree ← maybe_tp_m_ttree;
                 let '(tp, m, ttree) := tp_m_ttree in
                 cnt_i ← maybeContainsThread tp tid;
-                c ← blocked_at $ getThreadC cnt_i;
+                c ← Kblocked_at $ getThreadC cnt_i;
                 le ← get_le c;
                 maybe_pvm_le'_m' ← pvm_priv_start pc m ge le;
                 let '(pvm, le', m') := maybe_pvm_le'_m' in
@@ -328,7 +329,7 @@ Module DryHybridMachine.
             le_lst ← maybe_le_lst;
             cnt_i ← maybeContainsThread tp tid;
             (* every thread is blocked at OMPParallelEnd *)
-            c ← blocked_at $ getThreadC cnt_i;
+            c ← Kblocked_at $ getThreadC cnt_i;
             match at_pragma semSem c with
             | Some (idx', OMPParallelEnd) =>
               if decide (idx' = idx) then
@@ -346,7 +347,7 @@ Module DryHybridMachine.
               let '(permSum, tp, m, ttree) := permSum_tp_m_ttree in
               cnt_i ← maybeContainsThread tp tid;
               permSum' ← permJoinFun permSum (getThreadR cnt_i);
-              c ← blocked_at $ getThreadC cnt_i;
+              c ← Kblocked_at $ getThreadC cnt_i;
               le ← get_le c;
               ttree'_th_ctx ← mate_pop_thread_context ttree tid ;
               let '(ttree', th_ctx) := ttree'_th_ctx in
@@ -415,7 +416,7 @@ Module DryHybridMachine.
         le_lst ← maybe_le_lst;
         cnt_i ← maybeContainsThread tp tid;
         (* every thread is blocked at OMPForEnd *)
-        c ← blocked_at $ getThreadC cnt_i;
+        c ← Kblocked_at $ getThreadC cnt_i;
         match at_pragma semSem c with
         | Some (idx', OMPForEnd) =>
           (* collect their local environments *)
@@ -434,7 +435,7 @@ Module DryHybridMachine.
           tp_m_ttree ← maybe_tp_m_ttree;
           let '(tp, m, ttree) := tp_m_ttree in
           cnt_i ← maybeContainsThread tp tid;
-          c ← blocked_at $ getThreadC cnt_i;
+          c ← Kblocked_at $ getThreadC cnt_i;
           le ← get_le c;
           ttree'_th_ctx ← mate_pop_thread_context ttree tid ;
           let '(ttree', th_ctx) := ttree'_th_ctx in
@@ -457,7 +458,7 @@ Module DryHybridMachine.
       (Hstep_barrier: Some tp' = foldr (λ tid maybe_tp,
           tp ← maybe_tp;
           cnt_i ← maybeContainsThread tp tid;
-          c ← blocked_at $ getThreadC cnt_i;
+          c ← Kblocked_at $ getThreadC cnt_i;
           match at_pragma semSem c with
           | Some (_, OMPBarrier) =>
             c' ← update_stmt c Sskip;
@@ -889,10 +890,6 @@ Module DryHybridMachine.
                (ms:thread_pool) (m' : mem) (v:val) (args:list val) : Prop :=
       exists c, initial_core semSem 0 m c m' v args /\
            ms = mkPool (Krun c) (getCurPerm m', empty_map) (* (empty_map, empty_map) *).
-
-
-
-
 
     Definition install_perm tp m tid (Hcmpt: mem_compatible tp m) (Hcnt: containsThread tp tid) m' :=
       m' = restrPermMap (Hcmpt tid Hcnt).1.

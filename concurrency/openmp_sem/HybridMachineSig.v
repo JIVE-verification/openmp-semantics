@@ -316,13 +316,28 @@ Module HybridMachineSig.
                      (Hcmpt: mem_compatible ms m)
                      (Hcode: getThreadC ctn = Krun c)
                      (Hperm: install_perm Hcmpt ctn m')
-                     (Hat_external: at_external semSem c m'  = Some X)
+                     (Hat_external: at_external semSem c m' = Some X)
                      (Hinv: invariant ms)
                      (Hms': updThreadC ctn (Kblocked c) = ms'),
       suspend_thread' m ctn ms'.
   Definition suspend_thread: forall (m: mem) {tid0 ms},
       containsThread ms tid0 -> machine_state -> Prop:=
     @suspend_thread'.
+
+  Inductive suspend_thread_pragma': forall m {tid0} {ms:machine_state},
+      containsThread ms tid0 -> machine_state -> Prop:=
+  | SuspendThreadPragma: forall m tid0 ms ms' c X m'
+                     (ctn: containsThread ms tid0)
+                     (Hcmpt: mem_compatible ms m)
+                     (Hcode: getThreadC ctn = Krun c)
+                     (Hperm: install_perm Hcmpt ctn m')
+                     (Hat_external: at_pragma semSem c = Some X)
+                     (Hinv: invariant ms)
+                     (Hms': updThreadC ctn (Kblocked c) = ms'),
+      suspend_thread_pragma' m ctn ms'.
+  Definition suspend_thread_pragma: forall (m: mem) {tid0 ms},
+      containsThread ms tid0 -> machine_state -> Prop:=
+    @suspend_thread_pragma'.
 
   Inductive halted_thread': forall {tid0} {ms:machine_state},
       containsThread ms tid0 -> int -> Prop:=
@@ -370,6 +385,13 @@ Module HybridMachineSig.
           (HschedS: schedSkip U = U')        (*Schedule Forward*)
           (Htid: containsThread ms tid)
           (Htstep:suspend_thread m Htid ms'),
+          machine_step U tr ms m ttree U' tr ms' m ttree
+    | suspend_step_pragma:
+        forall tid U U' ms ms' m tr ttree
+          (HschedN: schedPeek U = Some tid)
+          (HschedS: schedSkip U = U')        (*Schedule Forward*)
+          (Htid: containsThread ms tid)
+          (Htstep:suspend_thread_pragma m Htid ms'),
           machine_step U tr ms m ttree U' tr ms' m ttree
     | sync_step:
         forall tid U U' ms ms' m m' ev tr ttree
@@ -517,6 +539,13 @@ Module HybridMachineSig.
             (Htid: containsThread ms tid)
             (Htstep:suspend_thread m Htid ms'),
             external_step U tr ms m ttree U' tr ms' m ttree
+      | suspend_step_pragma':
+          forall tid U U' ms ms' m tr ttree
+            (HschedN: schedPeek U = Some tid)
+            (HschedS: schedSkip U = U')        (*Schedule Forward*)
+            (Htid: containsThread ms tid)
+            (Htstep:suspend_thread_pragma m Htid ms'),
+            external_step U tr ms m ttree U' tr ms' m ttree
       | sync_step':
           forall tid U U' ms ms' m m' ev tr ttree
             (HschedN: schedPeek U = Some tid)
@@ -583,7 +612,8 @@ Module HybridMachineSig.
                  solve[econstructor 5 ; eauto]|
                  solve[econstructor 6 ; eauto]|
                  solve[econstructor 7 ; eauto]|
-                 solve[econstructor 8 ; eauto]
+                 solve[econstructor 8 ; eauto]|
+                 solve[econstructor 9 ; eauto]
                 ].
       Qed.
  
