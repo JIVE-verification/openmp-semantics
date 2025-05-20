@@ -532,17 +532,22 @@ Proof.
       rewrite /=. destruct i; done. }
     assert (H_lockRes_empty8: forall laddr, ThreadPool.lockRes tp8 laddr = None).
     { intros. subst tp8 tp6 tp5 tp4 tp3 tp2 tp. rewrite /getThreadR /=  /ThreadPool.lockRes /lockRes  /= find_empty //.  }
+    pose perm8:= (getCurPerm m5, empty_map).
+    (* pose perms_0 := ... *)
     eapply (rt1n_trans Ostate Ostep _ (_, _, _:ThreadPool.t, ttree, diluteMem _)).
     {
         (* take a suspend_step *)
         rewrite /Ostep /MachStep /=.
         eapply pragma_step.
         { rewrite HU //. }
-        eapply (step_parallel cnt8 Hcompat8 _ _ _ _ _ _ _ m8).
+        eapply (step_parallel cnt8 Hcompat8 _ _ _ _ _ _ _ m8 _ _ _ _ 3 _ _ _ _ _ perm8 _).
         { eapply one_thread_tp_inv; subst tp; done. }
         { apply (restrPermMap_eq (proj1 (Hcompat8 0 cnt8))). }
         { simpl. done. }
-        
+        { simpl. done. }
+        { lia. }
+        { rewrite /perm8 /m6 /= H_lock_res_empty //. }
+        { 
 
     }
 
