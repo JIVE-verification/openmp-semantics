@@ -273,7 +273,7 @@ Module DryHybridMachine.
             (Hinv : invariant tp)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m1)
-            (Hc: getThreadC cnt0 = Krun c)
+            (Hc: Kblocked_at (getThreadC cnt0) = Some c)
             (Hat_meta: at_pragma semSem c = Some (idx, OMPParallel num_threads pc rcs))
             (* 1. spawn new threads as fork, add them to team, and split permissions angelically*)
             (Hnum_threads: num_threads > 0)
