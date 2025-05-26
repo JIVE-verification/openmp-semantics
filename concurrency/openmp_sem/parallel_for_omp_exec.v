@@ -11,6 +11,8 @@ From mathcomp.ssreflect Require Import ssreflect.
 From Hammer Require Import Tactics.
 Require Import Coq.Program.Equality.
 
+Set Bullet Behavior "Strict Subproofs".
+
 Definition ge := Clight.globalenv prog.
 Instance Sem : Semantics := @Sem ge.
 Instance OrdinalThreadPoolInst: ThreadPool := OrdinalPool.OrdinalThreadPool.
@@ -45,6 +47,86 @@ Ltac inv' H :=
 
 Arguments Mem.storev: simpl never.
 Arguments Mem.alloc: simpl never.
+
+
+Lemma permMapJoin_empty p : permMapJoin empty_map p p.
+Proof. intros. unfold permMapJoin, empty_map.
+  intros; apply permjoin_def.permjoin_None_l.
+Qed.
+
+Lemma permMapJoinPair_empty p : permMapJoinPair emptyPerm p p.
+Proof. intros. rewrite /permMapJoinPair /emptyPerm /=.
+  split; apply permMapJoin_empty.
+Qed.
+
+Definition int_lo := Z0. (* offset lowerbound for integer *)
+Definition int_hi := (Zpos (xO (xO xH))). (* offset upperbound for integer *)
+
+Definition int_perm (p:option permission) : Z->option permission :=
+   (λ  (ofs : Z), if Coqlib.proj_sumbool (Coqlib.zle int_lo ofs) && Coqlib.proj_sumbool (Coqlib.zlt ofs int_hi)
+      then p else None).
+
+Lemma perm_set b_i p (amap:access_map):
+  amap.2 ! b_i = Some $ int_perm p →
+  PMap.set b_i (int_perm p) amap = amap.
+Proof.
+  intros.
+  destruct amap.
+  rewrite /PMap.set /=.
+  f_equal.
+  apply extensionality; intros.
+  destruct (decide (b_i = i)).
+  - simpl in H. subst. rewrite PTree.gss //.
+  - rewrite PTree.gso //. auto.
+Qed.
+
+Lemma permMapJoin_split_perm p1 p2 p3 (b_i:ident) (m1 m2 m3:access_map) :
+  permjoin_def.permjoin p1 p2 p3 ->
+  permMapJoin m1 m2 m3 ->
+  permMapJoin
+    (PMap.set b_i (int_perm p1) m1)
+    (PMap.set b_i (int_perm p2) m2)
+    (PMap.set b_i (int_perm p3) m3).
+Proof.
+  intros.
+  unfold permMapJoin; intros.
+  destruct (decide (b = b_i)).
+  - subst. 
+    rewrite !PMap.gss.
+    rewrite /int_perm.
+    destruct (Coqlib.proj_sumbool (Coqlib.zle int_lo ofs) && Coqlib.proj_sumbool (Coqlib.zlt ofs int_hi) ) .
+    + apply H.
+    + constructor.
+  - rewrite !PMap.gso //done.
+Qed.
+
+Lemma permMapJoin_permMapJoinPair (m1 m2 m3:access_map) :
+  permMapJoin m1 m2 m3 ->
+  permMapJoinPair
+    (m1, empty_map)
+    (m2, empty_map)
+    (m3, empty_map).
+Proof.
+  intros.
+  rewrite /permMapJoinPair /=.
+  split; [done|apply permMapJoin_empty].
+Qed.
+
+Lemma getCurPerm_set (f: Z -> option permission) (b_i:ident) (mem_access: PMap.t (Z → perm_kind → option permission)):
+  PMap.map (λ (entry : Z → perm_kind → option permission) (ofs : Z), entry ofs Cur) 
+    $ PMap.set b_i (λ (ofs:Z) (_:perm_kind), f ofs) mem_access =
+  PMap.set b_i f
+    $ PMap.map (λ (entry : Z → perm_kind → option permission) (ofs : Z), entry ofs Cur) mem_access.
+Proof.
+  rewrite /PMap.map /PMap.set /=.
+  f_equal.
+  apply extensionality.
+  intros i. destruct (decide (i = b_i)) as [->|Hi].
+  - rewrite PTree.gss.
+    rewrite gmap1 /Coqlib.option_map PTree.gss //.
+  - rewrite PTree.gso //.
+    rewrite !gmap1 /Coqlib.option_map PTree.gso //.
+Qed.
 
 Ltac destruct_match_goal :=
     lazymatch goal with
@@ -532,21 +614,101 @@ Proof.
       rewrite /=. destruct i; done. }
     assert (H_lockRes_empty8: forall laddr, ThreadPool.lockRes tp8 laddr = None).
     { intros. subst tp8 tp6 tp5 tp4 tp3 tp2 tp. rewrite /getThreadR /=  /ThreadPool.lockRes /lockRes  /= find_empty //.  }
-    pose perm8:= (getCurPerm m5, empty_map).
-    (* pose perms_0 := ... *)
+    
+    assert (Hres: res = (access_map * access_map)%type) by done.
+    pose amap8 := (getCurPerm m8).
+    pose perm8 := (amap8, empty_map).
+
+    pose curPerm_m1 := (PMap.map (λ (entry : Z → perm_kind → option permission) (ofs : Z),
+                        entry ofs Cur) (Mem.mem_access m)).         
+    assert (curPerm_m1_unit: permMapJoin curPerm_m1 curPerm_m1 curPerm_m1).
+    {
+      (* by case-analysis on block *)
+      rewrite /permMapJoin => _b _ofs.
+      rewrite /curPerm_m1 Hm Hm1_def /=.
+      rewrite PMap.gmap /=.
+      destruct (decide (_b = xH)) as [H_b|H_b].
+      - rewrite H_b PMap.gss /=.
+        destruct (Coqlib.proj_sumbool (Coqlib.zle Z0 _ofs) && Coqlib.proj_sumbool (Coqlib.zlt _ofs (Zpos xH))) eqn:H_ofs.
+        + constructor.
+        + rewrite /m1_mem_access /= PMap.gss H_ofs.
+          constructor.
+      - rewrite PMap.gso //.
+        rewrite /m1_mem_access /= PMap.gso //.
+        rewrite /PMap.init /PMap.get /=.
+        constructor.
+    }
+
+    (* perm8 is divided to perm8_1 and perm8_2 (w.r.t. permMapJoinPair); more specifically, the Freeable locations are divided into Readables,
+       and curPerm_m1 is not divided because it is a unit of the permMapJoin relation (it only contains Nonempty permission of a location that
+       we do no care ). *)
+    pose perm8_1 : (access_map * access_map) := (PMap.set b_count (int_perm $ Some Readable)
+                      (PMap.set b_i (int_perm $ Some Readable)
+                        curPerm_m1),
+                     empty_map).
+    pose perm8_2 : (access_map * access_map) := (PMap.set b_count (int_perm $ Some Readable)
+                      (PMap.set b_i (int_perm $ Some Readable)
+                        curPerm_m1),
+                     empty_map).
+    pose perms8 := [perm8_1; perm8_2].
+
+    assert (Hamap8 : amap8 = (PMap.set b_count (int_perm $ Some Freeable) $
+                                          PMap.set b_i (int_perm $ Some Freeable) curPerm_m1)).
+    { 
+      clear -Hm5  Hm2_1 Hm2_0 Hm Hm1_def m1_mem_access m_init Hb_i' Hb_count'.
+      rewrite /amap8 /m8 /m7 /m6 /=.
+      rewrite /Mem.alloc /= in Hm2_0.
+      injection Hm2_0; intros Hb_i Hm2_0_def.
+      rewrite /Mem.alloc /= in Hm2_1.
+      injection Hm2_1; intros Hb_count Hm2_1_def.
+      rewrite  /Mem.storev /Mem.store /= in Hm5.
+      destruct (Mem.valid_access_dec m4 Mint32 b_i (Ptrofs.unsigned Ptrofs.zero) Writable) eqn:Hm5_eq; [|done].
+      inversion Hm5.
+      rewrite /getCurPerm /=.
+      rewrite /m4 /m3 /m2 -Hm2_1_def /= Hb_count -Hm2_0_def /=.
+      rewrite Hb_i.
+      rewrite !getCurPerm_set /curPerm_m1 //.
+    }
+
+
+    assert (Hperms8_lemma : permMapJoinPair perm8_1 perm8_2 perm8).
+    {
+      clear -Hamap8 curPerm_m1_unit.
+      rewrite /permMapJoinPair /=.
+      split; [|apply permMapJoin_empty].
+      rewrite Hamap8.
+      apply permMapJoin_split_perm;[constructor|].
+      apply permMapJoin_split_perm;[constructor|].
+      apply curPerm_m1_unit.
+    }
+
+    assert (Hperms8 : permMapJoin_list perms8 perm8).
+    {
+      clear -Hperms8_lemma.
+      rewrite /permMapJoinPair /=.
+      econstructor 2.
+      { apply permMapJoinPair_empty. }
+      econstructor 2.
+      { apply Hperms8_lemma. }
+      constructor.
+    }
+
     eapply (rt1n_trans Ostate Ostep _ (_, _, _:ThreadPool.t, ttree, diluteMem _)).
     {
         (* take a suspend_step *)
         rewrite /Ostep /MachStep /=.
         eapply pragma_step.
         { rewrite HU //. }
-        eapply (step_parallel cnt8 Hcompat8 _ _ _ _ _ _ _ m8 _ _ _ _ 3 _ _ _ _ _ perm8 _).
+        eapply (step_parallel cnt8 Hcompat8 _ _ _ _ _ _ _ m8 _ _ _ _ 2 _ _ _ _ _ perm8 perms8).
         { eapply one_thread_tp_inv; subst tp; done. }
         { apply (restrPermMap_eq (proj1 (Hcompat8 0 cnt8))). }
         { simpl. done. }
         { simpl. done. }
         { lia. }
         { rewrite /perm8 /m6 /= H_lock_res_empty //. }
+        apply Hperms8.
+        
+        (* they both get readable permission of count and no permission of i *)
         { 
 
     }
