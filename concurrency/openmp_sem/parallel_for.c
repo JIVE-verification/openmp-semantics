@@ -6,7 +6,7 @@
 int main() {
     
     int count = 0;
-    #pragma omp parallel num_threads(3)
+    #pragma omp parallel num_threads(2)
     {
         #pragma omp for reduction (+:count)
         for (int i=0; i<6; i+=1) {
