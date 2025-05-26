@@ -707,10 +707,16 @@ Proof.
         { lia. }
         { rewrite /perm8 /m6 /= H_lock_res_empty //. }
         apply Hperms8.
-        
-        (* they both get readable permission of count and no permission of i *)
-        { 
-
+        { done. }
+        { (* current thread's new permission*) exists perm8_1.
+          split; done. }
+        { done. }
+        { done. }
+        { done. }
+        { done. }
+        { simpl. rewrite /spawn_team /update_tid /stree_update Heqttree /=.
+          unfold_mbind.
+          (* maybe just prove stree_lookup exists? *) }
     }
 
 
