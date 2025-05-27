@@ -34,7 +34,7 @@ void * _par_routine1(void* __par_routine1_data){
 
     // do reduction
     pthread_mutex_lock(&reduction_mutex_1); // reduction start
-    _par_routine1_data->k = _par_routine1_data->k + k; // increment k
+    *_par_routine1_data->k = *_par_routine1_data->k + k; // increment k
     pthread_mutex_unlock(&reduction_mutex_1); // reduction end
 
     return NULL;
@@ -57,12 +57,14 @@ int main() {
     int k = 0;
 
     /* parallel region start */
-    pthread_t t1,t2;
+    // t1 is the parent thread
+    pthread_t t2;
 
+    _par_routine1_data_ty __par_routine1_data_1 = {&i, &k};
     _par_routine1_data_ty __par_routine1_data_2 = {&i, &k};
-    pthread_create(&t2, NULL, _par_routine1, (void *)&__par_routine1_data_1);
+    pthread_create(&t2, NULL, _par_routine1, (void *)&__par_routine1_data_2);
     
-    _par_routine1(__par_routine1_data_1);
+    _par_routine1((void *)&__par_routine1_data_1);
 
     // wait for threads to finish
     pthread_join(t2, NULL);

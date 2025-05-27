@@ -1,13 +1,21 @@
 # Goal
 Write a compiler from concurrent C + omp pragmas (ClightOMP) to concurrent C (CPM), and verify correctness.
+Source: concurrent C + omp (in Clight)
+Target: concurrent C without using Spragma (in Clight)
 
 ## Compiler
 The target lang is Clight + concurrent primitives (spawn + lock functions).
+
+get CompCert C AST of source C program:
+```[bash]
+clightgen -csyntax PATH_TO_PROGRAM
+```
+
 Source lang: should probably be Clight, otherwise compiler correctness theorem might be tricky. Two issues:
 
 1. [compcert frontend](https://compcert.org/doc/) has these passes: `CompCert C =SimplExpr=> Clight_1 =[simplLocals]=> Clight_2`,
 where `Clight_1,2` are both Clight but the simplLocals pass does the stack allocation optimization, which we don't want (because compcert frontend ignores pragmas and therefore don't know anything about shared variables in OpenMP context), so we do `clightgen -csyntax` to generate CompCert C, then manually apply the SimplExpr pass, then add the OpenMP annotations.
-2. To write the passes, we need information about the (shared, private, reduction, local) variables. However compcert hoists local variable definitions (because there are no "block" in Clight), so at least information about local vars is lost in Clight. We assume this analysis info is given for now.
+1. To write the passes, we need information about the (shared, private, reduction, local) variables. However compcert hoists local variable definitions (because there are no "block" in Clight), so at least information about local vars is lost in Clight. We assume this analysis info is given for now.
 
 ### parallel pragma
 Types of different variables and their treatments when making a thread routine (e.g. translating the parallel region in [cmplr_src1.c](./cmplr_src1.c) to [complr_tgt1.c:_par_routine1](./cmplr_tgt1.c)):

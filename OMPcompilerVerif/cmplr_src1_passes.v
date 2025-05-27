@@ -271,6 +271,9 @@ Inductive pragma_info : Type :=
 (* shared vars, vars in the private cluse and vars in the reduction clause *)
   | ParallelInfo : list (ident * type) -> list (ident * type) -> list (ident * type) -> pragma_info.
 
+Definition empty_pragma_info : pragma_info :=
+  ParallelInfo nil nil nil.
+
 (* private variables are those specified in the private clause plus those in the reduction  *)
 Definition parallel_info_spec (par_info: pragma_info) vars: Prop :=
   match par_info with
@@ -335,7 +338,7 @@ Fixpoint erase_info (sT: statementT) : statement :=
    2. reduction variable, similar to 1
    3. local, declared in this parallel region
    4. otherwise, shared.  *)
-Fixpoint parse_parallel_info_stmt (stmt: statement) : (list ident * statementT) :=
+Fixpoint stmt_to_stmtT (stmt: statement) : statementT :=
   match stmt with
   | Sskip => SskipT
   | Sassign l r => SassignT l r
@@ -348,12 +351,13 @@ Fixpoint parse_parallel_info_stmt (stmt: statement) : (list ident * statementT) 
   | Sbreak => SbreakT
   | Scontinue => ScontinueT
   | Sreturn oe => SreturnT oe
-  | Sswitch e ls => SswitchT e (parse_parallel_info_labeled_statements ls)
+  | Sswitch e ls => SswitchT e (labeled_statements_to_labeled_statementsT ls)
   | Slabel l s => SlabelT l (parse_parallel_info_stmt s)
   | Sgoto l => SgotoT l
-  | Spragma n pl stmt' =>
-      match pl with
-      | OMPParallel n' cl =>
-          let '(ss, ps, rs) := parse_clauses cl in
-          let par_info := ParallelInfo ss ps rs in
-          let stmt'' := parse_parallel_info_stmt stmt' in 
+  | Spragma n pl stmt' => SpragmaT empty_pragma_info n pl (parse_parallel_info_stmt stmt')
+  end
+with labeled_statements_to_labeled_statementsT (ls: labeled_statements) : labeled_statementsT :=
+  match ls with
+  | LSnil => LSnilT
+  | LScons c s ls' => LSconsT c (parse_parallel_info_stmt s) (labeled_statements_to_labeled_statementsT ls')
+  end.
