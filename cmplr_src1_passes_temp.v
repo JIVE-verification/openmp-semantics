@@ -270,46 +270,29 @@ Definition f_main_omp :=
 
   Fixpoint extracting_spragma (s: statement): (option statement):=
   match s with
-  |Sskip => None
-  |Sassign a b => None
-  | Sset a b => None
-  | Scall a b c=> None
-  | Sbuiltin a b c d=> None
   | Ssequence a b => match extracting_spragma a with
                     | Some s => Some s
-                    | None => match extracting_spragma b with 
-                                | Some s => Some s
-                                | None => None
-                            end
+                    | None => extracting_spragma b
                     end
-  | Sifthenelse a b c =>    match extracting_spragma b with
+  | Sifthenelse a b c => match extracting_spragma b with
                     | Some s => Some s
-                    | None => match extracting_spragma c with 
-                                | Some s => Some s
-                                | None => None
-                            end
+                    | None => extracting_spragma c
                     end   
   | Sloop a b => match extracting_spragma a with
                     | Some s => Some s
-                    | None => match extracting_spragma b with 
-                                | Some s => Some s
-                                | None => None
-                            end
-                    end  
-  | Sbreak => None  
-  | Scontinue => None 
-  | Sreturn a => None  
-  | Sswitch b c => None  
-  | Slabel a b => match extracting_spragma b with 
-                  | Some s => Some s
-                  | None =>   None
-                  end  
-  | Sgoto a => None
-  | Spragma a b c => Some s                     
+                    | None => extracting_spragma b
+                    end   
+  | Slabel a b => extracting_spragma b
+  | Spragma a b c => Some s   
+  |_ => None            
   end.
 
   Definition extracted_pragma_parallel_material (f: function):=
-  extracting_spragma (fn_body f).
+  (*TODO: revise argments to mkfunction*)
+  match extracting_spragma (fn_body f) with 
+  | Some s => Some (mkfunction (fn_return f) (fn_callconv f) (fn_params f) (fn_vars f) (fn_temps f) s)
+  | None => None
+  end.
   Check extracted_pragma_parallel_material.
   Compute extracted_pragma_parallel_material (f_main_omp).
 (*design of function: maybe recurse until encountering SPragma with parallel?*)
