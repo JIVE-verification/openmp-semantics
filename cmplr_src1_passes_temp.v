@@ -290,7 +290,7 @@ Definition f_main_omp :=
   Definition extracted_pragma_parallel_material (f: function):=
   (*TODO: revise argments to mkfunction*)
   match extracting_spragma (fn_body f) with 
-  | Some s => Some (mkfunction (fn_return f) (fn_callconv f) (fn_params f) (fn_vars f) (fn_temps f) s)
+  | Some s => Some (mkfunction (tptr tvoid) (fn_callconv f) (fn_params f) (fn_vars f) (fn_temps f) s)
   | None => None
   end.
   Check extracted_pragma_parallel_material.
