@@ -266,9 +266,8 @@ Definition f_main_omp :=
         (Ssequence Sskip
            (Sreturn (Some (Econst_int (Int.repr 0) tint))))
   |}.
-  Check f_main_omp. 
 
-  Fixpoint extracting_spragma (s: statement): (option statement):=
+  Fixpoint extracting_spragma (s: statement): option statement:=
   match s with
   | Ssequence a b => match extracting_spragma a with
                     | Some s => Some s
@@ -286,15 +285,24 @@ Definition f_main_omp :=
   | Spragma a b c => Some s   
   |_ => None            
   end.
-
-  Definition extracted_pragma_parallel_material (f: function):=
+Type extracting_spragma.
+  Definition extracted_pragma_parallel_material (f: function): option function:=
   (*TODO: revise argments to mkfunction*)
   match extracting_spragma (fn_body f) with 
   | Some s => Some (mkfunction (tptr tvoid) (fn_callconv f) (fn_params f) (fn_vars f) (fn_temps f) s)
   | None => None
   end.
-  Check extracted_pragma_parallel_material.
+  Type extracted_pragma_parallel_material.
+  Compute fn_params f_main_omp.
+  Compute fn_temps f_main_omp.
+  Compute extracted_pragma_parallel_material f_main_omp.
+  Definition adding_ident (identifier: (ident * type)) (existing_list: list (ident * type)):=
+  identifier::existing_list.
+  Type _i.
+  Type type.
+(* Compute adding_ident (_i, Tint) (fn_temps f_main_omp). *)
   Compute extracted_pragma_parallel_material (f_main_omp).
+  Search "routine".
 (*design of function: maybe recurse until encountering SPragma with parallel?*)
 (* step 3: find all variables used in a parallel pragma, figure out which ones are private,
    which ones are shared and whihch ones are reduction variables.
@@ -394,3 +402,71 @@ with labeled_statements_to_labeled_statementsT (ls: labeled_statements) : labele
   | LSnil => LSnilT
   | LScons c s ls' => LSconsT c (stmt_to_stmtT s) (labeled_statements_to_labeled_statementsT ls')
   end.
+Definition full_pragma_info : pragma_info := ParallelInfo [(_i, tint)] [(_j, tint)] [(_k, tint)].
+
+  Record annotatedFunction  : Type := makeAnnotatedFunction {
+  fn_return_annot: type;
+  fn_callconv_annot: calling_convention;
+  fn_params_annot: list (ident * type);
+  fn_vars_annot: list (ident * type);
+  fn_temps_annot: list (ident * type);
+  fn_body_annot: statementT
+}.
+
+Definition parallel_body_T : statementT :=
+  (SsequenceT
+    (SsequenceT SskipT
+      (SassignT (Evar _i tint)
+          (Ebinop Oadd 
+            (Evar _i tint)
+            (Econst_int Int.one type_int32s)
+            (Tint I32 Signed noattr))))
+    (SsequenceT
+      (SsequenceT SskipT
+          (SassignT (Evar _j tint)
+            (Econst_int (Int.repr 1) tint)))
+      (SsequenceT SskipT
+          (SassignT (Evar _k tint)
+            (Econst_int (Int.repr 1) tint))))).
+
+Definition f_main_omp_annot :=
+  {|
+    fn_return_annot := tint;
+    fn_callconv_annot := cc_default;
+    fn_params_annot := nil;
+    fn_vars_annot := (_i, tint) :: (_j, tint) :: (_k, tint) :: nil;
+    fn_temps_annot := nil;
+    fn_body_annot :=
+      SsequenceT
+        (SsequenceT
+           (SsequenceT SskipT
+              (SassignT (Evar _i tint)
+                 (Econst_int (Int.repr 0) tint)))
+           (SsequenceT
+              (SsequenceT SskipT
+                 (SassignT (Evar _j tint)
+                    (Econst_int (Int.repr 0) tint)))
+              (SsequenceT
+                 (SsequenceT SskipT
+                    (SassignT (Evar _k tint)
+                       (Econst_int (Int.repr 0) tint)))
+                 (SsequenceT SskipT
+                    (SsequenceT 
+                      (SpragmaT full_pragma_info 0 (OMPParallel 2 (PrivClause (_j::nil)) ((RedClause RedIdPlus (_k::nil))::nil))
+                        parallel_body_T)
+                      (ScallT None
+                          (Evar _printf
+                            (Tfunction 
+                                (Tcons (tptr tschar) Tnil) tint
+                                {|
+                                  cc_vararg := Some 1;
+                                  cc_unproto := false;
+                                  cc_structret := false
+                                |}))
+                          (Evar ___stringlit_1 (tarray tschar 24)
+                          :: Evar _i tint
+                              :: Evar _j tint
+                                :: Evar _k tint :: nil)))))))
+        (SsequenceT SskipT
+           (SreturnT (Some (Econst_int (Int.repr 0) tint))))
+  |}.
