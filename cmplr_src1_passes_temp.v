@@ -17,11 +17,12 @@ Module Info.
   Definition big_endian := false.
   Definition source_file := "cmplr_src1.c".
 End Info.
-
+Compute ((Zpos $"df")+(Zpos $"j")).
 Definition ___stringlit_1 : ident := $"__stringlit_1".
 Definition _i : ident := $"i".
 Definition _j : ident := $"j".
 Definition _k : ident := $"k".
+Definition _l : ident := $"l".
 Definition _main : ident := $"main".
 Definition _printf : ident := $"printf".
 
@@ -207,7 +208,7 @@ Definition prog_clight :=
 Lemma f_main_clight_eq :
   Errors.OK prog_clight = prog_clight'.
 Proof. reflexivity. Qed.
-
+Locate Econst_int.
 Definition parallel_body : statement :=
   (Ssequence
     (Ssequence Sskip
@@ -227,45 +228,39 @@ Definition parallel_body : statement :=
 (* step 2 : manually annotate f_main_clight with pragma steps *)
 Definition f_main_omp :=
   {|
-    fn_return := tint;
-    fn_callconv := cc_default;
-    fn_params := nil;
-    fn_vars := (_i, tint) :: (_j, tint) :: (_k, tint) :: nil;
-    fn_temps := nil;
-    fn_body :=
-      Ssequence
+  fn_return := tint;
+  fn_callconv := cc_default;
+  fn_params := nil;
+  fn_vars := ((_i, tint) :: (_j, tint) :: (_k, tint) :: (_l, tint) :: nil);
+  fn_temps := nil;
+  fn_body :=
+(Ssequence
+  (Ssequence
+    (Sset _i (Econst_int (Int.repr 0) tint))
+    (Ssequence
+      (Sset _j (Econst_int (Int.repr 0) tint))
+      (Ssequence
+        (Sset _k (Econst_int (Int.repr 0) tint))
         (Ssequence
-           (Ssequence Sskip
-              (Sassign (Evar _i tint)
-                 (Econst_int (Int.repr 0) tint)))
-           (Ssequence
-              (Ssequence Sskip
-                 (Sassign (Evar _j tint)
-                    (Econst_int (Int.repr 0) tint)))
+          (Ssequence
+            (Sset _i
+              (Ebinop Oadd (Etempvar _i tint) (Econst_int (Int.repr 1) tint)
+                tint))
+            (Ssequence
+              (Sset _j (Econst_int (Int.repr 1) tint))
               (Ssequence
-                 (Ssequence Sskip
-                    (Sassign (Evar _k tint)
-                       (Econst_int (Int.repr 0) tint)))
-                 (Ssequence Sskip
-                    (Ssequence 
-                      (Spragma 0 (OMPParallel 2 (PrivClause (_j::nil)) ((RedClause RedIdPlus (_k::nil))::nil))
-                        parallel_body)
-                      (Scall None
-                          (Evar _printf
-                            (Tfunction 
-                                (Tcons (tptr tschar) Tnil) tint
-                                {|
-                                  cc_vararg := Some 1;
-                                  cc_unproto := false;
-                                  cc_structret := false
-                                |}))
-                          (Evar ___stringlit_1 (tarray tschar 24)
-                          :: Evar _i tint
-                              :: Evar _j tint
-                                :: Evar _k tint :: nil)))))))
-        (Ssequence Sskip
-           (Sreturn (Some (Econst_int (Int.repr 0) tint))))
-  |}.
+                (Sset _k (Econst_int (Int.repr 1) tint))
+                (Sset _l (Econst_int (Int.repr 0) tint)))))
+          (Ssequence (Spragma 0 (OMPParallel 2 (PrivClause (_j::nil)) ((RedClause RedIdPlus (_k::nil))::nil))
+                  parallel_body)
+          (Scall None
+            (Evar _printf (Tfunction (Tcons (tptr tschar) Tnil) tint
+                            {|cc_vararg:=(Some 1); cc_unproto:=false; cc_structret:=false|}))
+            ((Evar ___stringlit_1 (tarray tschar 24)) ::
+             (Etempvar _i tint) :: (Etempvar _j tint) ::
+             (Etempvar _k tint) :: nil)))))))
+  (Sreturn (Some (Econst_int (Int.repr 0) tint))))
+|}.
 
   Fixpoint extracting_spragma (s: statement): option statement:=
   match s with
@@ -402,7 +397,6 @@ with labeled_statements_to_labeled_statementsT (ls: labeled_statements) : labele
   | LSnil => LSnilT
   | LScons c s ls' => LSconsT c (stmt_to_stmtT s) (labeled_statements_to_labeled_statementsT ls')
   end.
-Definition full_pragma_info : pragma_info := ParallelInfo [(_i, tint)] [(_j, tint)] [(_k, tint)].
 
   Record annotatedFunction  : Type := makeAnnotatedFunction {
   fn_return_annot: type;
@@ -429,44 +423,39 @@ Definition parallel_body_T : statementT :=
           (SassignT (Evar _k tint)
             (Econst_int (Int.repr 1) tint))))).
 
+Definition full_pragma_info : pragma_info := ParallelInfo [(_i, tint)] [(_j, tint)] [(_k, tint)].
 Definition f_main_omp_annot :=
   {|
     fn_return_annot := tint;
-    fn_callconv_annot := cc_default;
-    fn_params_annot := nil;
-    fn_vars_annot := (_i, tint) :: (_j, tint) :: (_k, tint) :: nil;
-    fn_temps_annot := nil;
-    fn_body_annot :=
-      SsequenceT
+  fn_callconv_annot := cc_default;
+  fn_params_annot := nil;
+  fn_vars_annot := ((_i, tint) :: (_j, tint) :: (_k, tint) :: (_l, tint) :: nil);
+  fn_temps_annot := nil;
+  fn_body_annot :=
+(SsequenceT
+  (SsequenceT
+    (SsetT _i (Econst_int (Int.repr 0) tint))
+    (SsequenceT
+      (SsetT _j (Econst_int (Int.repr 0) tint))
+      (SsequenceT
+        (SsetT _k (Econst_int (Int.repr 0) tint))
         (SsequenceT
-           (SsequenceT SskipT
-              (SassignT (Evar _i tint)
-                 (Econst_int (Int.repr 0) tint)))
-           (SsequenceT
-              (SsequenceT SskipT
-                 (SassignT (Evar _j tint)
-                    (Econst_int (Int.repr 0) tint)))
+          (SsequenceT
+            (SsetT _i
+              (Ebinop Oadd (Etempvar _i tint) (Econst_int (Int.repr 1) tint)
+                tint))
+            (SsequenceT
+              (SsetT _j (Econst_int (Int.repr 1) tint))
               (SsequenceT
-                 (SsequenceT SskipT
-                    (SassignT (Evar _k tint)
-                       (Econst_int (Int.repr 0) tint)))
-                 (SsequenceT SskipT
-                    (SsequenceT 
-                      (SpragmaT full_pragma_info 0 (OMPParallel 2 (PrivClause (_j::nil)) ((RedClause RedIdPlus (_k::nil))::nil))
-                        parallel_body_T)
-                      (ScallT None
-                          (Evar _printf
-                            (Tfunction 
-                                (Tcons (tptr tschar) Tnil) tint
-                                {|
-                                  cc_vararg := Some 1;
-                                  cc_unproto := false;
-                                  cc_structret := false
-                                |}))
-                          (Evar ___stringlit_1 (tarray tschar 24)
-                          :: Evar _i tint
-                              :: Evar _j tint
-                                :: Evar _k tint :: nil)))))))
-        (SsequenceT SskipT
-           (SreturnT (Some (Econst_int (Int.repr 0) tint))))
+                (SsetT _k (Econst_int (Int.repr 1) tint))
+                (SsetT _l (Econst_int (Int.repr 0) tint)))))
+          (SsequenceT (SpragmaT full_pragma_info 0 (OMPParallel 2 (PrivClause (_j::nil)) ((RedClause RedIdPlus (_k::nil))::nil))
+                  parallel_body_T)     
+          (ScallT None
+            (Evar _printf (Tfunction (Tcons (tptr tschar) Tnil) tint
+                            {|cc_vararg:=(Some 1); cc_unproto:=false; cc_structret:=false|}))
+            ((Evar ___stringlit_1 (tarray tschar 24)) ::
+             (Etempvar _i tint) :: (Etempvar _j tint) ::
+             (Etempvar _k tint) :: nil)))))))
+  (SreturnT (Some (Econst_int (Int.repr 0) tint))))
   |}.
