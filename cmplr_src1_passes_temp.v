@@ -459,3 +459,31 @@ Definition f_main_omp_annot :=
              (Etempvar _k tint) :: nil)))))))
   (SreturnT (Some (Econst_int (Int.repr 0) tint))))
   |}.
+
+Fixpoint extracting_spragma_T (s: statementT): option statementT:=
+  match s with
+  | SsequenceT a b => match extracting_spragma_T a with
+                    | Some s => Some s
+                    | None => extracting_spragma_T b
+                    end
+  | SifthenelseT a b c => match extracting_spragma_T b with
+                    | Some s => Some s
+                    | None => extracting_spragma_T c
+                    end   
+  | SloopT a b => match extracting_spragma_T a with
+                    | Some s => Some s
+                    | None => extracting_spragma_T b
+                    end   
+  | SlabelT a b => extracting_spragma_T b
+  | SpragmaT a b c d => Some s   
+  |_ => None            
+  end.
+
+Definition extracted_pragma_parallel_material_T (f: annotatedFunction): option annotatedFunction:=
+  (*TODO: revise argments to mkfunction*)
+  match extracting_spragma_T (fn_body_annot f) with 
+  | Some s => Some (makeAnnotatedFunction (tptr tvoid) (fn_callconv_annot f) (fn_params_annot f) (fn_vars_annot f) (fn_temps_annot f) s)
+  | None => None
+  end.
+
+  Compute extracted_pragma_parallel_material_T f_main_omp_annot.
