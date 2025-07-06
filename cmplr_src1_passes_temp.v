@@ -487,3 +487,14 @@ Definition extracted_pragma_parallel_material_T (f: annotatedFunction): option a
   end.
 
   Compute extracted_pragma_parallel_material_T f_main_omp_annot.
+
+(*TODO: add all cases and translate SpragmaT into something that's not a pragma*)
+Fixpoint compiler_to_clight_function (s: statementT) : statement :=
+ match s with
+  | SsequenceT a b => Ssequence (compiler_to_clight_function a) (compiler_to_clight_function b)
+  | SifthenelseT a b c => Sifthenelse a (compiler_to_clight_function b) (compiler_to_clight_function c)
+  | SloopT a b => Sloop (compiler_to_clight_function a) (compiler_to_clight_function b)  
+  | SlabelT a b => Slabel a (compiler_to_clight_function b)
+  | SpragmaT a b c d => Sskip  
+  |_ => Sskip            
+  end.
