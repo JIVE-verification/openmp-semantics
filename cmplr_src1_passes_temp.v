@@ -495,6 +495,6 @@ Fixpoint compiler_to_clight_function (s: statementT) : statement :=
   | SifthenelseT a b c => Sifthenelse a (compiler_to_clight_function b) (compiler_to_clight_function c)
   | SloopT a b => Sloop (compiler_to_clight_function a) (compiler_to_clight_function b)  
   | SlabelT a b => Slabel a (compiler_to_clight_function b)
-  | SpragmaT a b c d => Sskip  
+  | SpragmaT a b c d => (compiler_to_clight_function d)
   |_ => Sskip            
   end.
