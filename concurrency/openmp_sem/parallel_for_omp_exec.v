@@ -716,7 +716,14 @@ Proof.
         { done. }
         { simpl. rewrite /spawn_team /update_tid /stree_update Heqttree /=.
           unfold_mbind.
+          
+          rewrite /node_init /stree_lookup /stree_lookup_aux /stree_lookup_aux_func /=.
+          
+
+
+          rewrite
           (* maybe just prove stree_lookup exists? *) }
+
     }
 
 

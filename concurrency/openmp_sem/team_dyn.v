@@ -318,8 +318,14 @@ Section SiblingTreeZipper.
     do 2 f_equal. rewrite -app_assoc //.
   Qed.
 
+  End SiblingTreeZipper.
 
+  (* the tree zipper is a settable record *)
   Section AlternativeDefs.
+    Notation stree := (@stree nat).
+    Notation tree_zipper := (@tree_zipper nat).
+
+
   (* alternative definition of root, not used *)
     Program Fixpoint root' tz {measure (tree_pos_measure_up tz)}: tree_zipper :=
       match go_up tz with
@@ -329,11 +335,17 @@ Section SiblingTreeZipper.
     Next Obligation. apply go_up_wf. rewrite Heq_anonymous //. Defined.
     Next Obligation. apply measure_wf. apply Nat.lt_wf_0. Defined.
 
-        Definition to_stree' (tz: tree_zipper) : option stree :=
+    Definition to_stree' (tz: tree_zipper) : option stree :=
       match (root' tz) with
       | TreeZip this [] [] _ => Some this
       | _ => None
       end.
+
+    Example to_stree'_test : to_stree' (TreeZip (SNode 1 []) [] [] [([],2,[])]) = Some (SNode 1 []).
+    rewrite /to_stree' /root' /=. cbv. (* stuck *)
+    Abort.
+
+
 
 
     Lemma go_right_same_tree' (tz tz': tree_zipper) :

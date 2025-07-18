@@ -221,7 +221,7 @@ Definition parallel_body : statement :=
             (Econst_int (Int.repr 1) tint))))).
 
 (* step 2 : manually annotate f_main_clight with pragma steps *)
-Definition f_main_omp :=
+Definition f_main_omp : function :=
   {|
     fn_return := tint;
     fn_callconv := cc_default;
