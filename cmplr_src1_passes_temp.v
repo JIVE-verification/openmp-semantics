@@ -496,5 +496,33 @@ Fixpoint compiler_to_clight_function (s: statementT) : statement :=
   | SloopT a b => Sloop (compiler_to_clight_function a) (compiler_to_clight_function b)  
   | SlabelT a b => Slabel a (compiler_to_clight_function b)
   | SpragmaT a b c d => (compiler_to_clight_function d)
-  |_ => Sskip            
+  |_ => Sskip 
+  (* | SpragmaT a b c d => match b with 
+          | OMPParallel => 
+          | OMPParallelEnd =>
+          | OMPFor =>
+          | OMPForEnd =>
+          | OMPBarrier =>
+  |_ => Sskip             *)
   end.
+
+  (*pragma label has these options:
+  Variant pragma_label : Type :=
+  | OMPParallel (num_threads: nat)
+                (privatization_clause: privatization_clause_type)
+                (reduction_clauses: list reduction_clause_type)
+  | OMPParallelEnd
+  | OMPFor (privatization_clause: privatization_clause_type)
+           (reduction_clauses: list reduction_clause_type)
+  | OMPForEnd
+  | OMPBarrier
+.
+pthread_create has this signature: https://man7.org/linux/man-pages/man3/pthread_create.3.html
+Final argument (in c) is the variables used
+
+TODO:
+Plan for compiler passes:
+First pass cannot lose information in pragma_info and pragma_label
+First pass: 
+
+*)
