@@ -53,10 +53,10 @@ Section SiblingTree.
     induction s. destruct l; simpl; lia.
   Qed.
 
-  End SiblingTree.
-  
-  Notation " x '.data' " := (data x) (at level 3).
-  Notation " x '.kids' " := (kids x) (at level 3).
+End SiblingTree.
+
+Notation " x '.data' " := (data x) (at level 3).
+Notation " x '.kids' " := (kids x) (at level 3).
 
 Section SiblingTreeZipper.
   Context {B:Type}.
@@ -195,7 +195,65 @@ Section SiblingTreeZipper.
     inv Heqo0.
     rewrite /tree_pos_measure.
     rewrite  /stree_measure /= -/stree_measure /fmap. lia.
-  Qed.
+  Defined.
+
+  (* the equation for the case when we go down *)
+  Definition tree_zipper_iter_rel : relation tree_zipper.
+  Proof. rewrite /relation. intros tz tz'. 
+    refine (tree_pos_iter tz' = Some tz). Defined.
+
+  #[export] Instance tree_zipper_iter_wf : WellFounded tree_zipper_iter_rel.
+  Proof. rewrite /WellFounded.  eapply (well_founded_lt_compat _  (tree_pos_measure)).
+    intros. apply tree_pos_iter_wf. rewrite H //. Defined.
+
+  (* not used for now *)
+  Section TreeZipperIter.
+    
+    Program Fixpoint fold_tree_zipper' {A: Type} tz (f: tree_zipper -> A -> A) (base: A) {measure (tree_pos_measure tz) } : A :=
+      let rest:A :=
+        match tree_pos_iter tz with
+        | Some tz' => fold_tree_zipper' tz' f base
+        | None => base
+        end in
+      f tz rest
+      .
+    Next Obligation. intros. by apply tree_pos_iter_wf. Defined.
+    Next Obligation. apply measure_wf. apply lt_wf. Defined.
+
+    Equations fold_tree_zipper {A: Type} tz (f: tree_zipper -> A -> A) (base: A) : A by wf tz tree_zipper_iter_rel :=
+      (* go right if possible *)
+      fold_tree_zipper (TreeZip this b (h::a) p) f base :=
+        let tz := (TreeZip this b (h::a) p) in
+          f tz (fold_tree_zipper (TreeZip h (this::b) a p) f base);
+      fold_tree_zipper (TreeZip (SNode d (h::kids)) b [] p) f base :=
+        let tz := (TreeZip (SNode d (h::kids)) b [] p) in
+          f tz (fold_tree_zipper (TreeZip h [] kids ((b,d,[])::p)) f base);
+      fold_tree_zipper tz f base := base.
+    Next Obligation. rewrite /tree_zipper_iter_rel. rewrite /tree_pos_iter //. Defined.
+    Next Obligation. rewrite /tree_zipper_iter_rel. rewrite /tree_pos_iter //. Defined.
+  End TreeZipperIter.
+
+  (* TODO maybe rewrite stree_lookup with fold_tree_zipper *)
+  Program Fixpoint stree_lookup (f: tree_zipper -> bool) tz {measure (tree_pos_measure tz)} : option tree_zipper :=
+  if f tz then Some tz else
+  let right_res :=
+      match go_right tz with
+    | Some tz_r => stree_lookup f tz_r
+    | None => None 
+    end in
+  match right_res with
+  | Some res => Some res
+  | None => 
+    match go_down tz with
+    | Some tz_d => stree_lookup f tz_d
+    | None => None
+    end
+  end.
+  Next Obligation. destruct tz. destruct after; try done. inv Heq_anonymous.
+    simpl. rewrite /fmap. destruct this; simpl. lia. Defined.
+  Next Obligation. destruct tz. destruct this. destruct l; try done. inv Heq_anonymous.
+    simpl. rewrite /fmap. lia. Defined.
+  Next Obligation. apply measure_wf. apply lt_wf. Defined.
 
   (* go_up is well-founded *)
   Definition tree_pos_measure_up tz : nat :=
@@ -214,193 +272,48 @@ Section SiblingTreeZipper.
     repeat destruct_match. inv H. simpl. lia.
   Defined.
 
-  Program Fixpoint fold_tree_zipper' {A: Type} tz (f: tree_zipper -> A -> A) (base: A) {measure (tree_pos_measure tz) } : A :=
-    let rest:A :=
-      match tree_pos_iter tz with
-      | Some tz' => fold_tree_zipper' tz' f base
-      | None => base
-      end in
-     f tz rest
-    .
-  Next Obligation. intros. by apply tree_pos_iter_wf. Defined.
-  Next Obligation. rewrite /MR /=. apply Nat.lt_wf_0_projected. Defined.
-
-  (* the equation for the case when we go down *)
-  Definition tree_zipper_iter_rel : relation tree_zipper.
-  Proof. rewrite /relation. intros tz tz'. 
-    refine (tree_pos_iter tz' = Some tz). Defined.
-
-  #[export] Instance tree_zipper_iter_wf : WellFounded tree_zipper_iter_rel.
-  Proof. rewrite /WellFounded.  eapply (well_founded_lt_compat _  (tree_pos_measure)).
-    intros. apply tree_pos_iter_wf. rewrite H //. Defined.
-
-  Equations fold_tree_zipper {A: Type} tz (f: tree_zipper -> A -> A) (base: A) : A by wf tz tree_zipper_iter_rel :=
-    (* go right if possible *)
-    fold_tree_zipper (TreeZip this b (h::a) p) f base :=
-      let tz := (TreeZip this b (h::a) p) in
-        f tz (fold_tree_zipper (TreeZip h (this::b) a p) f base);
-    fold_tree_zipper (TreeZip (SNode d (h::kids)) b [] p) f base :=
-      let tz := (TreeZip (SNode d (h::kids)) b [] p) in
-        f tz (fold_tree_zipper (TreeZip h [] kids ((b,d,[])::p)) f base);
-    fold_tree_zipper tz f base := base.
-  Next Obligation. rewrite /tree_zipper_iter_rel. rewrite /tree_pos_iter //. Defined.
-  Next Obligation. rewrite /tree_zipper_iter_rel. rewrite /tree_pos_iter //. Defined.
-  
-  (* TODO maybe rewrite stree_lookup with fold_tree_zipper *)
-  Equations stree_lookup (f: tree_zipper -> bool) tz : option tree_zipper by wf tz tree_zipper_iter_rel :=
-    stree_lookup f (TreeZip this b (h::a) p) :=
-      let tz := (TreeZip this b (h::a) p) in
-      if (f tz) then Some tz else
-      (* look right if possible *)
-        stree_lookup f (TreeZip h (this::b) a p);
-    stree_lookup f (TreeZip (SNode d (h::kids)) b [] p) :=
-      let tz := (TreeZip (SNode d (h::kids)) b [] p) in
-      if (f tz) then Some tz else
-      (* look down if possible *)
-        stree_lookup f (TreeZip h [] kids ((b,d,[])::p));
-    stree_lookup f tz :=
-      if (f tz) then Some tz else None.
-  Next Obligation. rewrite /tree_zipper_iter_rel. rewrite /tree_pos_iter //. Defined.
-  Next Obligation. rewrite /tree_zipper_iter_rel. rewrite /tree_pos_iter //. Defined.
-
-
-  (* Definition stree_look_down (look_right_fun : (tree_zipper -> bool) -> stree -> list stree -> list stree -> list (sforest * B * sforest) -> option tree_zipper)
-    (f: tree_zipper -> bool) (this: stree) (b: sforest) (a: list stree) (p: list (sforest * B * sforest)) : option tree_zipper :=
-    match this with 
-    | SNode d (k::ks) => look_right_fun f k [] ks ((b,d,a)::p)
-    | _ => None
+  (* Using Equations would generate the rewrite lemmas automatically,
+     but the definition would be a bit hard to read (it has to be defined on patterns of tz) and may not compute. *)
+  Program Fixpoint root tz {measure (tree_pos_measure_up tz)}: tree_zipper :=
+    match go_up tz with
+    | Some tz' => root tz'
+    | None => tz
     end.
+  Next Obligation. apply go_up_wf. rewrite Heq_anonymous //. Defined.
+  Next Obligation. apply measure_wf. apply lt_wf. Defined.
 
-  Fixpoint stree_look_right (f: tree_zipper -> bool) this b a p {struct a}: option tree_zipper :=
-    (* check current *)
-    let tz := (TreeZip this b a p) in
-    if f tz then Some tz else
-    (* go right *)
-    let right_res := match a with
-      | a_h :: a_t => stree_look_right f a_h (this::b) a_t p
-      | _ => None
-      end in
-    (* go down *)
-    match right_res with
-    | Some tz' => Some tz'
-    | None => stree_look_down stree_look_right f this b a p end. *)
+  Lemma root_eq_1 this b a l d r p :
+    root $ TreeZip this b a ((l,d,r)::p) = root $ TreeZip (SNode d ((rev b)++[this]++a)) l r p.
+  Proof.
+    rewrite /root.
+    rewrite WfExtensionality.fix_sub_eq_ext /=.
+    rewrite /forest_of //.
+  Qed.
 
-  Fixpoint parent_cont (p: list (sforest * B * sforest)) : option (list stree -> stree) :=
-    match p with
-    | [([], d, [])] => Some (λ kids, SNode d kids)
-    | (l, b, r)::ps => p_cont ← parent_cont ps;
-      Some (λ kids, let cur_parent := SNode b kids in
-        p_cont ((rev l) ++ (cur_parent :: r)))
-    | _ => None
-    end.
-
-  Definition root tz : option tree_zipper :=
-    match tz with
-    | TreeZip this b a p =>
-      p_cont ← parent_cont p;
-      Some (TreeZip (p_cont ((rev b)++ this::a)) [] [] p)
-    end.
+ Lemma root_eq_2 tz : 
+     (go_up tz = None) → root tz = tz.
+  Proof. intros. rewrite /root.
+    rewrite WfExtensionality.fix_sub_eq_ext /= H //.
+  Qed.
 
   Definition to_stree (tz: tree_zipper) : option stree :=
     match (root tz) with
-    | Some (TreeZip this [] [] _) => Some this
+    | TreeZip this [] [] _ => Some this
     | _ => None
     end.
 
-  Lemma go_right_same_tree' (tz tz': tree_zipper) :
+  Lemma go_right_same_tree (tz tz': tree_zipper) :
     go_right tz = Some tz' → to_stree tz = to_stree tz'.
   Proof.
     intros H.
     induction tz. destruct after; first done.
-    unfold go_right in H. inv H.
-    rewrite /to_stree /=. unfold_mbind.
-    destruct (parent_cont parents); try done.
-    do 2 f_equal. rewrite -app_assoc //.
+    rewrite /root.
+    inv H. 
+    destruct parents; rewrite /to_stree.
+    - rewrite !root_eq_2 //. destruct before; done.
+    - destruct p as [[? ?] ?]. rewrite !root_eq_1 //.
+      rewrite app_assoc //.
   Qed.
-
-  End SiblingTreeZipper.
-
-  (* the tree zipper is a settable record *)
-  Section AlternativeDefs.
-    Notation stree := (@stree nat).
-    Notation tree_zipper := (@tree_zipper nat).
-
-
-  (* alternative definition of root, not used *)
-    Program Fixpoint root' tz {measure (tree_pos_measure_up tz)}: tree_zipper :=
-      match go_up tz with
-      | Some tz' => root' tz'
-      | None => tz
-      end.
-    Next Obligation. apply go_up_wf. rewrite Heq_anonymous //. Defined.
-    Next Obligation. apply measure_wf. apply Nat.lt_wf_0. Defined.
-
-    Definition to_stree' (tz: tree_zipper) : option stree :=
-      match (root' tz) with
-      | TreeZip this [] [] _ => Some this
-      | _ => None
-      end.
-
-    Example to_stree'_test : to_stree' (TreeZip (SNode 1 []) [] [] [([],2,[])]) = Some (SNode 1 []).
-    rewrite /to_stree' /root' /=. cbv. (* stuck *)
-    Abort.
-
-
-
-
-    Lemma go_right_same_tree' (tz tz': tree_zipper) :
-      go_right tz = Some tz' → to_stree' tz = to_stree' tz'.
-    Proof.
-      intros H.
-      induction tz. destruct after; first done.
-      unfold go_right in H. inv H.
-      rewrite /to_stree' /=.
-      destruct parents; simpl; cbn.
-      
-    Abort.
-  End AlternativeDefs.
-
-  Section AlternativeDefs2.
-    Definition go_up_rel : relation tree_zipper.
-    Proof. rewrite /relation. intros tz tz'.
-      refine  (go_up tz' = Some tz). Defined.
-
-    Instance go_up_wf_inst : WellFounded go_up_rel.
-    Proof. rewrite /WellFounded.
-      eapply (well_founded_lt_compat _  (tree_pos_measure_up)).
-      intros. apply go_up_wf.  rewrite H //. Defined.
-
-    (* not obvious how to write as Fixpoint, and Program Fixpoint does not compute well *)
-    Equations root'' tz : tree_zipper by wf tz go_up_rel :=
-      root'' (TreeZip this b a ((l, p, r)::ps)) := let tz := (TreeZip this b a ((l, p, r)::ps)) in 
-        root'' (TreeZip (SNode p $ forest_of tz) l r ps);
-      root'' tz := tz.
-    Next Obligation. rewrite /go_up_rel /go_up. reflexivity. Defined.
-
-    (* convert a tree zipper to stree; root must have no sibling *)
-    Definition to_stree'' (tz: tree_zipper) : option stree :=
-      match (root'' tz) with
-      | TreeZip this [] [] _ => Some this
-      | _ => None
-      end.
-
-    Definition from_stree (st: stree) : tree_zipper :=
-      TreeZip st [] [] [].
-
-    Lemma go_right_same_tree (tz tz': tree_zipper) :
-      go_right tz = Some tz' → to_stree'' tz = to_stree'' tz'.
-    Proof.
-      intros H.
-      induction tz. destruct after; first done.
-      unfold go_right in H. inv H.
-      rewrite /to_stree'' /=.
-      destruct parents.
-      - rewrite !root''_equation_1 /=. destruct before; done.
-      - destruct p as [[? ?] ?]. rewrite !root''_equation_2 /= /forest_of /=.
-        rewrite -app_assoc //=.
-    Qed.
-
-  End AlternativeDefs2.
 
   Lemma stree_lookup_correct (is_target: tree_zipper -> bool)  (tz tz': tree_zipper):
     stree_lookup is_target tz = Some tz' →
@@ -413,8 +326,22 @@ Section SiblingTreeZipper.
     cur ← f (this_of tz');
     Some (tz' <| this_of := cur |>).
 
-End SiblingTree.
+End SiblingTreeZipper.
 
+Section TreeZipperTests.
+  Example test_stree_lookup :
+    stree_lookup (λ x, data $ this_of x =? 3) 
+      (TreeZip (SNode 0 []) [] [(SNode 1 []);(SNode 2 [SNode 3 []])] []) = Some (TreeZip (SNode 3 []) [] [] [([SNode 1 []; SNode 0 []], 2, [])]).
+  Proof.
+    cbv. done.
+  Qed.
+End TreeZipperTests.
+
+Notation " x '.this' " := (this_of x) (at level 3).
+Notation " x '.before' " := (before_of x) (at level 3).
+Notation " x '.after' " := (after_of x) (at level 3).
+Notation " x '.parents' " := (parents_of x) (at level 3).
+Notation " x '.forest' " := (forest_of x) (at level 3).
 
 (* contexts regarding a team are the parallel_construct_context and the team_executing_context. *)
 Variant parallel_construct_context' :=
@@ -550,7 +477,7 @@ Section OpenMPThreads.
         data <$> kids tree.
 
       Definition has_tid (tid: nat) (tree: team_tree) : bool :=
-        isSome $ stree_lookup (λ st, decide $ is_tid tid $ st.data) tree.
+        isSome $ stree_lookup (λ st, decide $ is_tid tid $ st.this.data) tree.
 
       Lemma has_tid_correct tid tree :
         has_tid tid tree = true ↔ has_tid' tid tree.
