@@ -7,11 +7,6 @@ From RecordUpdate Require Import RecordSet.
 Import RecordSetNotations.
 From Coq Require Import Nat.
 From Equations Require Import Equations.
-(* Section ListCursor.
-  Inductive list_zipper {A:Type} : Type :=
-  | ListZip (content: A) (before after: list A) : list_zipper.
-
-End ListCursor. *)
 
 Section SiblingTree.
 
@@ -79,37 +74,37 @@ Section SiblingTreeZipper.
                 /      |          \
     parents[0].1   parents[0].2    parents[0].3
                   /    |    \
-            before   this    after
+            Before   ThIS    After
     *)
-  | TreeZip (this: stree) (before after: sforest) (parents: list (sforest * B * sforest))
+  | TreeZip (tis: stree) (b a: sforest) (p: list (sforest * B * sforest))
   .
 
   Implicit Type (tz: tree_zipper).
 
-  Definition this_of tz : stree :=
+  Definition this tz : stree :=
     match tz with
-    | TreeZip this _ _ _ => this
+    | TreeZip tis _ _ _ => tis
     end.
 
-  Definition before_of tz : sforest :=
+  Definition before tz : sforest :=
     match tz with
-    | TreeZip _ before _ _ => before end.
+    | TreeZip _ b _ _ => b end.
 
-  Definition after_of tz : sforest :=
+  Definition after tz : sforest :=
     match tz with
-    | TreeZip _ _ after _ => after
+    | TreeZip _ _ a _ => a
     end.
 
-  Definition parents_of tz : list (sforest * B * sforest) :=
+  Definition parents tz : list (sforest * B * sforest) :=
     match tz with
-    | TreeZip _ _ _ parents => parents
+    | TreeZip _ _ _ p => p
     end.
 
-  #[export] Instance tree_zipper_settable : Settable tree_zipper := settable! TreeZip < this_of; before_of; after_of; parents_of >.
+  #[export] Instance tree_zipper_settable : Settable tree_zipper := settable! TreeZip < this; before; after; parents >.
 
   (* all siblings and itself *)
-  Definition forest_of tz : sforest :=
-    (rev (before_of tz)) ++ [this_of tz] ++ after_of tz.
+  Definition forest tz : sforest :=
+    (rev (before tz)) ++ [this tz] ++ after tz.
 
   Definition go_left tz : option tree_zipper :=
     match tz with
@@ -129,7 +124,7 @@ Section SiblingTreeZipper.
   Definition go_up tz : option tree_zipper :=
     match tz with
     | TreeZip this b a ((l, p, r)::ps) =>
-      Some (TreeZip (SNode p $ forest_of tz) l r ps)
+      Some (TreeZip (SNode p $ forest tz) l r ps)
     | _ => None
     end.
 
@@ -146,7 +141,7 @@ Section SiblingTreeZipper.
       (tz' ← go_left tz; go_right tz') = Some tz''
       -> tz = tz''.
   Proof.
-    intros. destruct tz. destruct before; first done.
+    intros. destruct tz. destruct b; first done.
     unfold_mbind_in_hyp. inv H. done.
   Qed.
   
@@ -155,7 +150,7 @@ Section SiblingTreeZipper.
       (tz' ← go_right tz; go_left tz') = Some tz''
       -> tz = tz''.
   Proof.
-    intros. destruct tz. destruct after; first done.
+    intros. destruct tz. destruct a; first done.
     unfold_mbind_in_hyp. inv H. done.
   Qed.
 
@@ -183,9 +178,10 @@ Section SiblingTreeZipper.
     rewrite /tree_pos_iter in H.
     destruct_match.
     { rewrite /go_right in Heqo.
-      destruct tz => //. destruct after  => //. inv Heqo.
+      destruct tz => //.
+      destruct a => //. inv Heqo.
       rewrite /tree_pos_measure /fmap /= -/fmap.
-      assert (stree_measure this > 0) by apply stree_measure_pos.
+      assert (stree_measure tis > 0) by apply stree_measure_pos.
       lia. }
     destruct_match.
     rewrite /go_down in Heqo0.
@@ -208,7 +204,7 @@ Section SiblingTreeZipper.
 
   (* not used for now *)
   Section TreeZipperIter.
-    
+
     Program Fixpoint fold_tree_zipper' {A: Type} tz (f: tree_zipper -> A -> A) (base: A) {measure (tree_pos_measure tz) } : A :=
       let rest:A :=
         match tree_pos_iter tz with
@@ -249,9 +245,9 @@ Section SiblingTreeZipper.
     | None => None
     end
   end.
-  Next Obligation. destruct tz. destruct after; try done. inv Heq_anonymous.
-    simpl. rewrite /fmap. destruct this; simpl. lia. Defined.
-  Next Obligation. destruct tz. destruct this. destruct l; try done. inv Heq_anonymous.
+  Next Obligation. destruct tz. destruct a; try done. inv Heq_anonymous.
+    simpl. rewrite /fmap. destruct tis; simpl. lia. Defined.
+  Next Obligation. destruct tz. destruct tis. destruct l; try done. inv Heq_anonymous.
     simpl. rewrite /fmap. lia. Defined.
   Next Obligation. apply measure_wf. apply lt_wf. Defined.
 
@@ -268,7 +264,7 @@ Section SiblingTreeZipper.
     intros H.
     rewrite /go_up in H.
     destruct tz => //.
-    destruct parents; first done.
+    destruct p; first done.
     repeat destruct_match. inv H. simpl. lia.
   Defined.
 
@@ -287,7 +283,7 @@ Section SiblingTreeZipper.
   Proof.
     rewrite /root.
     rewrite WfExtensionality.fix_sub_eq_ext /=.
-    rewrite /forest_of //.
+    rewrite /forest //.
   Qed.
 
  Lemma root_eq_2 tz : 
@@ -302,15 +298,22 @@ Section SiblingTreeZipper.
     | _ => None
     end.
 
+  Definition from_stree (st: stree) : tree_zipper :=
+    TreeZip st [] [] [].
+
+  Lemma from_to_stree_idem (st: stree) :
+    to_stree (from_stree st) = Some st.
+  Proof. rewrite /to_stree /from_stree //. Qed.
+
   Lemma go_right_same_tree (tz tz': tree_zipper) :
     go_right tz = Some tz' → to_stree tz = to_stree tz'.
   Proof.
     intros H.
-    induction tz. destruct after; first done.
+    induction tz. destruct a; first done.
     rewrite /root.
     inv H. 
-    destruct parents; rewrite /to_stree.
-    - rewrite !root_eq_2 //. destruct before; done.
+    destruct p; rewrite /to_stree.
+    - rewrite !root_eq_2 //. destruct b; done.
     - destruct p as [[? ?] ?]. rewrite !root_eq_1 //.
       rewrite app_assoc //.
   Qed.
@@ -323,25 +326,25 @@ Section SiblingTreeZipper.
   (* lookup with is_target, if found, update the data of the subtree root to b' *)
   Definition stree_update (is_target: tree_zipper -> bool) (f: stree -> option stree) (tz: tree_zipper) : option tree_zipper :=
     tz' ← stree_lookup is_target tz;
-    cur ← f (this_of tz');
-    Some (tz' <| this_of := cur |>).
+    cur ← f (this tz');
+    Some (tz' <| this := cur |>).
 
 End SiblingTreeZipper.
 
 Section TreeZipperTests.
   Example test_stree_lookup :
-    stree_lookup (λ x, data $ this_of x =? 3) 
+    stree_lookup (λ x, data $ this x =? 3) 
       (TreeZip (SNode 0 []) [] [(SNode 1 []);(SNode 2 [SNode 3 []])] []) = Some (TreeZip (SNode 3 []) [] [] [([SNode 1 []; SNode 0 []], 2, [])]).
   Proof.
     cbv. done.
   Qed.
 End TreeZipperTests.
 
-Notation " x '.this' " := (this_of x) (at level 3).
-Notation " x '.before' " := (before_of x) (at level 3).
-Notation " x '.after' " := (after_of x) (at level 3).
-Notation " x '.parents' " := (parents_of x) (at level 3).
-Notation " x '.forest' " := (forest_of x) (at level 3).
+Notation " x '.this' " := (this x) (at level 3).
+Notation " x '.before' " := (before x) (at level 3).
+Notation " x '.after' " := (after x) (at level 3).
+Notation " x '.parents' " := (parents x) (at level 3).
+Notation " x '.forest' " := (forest x) (at level 3).
 
 (* contexts regarding a team are the parallel_construct_context and the team_executing_context. *)
 Variant parallel_construct_context' :=
@@ -392,6 +395,7 @@ Definition pv_of_thread_ctx (td_ctx: thread_context) : pv_map :=
   | thread_ctx_barrier => pvm_init (* an empty pv map *)
   end.
 
+(* TODO fix variable convention: tz should always be the first or last argument *)
 Section OpenMPThreads.
 
     (* OpenMP context for a thread in a parallel region *)
@@ -439,22 +443,27 @@ Section OpenMPThreads.
          The bookkeeping data of a team contains `Some privatized_vars` if the parallel region of the team (i.e. the lifetime
          span of the team) also contains a reduction clause. *)
       Definition team_tree := @stree (o_ctx).
+      Definition team_zipper := @tree_zipper (o_ctx).
 
-      Implicit Types (pvm : pv_map) (ot: o_ctx) (tree: team_tree)
+      Implicit Types (pvm : pv_map) (ot: o_ctx) (tree: team_tree) (tz ptz:team_zipper)
         (i: ident) (ge orig_ge: genv) (le orig_le: env)
         (ce:composite_env) (m: mem) (b:Values.block) (ty:type)
-        (td_ctx: thread_context) (tm_exec_ctx: team_executing_context) (par_ctx: parallel_construct_context).
+        (td_ctx: thread_context) (tm_exec_ctx: team_executing_context) (par_ctx: parallel_construct_context)
+        (tid:nat).
 
       (* the first thread in the program *)
       Definition ot_init (tid: nat) : o_ctx := Build_o_ctx tid [] None.
 
       (* a team starts with just the main thread *)
-      Definition node_init (tid: nat) : team_tree := SNode (ot_init tid) [].
+      Definition team_tree_init (tid: nat) : team_tree := SNode (ot_init tid) [].
 
       Definition is_tid (tid: nat) (ot: o_ctx) : Prop :=
         ot.(t_tid) = tid.
       #[global] Instance is_tid_dec (tid: nat) (ot: o_ctx) : Decision (is_tid tid ot).
       Proof. apply Nat.eq_dec. Qed.
+
+      Definition has_tid (tid: nat) (tz: team_zipper) : bool :=
+        isSome $ stree_lookup (λ st, decide $ is_tid tid $ st.this.data) tz.
 
       (* the list of all leaf threads *)
       Fixpoint tree_to_list (tree: team_tree) : (list o_ctx) :=
@@ -469,18 +478,11 @@ Section OpenMPThreads.
       Definition leaf_tids (t: team_tree) : list nat :=
         t_tid <$> tree_to_list t.
 
-      Definition has_tid' (tid: nat) (tree: team_tree) : Prop :=
+      Definition has_tid_spec (tid: nat) (tree: team_tree) : Prop :=
         In tid $ leaf_tids tree.
-        
-      (* o_ctx of the (immediate) team led by root of tree; does not include subteams *)
-      Definition team_info (tree: team_tree) : list o_ctx :=
-        data <$> kids tree.
 
-      Definition has_tid (tid: nat) (tree: team_tree) : bool :=
-        isSome $ stree_lookup (λ st, decide $ is_tid tid $ st.this.data) tree.
-
-      Lemma has_tid_correct tid tree :
-        has_tid tid tree = true ↔ has_tid' tid tree.
+      Lemma has_tid_correct tid st :
+        has_tid tid (from_stree st) = true ↔ has_tid_spec tid st.
       Proof. Admitted.
 
       Definition tid_unique (tree: team_tree) : Prop :=
@@ -496,121 +498,111 @@ Section OpenMPThreads.
        *)
 
       (* t is a leaf node and represents tid *)
-      Definition is_leaf_tid (tid: nat) (t: team_tree) : bool :=
+      Definition is_leaf_tid' (tid: nat) (t: team_tree) : bool :=
         match t with
         | SNode ot [] => decide (is_tid tid ot)
         | _ => false
         end.
 
+      Definition is_leaf_tid (tid: nat) (tz: team_zipper) : bool :=
+        is_leaf_tid' tid tz.this.
+
       (* find the leaf node that represents tid *)
-      Definition lookup_tid (tid: nat) (t: team_tree) : option tree_ref :=
-        stree_lookup (is_leaf_tid tid) t.
+      Definition lookup_tid (tid: nat) (t: team_tree) : option team_zipper :=
+        stree_lookup (is_leaf_tid tid) (from_stree t).
 
-      Definition update_tid (tid: nat) (t: team_tree) (f: team_tree -> option team_tree) : option team_tree :=
-        stree_update (is_leaf_tid tid) f t.
+      Definition update_tid (tid: nat) t f : option team_tree :=
+        tz ← stree_update (is_leaf_tid tid) f (from_stree t);
+        to_stree tz.
 
-      (* whether tree is the parent of a leaf node for tid. *)
-      Definition is_parent_tree_of (tid: nat) (tree: team_tree) : Prop :=
-        match tree with
-        | SNode ot kids =>
-           (Exists (λ kid, is_leaf_tid tid kid=true) tree.kids) end.
-
-      #[global] Instance is_parent_tree_of_dec tid tree : Decision (is_parent_tree_of tid tree).
-      Proof.
-        move : tree => [ot ts].
-        rewrite /is_parent_tree_of.
-        apply Exists_dec. apply _.
-      Qed.
-
-      Definition parent_tree_of (tid: nat) (tree: team_tree) : option tree_ref :=
-        stree_lookup (λ st, decide $ is_parent_tree_of tid st) tree.
+      Definition parent_tree_of tid tz : option team_zipper :=
+        tz ← stree_lookup (is_leaf_tid tid) tz;
+        go_up tz.
 
       (* the parallel pragma spawns a team of threads, each gets initialized thread contexts;
          sets team_ctxs.1. *)
-      Definition spawn_team (tid: nat) (team_mates: list nat) rvs (spar_index:nat) (tree: team_tree) : option team_tree :=
-        update_tid tid tree (λ leaf, Some $ leaf <| kids := map node_init (tid::team_mates) |>
-                                                 <| data; o_team_ctxs := Some ((spar_index, team_ctx_parallel rvs), None) |>).
+      Definition spawn_team (tid: nat) (team_mates: list nat) rvs (spar_index:nat) t : option team_tree :=
+        update_tid tid t (λ leaf, Some $ leaf <| kids := map team_tree_init (tid::team_mates) |>
+                                               <| data; o_team_ctxs := Some ((spar_index, team_ctx_parallel rvs), None) |>).
       
       (* t must be a leaf node for that thread.
          append a of thread context to t. *)
       Definition leaf_add_td_ctx (t: team_tree) td_ctx : team_tree :=
         t <| data; o_thread_ctxs ::= cons td_ctx |>.
 
-      Definition mate_add_td_ctx (tid:nat) (td_ctx: thread_context) (tree: team_tree) : option team_tree :=
-        update_tid tid tree (λ leaf, Some $ leaf_add_td_ctx leaf td_ctx).
+      Definition mate_add_td_ctx (tid:nat) (td_ctx: thread_context) t : option team_tree :=
+        update_tid tid t (λ leaf, Some $ leaf_add_td_ctx leaf td_ctx).
 
       (* Maintenance of the team context when tid enters a team executing construct.
           if it is the first thread in the team that enters this construct <-> data.o_team_ctxs.2 is None,
           it sets data.o_team_ctxs.2 according to (idx, pragma);
           otherwise, someone else in the team has already entered a team executing construct, 
           and it must enter the same construct, so it checks whether (idx, pragma) corresponds to data.o_team_ctxs.2. *)
-      Definition mate_maybe_add_team_exec_ctx (tree: team_tree) tid tm_exec_ctx : option (team_tree * team_executing_context) :=
-        pref ← parent_tree_of tid tree;
-        tm_ctx ← pref.1.data.(o_team_ctxs);
+      Definition mate_maybe_add_team_exec_ctx tz tid tm_exec_ctx : option team_zipper :=
+        parent ← parent_tree_of tid tz;
+        tm_ctx ← parent.this.data.(o_team_ctxs);
         match tm_ctx.2 with
-        | Some tm_exec_ctx' => 
-          if matching_tm_exec_ctx tm_exec_ctx tm_exec_ctx' 
-          then Some (tree, tm_exec_ctx')
+        | Some tm_exec_ctx' =>
+          if matching_tm_exec_ctx tm_exec_ctx tm_exec_ctx'
+          then Some tz
           else None
-        | None => let tree' := of_tref $ pref <| fst; data; o_team_ctxs := Some (tm_ctx.1, Some tm_exec_ctx) |> in
-          Some (tree', tm_exec_ctx)
+        | None => Some $ parent <| this; data; o_team_ctxs := Some (tm_ctx.1, Some tm_exec_ctx) |>
         end
       .
 
       (* find tid's teammates' thread ids, including tid.
          If tid is root, return itself. *)
-      Definition team_mates_tids tid tree: list nat :=
-      match parent_tree_of tid tree with
-      | None => [tid]
-      | Some pref => map (λ kid, kid.data.(t_tid)) pref.1.kids
-      end.
+      Definition team_mates_tids tid (t:team_tree) : option $ list nat :=
+        ref ← lookup_tid tid t;
+        Some $ map (λ x, x.data.(t_tid)) (ref.before ++ ref.this :: ref.after).
 
       Definition mate_pop_thread_context (tree: team_tree) (tid: nat) : option (team_tree * thread_context) :=
         ref ← lookup_tid tid tree;
-        match ref.1.data.(o_thread_ctxs) with
+        match ref.this.data.(o_thread_ctxs) with
         | [] => None
         | th_ctx::tl =>
-          let t' := of_tref $ ref <| fst; data; o_thread_ctxs := tl |> in
+          t' ← to_stree $ ref <| this; data; o_thread_ctxs := tl |>;
           Some (t', th_ctx)
         end.
 
       (* pop the team executing context for the team that tid is in *)
-      Definition team_pop_team_exec_context (tree: team_tree) (tid: nat) : option (team_tree * team_executing_context) :=
-        pref ← parent_tree_of tid tree;
-        tm_ctxs ← pref.1.data.(o_team_ctxs);
+      Definition team_pop_team_exec_context tz tid : option (team_zipper * team_executing_context) :=
+        ptz ← parent_tree_of tid tz;
+        tm_ctxs ← ptz.this.data.(o_team_ctxs);
         tm_exec_ctx ← tm_ctxs.2;
-        Some (of_tref $ pref <| fst; data; o_team_ctxs := Some (tm_ctxs.1, None) |>, tm_exec_ctx).
-      
+        let ptz' := ptz <| this; data; o_team_ctxs := Some (tm_ctxs.1, None) |> in
+        Some (ptz', tm_exec_ctx).
+
       (*** ending a parallel construct ***)
       (* pop the parallel context for the team that tid is in *)
-      Definition team_pop_parallel_context (tree: team_tree) (tid: nat) : option (team_tree * parallel_construct_context) :=
-        pref ← parent_tree_of tid tree;
-        tm_ctxs ← pref.1.data.(o_team_ctxs);
-        (* must not have a team_executing context *)
+      Definition team_pop_parallel_context tz tid : option (team_zipper * parallel_construct_context) :=
+        pref ← parent_tree_of tid tz;
+        tm_ctxs ← pref.this.data.(o_team_ctxs);
+        (* must not have any other team context (i.e. team_executing context) *)
         match tm_ctxs.2 with
         | Some _ => None
-        | None => Some (of_tref $ pref <| fst; data; o_team_ctxs := None |>, tm_ctxs.1) end.
+        | None => Some ( pref <| this; data; o_team_ctxs := None |>, tm_ctxs.1) end.
 
       (* all teammates of tid have no thread context left *)
-      Definition thread_context_resolved (tree: team_tree) (tid: nat) : bool :=
-        match parent_tree_of tid tree with
-        | Some pref => forallb (λ kid, decide (kid.data.(o_thread_ctxs) = [])) pref.1.kids
+      Definition thread_context_resolved tz tid : bool :=
+        match parent_tree_of tid tz with
+        | Some pref => forallb (λ kid, decide (kid.data.(o_thread_ctxs) = [])) tz.this.kids
         | None => false
         end.
 
       (* there is no team context for the team of tid *)
-      Definition team_context_resolved (tree: team_tree) (tid: nat) : bool :=
-        match parent_tree_of tid tree with
-        | Some pref => decide (pref.1.data.(o_team_ctxs) = None)
+      Definition team_context_resolved tz tid : bool :=
+        match parent_tree_of tid tz with
+        | Some pref => decide (pref.this.data.(o_team_ctxs) = None)
         | None => false
         end.
 
       (* finish a team when there is no team or thread context left to resolve *)
-      Definition team_fire (tid: nat) (tree: team_tree) : option team_tree :=
-        if thread_context_resolved tree tid &&
-           team_context_resolved tree tid
-        then pref ← parent_tree_of tid tree;
-             Some $ of_tref (pref <| fst; kids := [] |>)
+      Definition team_fire tz tid : option team_zipper :=
+        if thread_context_resolved tz tid &&
+           team_context_resolved tz tid
+        then pref ← parent_tree_of tid tz;
+             Some $ (pref <| this; kids := [] |>)
         else None.
 
       (* returns the first i if f(l[i])=true. *)
@@ -625,15 +617,15 @@ Section OpenMPThreads.
         end.
       
       (* thread num is the index to tid of parent tree's kids list. *)
-      Definition get_thread_num tid tree : option nat :=
-        ref ← parent_tree_of tid tree;
-        find_index (is_leaf_tid tid) ref.1.kids.
+      Definition get_thread_num tid tz : option nat :=
+        ref ← parent_tree_of tid tz;
+        find_index (is_leaf_tid' tid) ref.this.kids.
 
       (* tid is a leader of its current team if it's parent node has the same tid. *)
-      Definition is_leader (tid: nat) (tree: team_tree) : bool :=
-        match parent_tree_of tid tree with
+      Definition is_leader tid tz : bool :=
+        match parent_tree_of tid tz with
         | None => true
-        | Some pref => pref.1.data.(t_tid) =? tid
+        | Some pref => pref.this.data.(t_tid) =? tid
         end.
 
     End OpenMPTeam.
