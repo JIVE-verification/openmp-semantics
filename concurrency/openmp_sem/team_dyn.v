@@ -598,7 +598,7 @@ Section OpenMPThreads.
         end.
 
       (* finish a team when there is no team or thread context left to resolve *)
-      Definition team_fire tz tid : option team_zipper :=
+      Definition team_fire tid tz : option team_zipper :=
         if thread_context_resolved tz tid &&
            team_context_resolved tz tid
         then pref ← parent_tree_of tid tz;

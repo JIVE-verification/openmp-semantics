@@ -261,6 +261,18 @@ Module DryHybridMachine.
     Definition permMapJoin_list pmaps pmap : Prop :=
       sepalg_list.fold_rel permMapJoinPair emptyPerm pmaps pmap.
 
+    Program Fixpoint fold_siblings {B:Type} (f: stree -> B -> B) (b:B) tz {measure (tree_pos_measure tz)} : (team_zipper * B) :=
+      let b' := f tz.this b in
+      match go_right tz with
+      | None => (tz, b')
+      | Some tz' => fold_siblings f b' tz'
+      end.
+    Next Obligation. intros. destruct tz. destruct a; try done.
+        subst filtered_var.
+        Coqlib.inv Heq_anonymous.
+      simpl. rewrite /fmap. destruct tis; simpl. Lia.lia. Defined.
+    Next Obligation. apply measure_wf. apply lt_wf. Defined.
+
     Inductive pragma_step {tid0 tp m} {ttree: team_tree}
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
       thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=
@@ -294,6 +306,10 @@ Module DryHybridMachine.
             let team_tids := tid0::(map pos.n new_tids) in
             forall
             (Htree'': Some (tp''', m'', ttree'') = foldr (
+                (* NOTE it would be more natural to iterate through the siblings and
+                  update team_zipper along the way, but to implmenet it as a terminating
+                  recursion (needs to update the team_zipper being recursed on while ensuring
+                  well-foundedness) may not be simpler than simply iterating through the tids. *)
                 λ tid maybe_tp_m_ttree,
                 tp_m_ttree ← maybe_tp_m_ttree;
                 let '(tp, m, ttree) := tp_m_ttree in
@@ -315,15 +331,15 @@ Module DryHybridMachine.
        Collect permission for threads at the end of its parallel region and transfer to parent.
        non-parent teammates are halted. *)
     | step_parallel_end :
-        forall tp' tp'' tp''' m' m'' ttree' ttree'' ttree''' mates_tids le_lst parent_tid rvs
+        forall tp' tp'' tp''' m' m'' ttree' tz' ttree'' ttree''' mates_tids le_lst rvs
         permSum cnt_parent (par_ctx:parallel_construct_context) idx
           (Hinv : invariant tp)
           (* 1. pop the team's parallel context, verify that
             every thread is stuck at the same OMPParallelEnd as recorded in the context, 
             and collect their le, combine reduction contribution to memory. *)
-          (Hmates_tids: mates_tids = team_mates_tids tid0 ttree)
-          (Hparent_tid: Some parent_tid = hd_error mates_tids)
-          (Hpar_ctx: Some (ttree', par_ctx) = team_pop_parallel_context ttree tid0)
+          (Hmates_tids: Some mates_tids = team_mates_tids tid0 ttree)
+          (Hpar_ctx: Some (tz', par_ctx) = team_pop_parallel_context (from_stree ttree) tid0)
+          (Httree': Some ttree' = to_stree tz')
           (Hpar_ctx_check: par_ctx = (idx, team_ctx_parallel rvs))
           (Hall_teammates_at_parallel_end: Some le_lst = foldr (λ tid maybe_le_lst,
             le_lst ← maybe_le_lst;
@@ -341,10 +357,10 @@ Module DryHybridMachine.
             end)
             (Some []) mates_tids)
           (Hreduce: Some m' = rvs_combine_reduction_contribs rvs le_lst ce m)
-          (* 2. pop thread context, end privatization *)
-          (Hend_pr: Some (permSum, tp', m'', ttree'') = foldr (λ tid maybe_permSum_tp_m_ttree,
-              permSum_tp_m_ttree ← maybe_permSum_tp_m_ttree;
-              let '(permSum, tp, m, ttree) := permSum_tp_m_ttree in
+          (* 2. iterate through kids, pop thread context, end privatization *)
+          (Hend_pr: Some (permSum, tp', m'', ttree'') = foldr (λ tid maybe_permSum_tp_m_tz,
+              permSum_tp_m_tz ← maybe_permSum_tp_m_tz;
+              let '(permSum, tp, m, tz) := permSum_tp_m_tz in
               cnt_i ← maybeContainsThread tp tid;
               permSum' ← permJoinFun permSum (getThreadR cnt_i);
               c ← Kblocked_at $ getThreadC cnt_i;
@@ -363,7 +379,7 @@ Module DryHybridMachine.
             (Some (emptyPerm, tp, m', ttree')) mates_tids)
           (* 3. fire teammates. this checks that there is no team contexts and no thread contexts
             in the team. *)
-          (Hfireteam: Some ttree''' = team_fire tid0 ttree'')
+          (Hfireteam: Some ttree''' = tz ← team_fire tid0 (from_stree ttree''); to_stree tz)
           (* 4. give collected permission back to parent. *)
           (Hcnt_parent: Some cnt_parent = maybeContainsThread tp'' tid0)
           (Htp''': tp''' = updThreadR cnt_parent permSum),
@@ -371,8 +387,8 @@ Module DryHybridMachine.
     | step_for :
       forall c c' c'' ge le le' te stmt cln lb incr 
        (team_workloads : list $ list chunk) my_workload
-       pref ( ptree' ttree' ttree'' ttree''': team_tree)
-       tp' tnum pc rcs pvm m' idx tm_exec_ctx tm_exec_ctx' rvs
+       (ttree' ttree'' ttree''': team_tree)
+       tp' tnum pc rcs pvm m' idx tm_exec_ctx rvs
       (Hcode: getThreadC cnt0 = Kblocked c)
       (Hat_meta: at_pragma semSem c = Some (idx, OMPFor pc rcs))
       (* next statement is a canonical loop nest *)
@@ -384,34 +400,34 @@ Module DryHybridMachine.
       (Hlb_of_loop: lb_of_loop cln ge le te m = Some lb)
       (Hincr_of_loop: incr_of_loop cln ge le te m = Some incr),
       (* TODO angelically decides a chunk_split with parameters lb, incr, iter_num *)
-      let ptree := pref.1 in
       let threadPerm := getThreadR cnt0 in
-      forall 
-      (Hparent_ref: parent_tree_of tid0 ttree = Some pref)
+      forall
       (* 1. first thread encountering the for-construct adds the team_exec_ctx
             for the for-construct, including reduction info and a partition of
             iterations. *)
       (Hrvs: Some rvs = init_rvs rcs ge le m)
       (Htm_exec_ctx: tm_exec_ctx = (idx, team_ctx_for team_workloads rvs) )
-      (Httree': Some (ttree', tm_exec_ctx') = mate_maybe_add_team_exec_ctx ttree tid0 tm_exec_ctx)
+      (Httree': Some ttree' = tz' ← mate_maybe_add_team_exec_ctx (from_stree ttree) tid0 tm_exec_ctx;
+                              to_stree tz')
       (* 2. start privatization *)
       (Hpriv_start: Some (pvm, le', m') = pvm_priv_start pc m ge le)
       (Hadd_td_ctx: Some ttree'' = mate_add_td_ctx tid0 (thread_ctx_for pvm) ttree')
       (Hc': Some c' = update_le c le')
       (* 3. update current statement to be my workload *)
-      (Htnum: Some tnum = get_thread_num tid0 ttree'')
+      (Htnum: Some tnum = get_thread_num tid0 (from_stree ttree''))
       (Hchunks: Some my_workload = nth_error team_workloads tnum)
       (Hc'': Some c'' = transform_state_for c' my_workload cln)
       (* 4. update tp with the new c'' *)
       (Htp': tp' = updThread cnt0 (Krun c'') threadPerm),
       pragma_step cnt0 Hcompat tp' m' ttree''
    | step_for_end:
-    forall tp' m' m'' ttree' ttree'' mates_tids le_lst work_split rvs idx
+    forall tp' m' m'' tz' ttree' ttree'' mates_tids le_lst work_split rvs idx
       (Hinv : invariant tp)
       (* 1. every thread must be stuck at OMPForEnd. Collect their le,
         combine reduction contribution to memory. *)
-      (Htm_exec_ctx: Some (ttree', (idx, team_ctx_for work_split rvs)) = team_pop_team_exec_context ttree tid0)
-      (Hmates_tids: mates_tids = team_mates_tids tid0 ttree)
+      (Htm_exec_ctx: Some (tz', (idx, team_ctx_for work_split rvs)) = team_pop_team_exec_context (from_stree ttree) tid0)
+      (Httree': Some ttree' = to_stree tz')
+      (Hmates_tids: Some mates_tids = team_mates_tids tid0 ttree)
       (Hall_teammates_at_for_end: Some le_lst = foldr (λ tid maybe_le_lst,
         le_lst ← maybe_le_lst;
         cnt_i ← maybeContainsThread tp tid;
@@ -454,7 +470,7 @@ Module DryHybridMachine.
       (* if all teammates are at barrier, move them across the barrier. *)
       (* TODO need to check that team exec context is None. *)
       forall m  mates_tids tp'
-      (Hmates_tids: mates_tids = team_mates_tids tid0 ttree)
+      (Hmates_tids: Some mates_tids = team_mates_tids tid0 ttree)
       (Hstep_barrier: Some tp' = foldr (λ tid maybe_tp,
           tp ← maybe_tp;
           cnt_i ← maybeContainsThread tp tid;
