@@ -463,7 +463,7 @@ Section OpenMPThreads.
       Proof. apply Nat.eq_dec. Qed.
 
       Definition has_tid (tid: nat) (tz: team_zipper) : bool :=
-        isSome $ stree_lookup (λ st, decide $ is_tid tid $ st.this.data) tz.
+        isSome $ stree_lookup (λ st, bool_decide $ is_tid tid $ st.this.data) tz.
 
       (* the list of all leaf threads *)
       Fixpoint tree_to_list (tree: team_tree) : (list o_ctx) :=
@@ -500,7 +500,7 @@ Section OpenMPThreads.
       (* t is a leaf node and represents tid *)
       Definition is_leaf_tid' (tid: nat) (t: team_tree) : bool :=
         match t with
-        | SNode ot [] => decide (is_tid tid ot)
+        | SNode ot [] => bool_decide (is_tid tid ot)
         | _ => false
         end.
 
@@ -586,14 +586,14 @@ Section OpenMPThreads.
       (* all teammates of tid have no thread context left *)
       Definition thread_context_resolved tz tid : bool :=
         match parent_tree_of tid tz with
-        | Some pref => forallb (λ kid, decide (kid.data.(o_thread_ctxs) = [])) tz.this.kids
+        | Some pref => forallb (λ kid, bool_decide (kid.data.(o_thread_ctxs) = [])) tz.this.kids
         | None => false
         end.
 
       (* there is no team context for the team of tid *)
       Definition team_context_resolved tz tid : bool :=
         match parent_tree_of tid tz with
-        | Some pref => decide (pref.this.data.(o_team_ctxs) = None)
+        | Some pref => bool_decide (pref.this.data.(o_team_ctxs) = None)
         | None => false
         end.
 

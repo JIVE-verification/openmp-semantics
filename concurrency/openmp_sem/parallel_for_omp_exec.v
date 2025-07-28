@@ -26,7 +26,7 @@ Definition init_Ostate (os:@Ostate ge OrdinalPool.OrdinalThreadPool) : Prop :=
     Genv.init_mem prog = Some m ∧
     Genv.find_symbol (Genv.globalenv prog) (prog_main prog) = Some b ∧
     OpenMP_semantics.(init_mach) None m q m (Vptr b Ptrofs.zero) nil ∧
-    os = ((U, [], q, node_init 0), m).
+    os = ((U, [], q, team_tree_init 0), m).
 
 Ltac evar_same_type_as i j :=
         match type of j with | ?Tj => evar (i: Tj) end.
@@ -148,11 +148,17 @@ Proof.
     destruct Hinit as (c&Hc&Hq). simpl in Hc. destruct_match! in Hc. clear e.
     destruct Hc as [Hc _]. destruct_match in Hc. rename Heqo into Hf. rename Hq into Htp.
     inv' Hc.
-    remember (node_init 0) as ttree.
+    remember (team_tree_init 0) as ttree.
 
     destruct os1 as ((((U1 & tr1) & tp1) & ttree1) & m1) eqn: Hos1.
     simpl in HU. inversion Hos as [[HU1 Htr1 Htp1 Httree1 Hm1]].
-    rewrite HU1 in HU.
+    clear Hos.
+    rewrite HU1 in HU. subst tp1.
+(*     
+    rewrite ->Htp in *|-*. 
+    clear tp Htp.
+    remember (ThreadPool.mkPool (Krun c) ((getCurPerm m, empty_map):@res dryResources)) as tp1. *)
+    
 
     (* compute m *)
 
@@ -278,8 +284,14 @@ Proof.
         done.
     }
     simpl.
+    rewrite /updThread Hth0_perms /=. cbn. rewrite Htp /=.
+    assert (∀ n, ssrnat.eqn (fintype.nat_of_ord (n: fintype.ordinal 1)) 0 = true) as Hord1.
+    { intros. admit. }
+    (* rewrite Hord1. *)
+
     match goal with
-    |  |- clos_refl_trans_1n _ _ (_, ?tp, _, _) _ => pose (tp:ThreadPool.t) as tp2 end.
+    |  |- clos_refl_trans_1n _ _ (_, ?tp, _, _) _ => set tp2 :=tp end.
+    assert (ThreadPool.t = t) by done. dependent rewrite <-H in tp2. clear H.
 
     (** take 2nd step *)
     assert (cnt2: ThreadPool.containsThread tp2 0) by by subst tp2.
@@ -291,21 +303,21 @@ Proof.
             simpl.
             split.
             * apply cur_lt_max.
-            * rewrite Hth0_perms. apply empty_LT.
+            * apply empty_LT.
           + (* tid > 0; does not exist in tp *) subst tp. done.
         - intros.  
           (* there is no lock, pmaps is empty *)
-          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.
+          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find // in H.
         - intros.
           (* there is no lock, pmaps is empty *)
-          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.
+          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find // in H.
     }
     assert (H_lock_res_empty2 : forall i, forall cnti: containsThread tp2 i, (ThreadPool.getThreadR cnti).2 = empty_map).
     { intros i cnti. subst tp2 tp.
       rewrite /=. destruct i; done. }
     assert (H_lockRes_empty2: forall laddr, ThreadPool.lockRes tp2 laddr = None).
     { intros. subst tp2 tp. rewrite /getThreadR /=  /ThreadPool.lockRes /lockRes  /= find_empty //.  }
-      eapply (rt1n_trans Ostate Ostep _ (_, _, _:ThreadPool.t, ttree, diluteMem _)).
+      eapply (rt1n_trans Ostate Ostep _ (_, _, _, ttree, diluteMem _)).
     { 
         (* take a threadStep *)
         rewrite /Ostep /MachStep /=.
@@ -338,14 +350,14 @@ Proof.
             simpl. 
             split.
             * apply cur_lt_max.
-            * rewrite Hth0_perms. apply empty_LT.
+            * apply empty_LT.
           + (* tid > 0; does not exist in tp *) subst tp. done.
         - intros.
           (* there is no lock, pmaps is empty *)
-          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.  
+          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find // in H.  
         - intros.
           (* there is no lock, pmaps is empty *)
-          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.
+          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find // in H.
     }
 
     assert (H_lock_res_empty3 : forall i, forall cnti: containsThread tp3 i, (ThreadPool.getThreadR cnti).2 = empty_map).
@@ -385,14 +397,14 @@ Proof.
             simpl. 
             split.
             * apply cur_lt_max.
-            * rewrite Hth0_perms. apply empty_LT.
+            * apply empty_LT.
           + (* tid > 0; does not exist in tp *) subst tp. done.
         - intros.
           (* there is no lock, pmaps is empty *)
-            rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.  
+            rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find // in H.
         - intros.
           (* there is no lock, pmaps is empty *)
-            rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.
+            rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find // in H.
     }
 
     (* pose m4_restr := (restrPermMap (ssrfun.pair_of_and (Hcompat4 0 cnt4)).1).
@@ -460,14 +472,14 @@ Proof.
             simpl. 
             split.
             * apply cur_lt_max.
-            * rewrite Hth0_perms. apply empty_LT.
+            *  apply empty_LT.
           + (* tid > 0; does not exist in tp *) subst tp. done.
         - intros.
           (* there is no lock, pmaps is empty *)
-          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.  
+          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find // in H.  
         - intros.
           (* there is no lock, pmaps is empty *)
-          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.
+          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find // in H.
     }
 
     assert (H_lock_res_empty5 : forall i, forall cnti: containsThread tp5 i, (ThreadPool.getThreadR cnti).2 = empty_map).
@@ -508,14 +520,14 @@ Proof.
             simpl. 
             split.
             * apply cur_lt_max.
-            * rewrite Hth0_perms. apply empty_LT.
+            * apply empty_LT.
           + (* tid > 0; does not exist in tp *) subst tp. done.
         - intros.
           (* there is no lock, pmaps is empty *)
-          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.  
+          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find // in H.  
         - intros.
           (* there is no lock, pmaps is empty *)
-          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.
+          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find // in H.
     }
 
     assert (H_lock_res_empty6 : forall i, forall cnti: containsThread tp6 i, (ThreadPool.getThreadR cnti).2 = empty_map).
@@ -555,14 +567,14 @@ Proof.
             simpl. 
             split.
             * apply cur_lt_max.
-            * rewrite Hth0_perms. apply empty_LT.
+            * apply empty_LT.
           + (* tid > 0; does not exist in tp *) subst tp. done.
         - intros.
           (* there is no lock, pmaps is empty *)
-          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.  
+          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find // in H.  
         - intros.
           (* there is no lock, pmaps is empty *)
-          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.
+          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find // in H.
     }
 
     assert (H_lock_res_empty7 : forall i, forall cnti: containsThread tp7 i, (ThreadPool.getThreadR cnti).2 = empty_map).
@@ -599,14 +611,14 @@ Proof.
             simpl. 
             split.
             * apply cur_lt_max.
-            * rewrite Hth0_perms. apply empty_LT.
+            * apply empty_LT.
           + (* tid > 0; does not exist in tp *) subst tp. done.
         - intros.
           (* there is no lock, pmaps is empty *)
-          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.  
+          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find // in H.  
         - intros.
           (* there is no lock, pmaps is empty *)
-          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find /= Htp // in H.
+          rewrite /= /lockRes /openmp_sem.addressFiniteMap.AMap.find // in H.
     }
 
     assert (H_lock_res_empty8 : forall i, forall cnti: containsThread tp8 i, (ThreadPool.getThreadR cnti).2 = empty_map).
@@ -705,26 +717,33 @@ Proof.
         { simpl. done. }
         { simpl. done. }
         { lia. }
-        { rewrite /perm8 /m6 /= H_lock_res_empty //. }
-        apply Hperms8.
+        { done. }
+        { apply Hperms8. }
         { done. }
         { (* current thread's new permission*) exists perm8_1.
           split; done. }
+        { simpl. done. }
+        {
+            match goal with
+            | |- context [ThreadPool.addThreads _ ?st _] => let st_name := fresh "thread_st" in
+              set st_name := st end.
+        simpl. done. }
         { done. }
         { done. }
-        { done. }
-        { done. }
-        { simpl. rewrite /spawn_team /update_tid /stree_update Heqttree /=.
-          unfold_mbind.
-          
-          rewrite /node_init /stree_lookup /stree_lookup_aux /stree_lookup_aux_func /=.
-          
+        { 
+          simpl.
+          rewrite Heqttree. cbn.
+          let H := fresh "H" in
+          rewrite /is_tid /=; case_bool_decide as H; try lia; clear H.
+          unfold_mbind. cbn.
+          rewrite /RecordSet.set /=.
+          f_equal.
+        }
+        simpl.
 
-
-          rewrite
-          (* maybe just prove stree_lookup exists? *) }
 
     }
 
 
 
+Admitted.
