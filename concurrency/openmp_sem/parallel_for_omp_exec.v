@@ -228,17 +228,17 @@ Proof.
     rewrite /m_init /= -/m_init in Hm1_def.
 
     pose tid:nat:=0.
-    pose σ2:=(clight_evsem_fun.alloc_variablesT_fun ge empty_env m (fn_vars f_main)
+    (* pose σ2:=(clight_evsem_fun.alloc_variablesT_fun ge empty_env m (fn_vars f_main)
       ≫=@{option_bind} (λ '(y, T),
             let
             '(e, m0) := y in
             bind_parameter_temps (fn_params f_main) [] (create_undef_temps (fn_temps f_main))
             ≫=@{option_bind} λ le : temp_env, Some (Clight_core.State f_main (fn_body f_main) Kstop e le, m0, T))).
 
-    cbn in σ2.
+    cbn in σ2. *)
     destruct (Mem.alloc m Z0 (Zpos (xO (xO xH)))) as [m2_0 b_i] eqn:Hm2_0.
     destruct (Mem.alloc m2_0 Z0 (Zpos (xO (xO xH)))) as [m2_1 b_count] eqn:Hm2_1.
-    cbn in σ2.
+    (* cbn in σ2. *)
     pose m2:=m2_1.
     assert (Hb_i'' : b_i = Mem.nextblock m).
     { rewrite /Mem.alloc /= in Hm2_0. injection Hm2_0 =>?? //. }
@@ -285,13 +285,28 @@ Proof.
     }
     simpl.
     rewrite /updThread Hth0_perms /=. cbn. rewrite Htp /=.
-    assert (∀ n, ssrnat.eqn (fintype.nat_of_ord (n: fintype.ordinal 1)) 0 = true) as Hord1.
-    { intros. admit. }
-    (* rewrite Hord1. *)
 
     match goal with
-    |  |- clos_refl_trans_1n _ _ (_, ?tp, _, _) _ => set tp2 :=tp end.
-    assert (ThreadPool.t = t) by done. dependent rewrite <-H in tp2. clear H.
+    |  |- clos_refl_trans_1n _ _ (_, ?tp, _, _) _ => set tp2 := tp end.
+    (* FIXME this just is to make tp2 to have type ThreadPool.t; is there an easier way? *)
+    assert (ThreadPool.t = t) by done; dependent rewrite <-H in tp2; clear H.
+    
+    
+    (** simplify tp2 *)
+    assert (∀ n, ssrnat.eqn (fintype.nat_of_ord (n: fintype.ordinal 1)) 0 = true) as Hord1.
+    { intros n.
+      destruct n as [n Hn]. simpl.
+      destruct n. - done. - rewrite /is_true in Hn. inv Hn. }
+    assert (forall {T:Type} (t1 t2:T), ((λ n : fintype.ordinal 1,
+             if ssrnat.eqn (fintype.nat_of_ord n) 0
+             then t1
+             else t2) =
+            λ n : fintype.ordinal 1, t1)).
+    { intros. apply Axioms.extensionality => n.
+      rewrite Hord1 //. }
+    (* dependent rewrite H in tp2 does not work *)
+    revert tp2; rewrite !H; intros tp2; clear H.
+    
 
     (** take 2nd step *)
     assert (cnt2: ThreadPool.containsThread tp2 0) by by subst tp2.
