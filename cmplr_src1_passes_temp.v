@@ -497,7 +497,7 @@ Fixpoint compiler_to_clight_function (s: statementT) : statement :=
   | SlabelT a b => Slabel a (compiler_to_clight_function b)
   | SpragmaT a b c d => (compiler_to_clight_function d)
   |_ => Sskip 
-  (* | SpragmaT a b c d => match b with 
+  (* | SpragmaT a b c d => match c with 
           | OMPParallel => 
           | OMPParallelEnd =>
           | OMPFor =>
@@ -506,6 +506,63 @@ Fixpoint compiler_to_clight_function (s: statementT) : statement :=
   |_ => Sskip             *)
   end.
 
+Definition _spawn : ident := $"spawn".
+Definition __opaque_pthread_t : ident := $"_opaque_pthread_t".
+Definition __opaque_pthread_attr_t : ident := $"_opaque_pthread_attr_t".
+Definition _t2 : ident := $"t2".
+Definition __par_routine1 : ident := $"_par_routine1".
+Definition ___par_routine1_data_2 : ident := $"__par_routine1_data_2".
+Definition __par_routine1_data_ty : ident := $"_par_routine1_data_ty".
+(*assume existence of function to create new identifiers*)
+Section Thread_spawning.
+  Parameter gen_ident : ident. 
+Definition spawn_thread : statementT :=
+(ScallT None
+(Evar _spawn (Tfunction
+    (Tcons
+      (tptr (tptr (Tstruct __opaque_pthread_t noattr)))
+      (Tcons
+        (tptr (Tstruct __opaque_pthread_attr_t noattr))
+        (Tcons
+          (tptr (Tfunction
+                  (Tcons
+                    (tptr tvoid)
+                    Tnil)
+                  (tptr tvoid)
+                  cc_default))
+          (Tcons (tptr tvoid)
+            Tnil)))) tint
+    cc_default))
+((Eaddrof
+  (Evar _t2 (tptr (Tstruct __opaque_pthread_t noattr)))
+  (tptr (tptr (Tstruct __opaque_pthread_t noattr)))) ::
+(Ecast (Econst_int (Int.repr 0) tint) (tptr tvoid)) ::
+(Evar __par_routine1 (Tfunction
+  (Tcons (tptr tvoid) Tnil)
+  (tptr tvoid) cc_default)) ::
+(Ecast
+  (Eaddrof
+    (Evar ___par_routine1_data_2 (Tstruct __par_routine1_data_ty noattr))
+    (tptr (Tstruct __par_routine1_data_ty noattr)))
+  (tptr tvoid)) :: nil)).
+
+ Fixpoint first_pass (s: statementT) : statementT :=
+ match s with
+  | SsequenceT a b => SsequenceT (first_pass a) (first_pass b)
+  | SifthenelseT a b c => SifthenelseT a (first_pass b) (first_pass c)
+  | SloopT a b => SloopT (first_pass a) (first_pass b)  
+  | SlabelT a b => SlabelT a (first_pass b)
+  | SpragmaT a b c d => match c with 
+          | OMPParallel nt pc rc => spawn_thread
+          | OMPParallelEnd => SskipT
+          | OMPFor a b => SskipT
+          | OMPForEnd => SskipT
+          | OMPBarrier =>SskipT
+          end
+  |_ => SskipT         
+  end. 
+  (*Need to generate: 
+  -a new body (replaces Spragma)*)
   (*pragma label has these options:
   Variant pragma_label : Type :=
   | OMPParallel (num_threads: nat)
@@ -523,6 +580,11 @@ Final argument (in c) is the variables used
 TODO:
 Plan for compiler passes:
 First pass cannot lose information in pragma_info and pragma_label
-First pass: 
+First pass: maybe it maintains the parallel pragma, maybe statementT to statementT
+(just about parallel pragma; translate SParallel to c code)
+
+When we are sure we don't need any pragma information then we can compile to statement
+
+Second pass: 
 
 *)

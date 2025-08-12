@@ -3,12 +3,12 @@
 
 #include <stdio.h>
 #include <unistd.h>
-#include <pthread.h>
+#include "threads.h"
 
-pthread_mutex_t critical_mutex_1; 
+lock_t critical_mutex_1; 
 
 // one mutex for each reduction variable in each reduction
-pthread_mutex_t reduction_mutex_1; // for k
+lock_t reduction_mutex_1; // for k
 
 typedef struct _par_routine1_data_ty{
     // shared variables
@@ -26,16 +26,17 @@ void * _par_routine1(void* __par_routine1_data){
     int k=0; // initialized according to reduction
 
     // original code starts; all accesses to shared variables are transformed to the pointer version
-    pthread_mutex_lock(&critical_mutex_1); // critical start
+    acquire(&critical_mutex_1); // critical start
     (*_i)++; // increment i
-    pthread_mutex_unlock(&critical_mutex_1); // critical end
+    release(&critical_mutex_1); // critical end
     j = 1;
     k = 1;
+    int l=0;
 
     // do reduction
-    pthread_mutex_lock(&reduction_mutex_1); // reduction start
+    acquire(&reduction_mutex_1); // reduction start
     *_par_routine1_data->k = *_par_routine1_data->k + k; // increment k
-    pthread_mutex_unlock(&reduction_mutex_1); // reduction end
+    release(&reduction_mutex_1); // reduction end
 
     return NULL;
 }
@@ -44,12 +45,8 @@ void * _par_routine1(void* __par_routine1_data){
 int main() {
     // initialize mutexes
     // can't move to call site of mutex_lock() because initialization should happen only once
-    if (pthread_mutex_init(&critical_mutex_1, NULL) != 0) {
-        return 1; 
-    } 
-    if (pthread_mutex_init(&reduction_mutex_1, NULL) != 0) {
-        return 1; 
-    }
+    lock_t lock_1 = makelock();
+    lock_t lock_2 = makelock();
 
 
     int i = 0;
@@ -57,28 +54,22 @@ int main() {
     int k = 0;
 
     /* parallel region start */
-    // t1 is the parent thread
-    pthread_t t2;
 
     _par_routine1_data_ty __par_routine1_data_1 = {&i, &k};
     _par_routine1_data_ty __par_routine1_data_2 = {&i, &k};
-    pthread_create(&t2, NULL, _par_routine1, (void *)&__par_routine1_data_2);
+    int t2 = spawn(_par_routine1, (void *)&__par_routine1_data_2);
     
     _par_routine1((void *)&__par_routine1_data_1);
 
     // wait for threads to finish
-    pthread_join(t2, NULL);
+    join_thread(t2);
     /* parallel region end */
 
     printf("i = %d, j = %d, k = %d\n", i, j, k);
 
     // destroy mutexes
-    if (pthread_mutex_destroy(&critical_mutex_1) != 0) {
-        return 1; 
-    }
-    if (pthread_mutex_destroy(&reduction_mutex_1) != 0) {
-        return 1; 
-    }
+    freelock(lock_1);
+    freelock(lock_2);
 
     return 0;
 }
