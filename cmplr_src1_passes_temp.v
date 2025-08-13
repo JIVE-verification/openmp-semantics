@@ -513,41 +513,30 @@ Definition _t2 : ident := $"t2".
 Definition __par_routine1 : ident := $"_par_routine1".
 Definition ___par_routine1_data_2 : ident := $"__par_routine1_data_2".
 Definition __par_routine1_data_ty : ident := $"_par_routine1_data_ty".
+Definition _t'3 : ident := 130%positive.
 (*assume existence of function to create new identifiers*)
-(* Section Thread_spawning.
-  Parameter gen_ident : ident.  *)
+Section Thread_spawning.
+  Parameter gen_ident : ident. 
 Fixpoint spawn_thread (n: nat): statementT :=
 match n with 
 | O => SskipT
 | S k =>
-SsequenceT (ScallT None
-(Evar _spawn (Tfunction
-    (Tcons
-      (tptr (tptr (Tstruct __opaque_pthread_t noattr)))
-      (Tcons
-        (tptr (Tstruct __opaque_pthread_attr_t noattr))
-        (Tcons
-          (tptr (Tfunction
-                  (Tcons
-                    (tptr tvoid)
-                    Tnil)
-                  (tptr tvoid)
-                  cc_default))
-          (Tcons (tptr tvoid)
-            Tnil)))) tint
-    cc_default))
-((Eaddrof
-  (Evar _t2 (tptr (Tstruct __opaque_pthread_t noattr)))
-  (tptr (tptr (Tstruct __opaque_pthread_t noattr)))) ::
-(Ecast (Econst_int (Int.repr 0) tint) (tptr tvoid)) ::
-(Evar __par_routine1 (Tfunction
-  (Tcons (tptr tvoid) Tnil)
-  (tptr tvoid) cc_default)) ::
-(Ecast
-  (Eaddrof
-    (Evar ___par_routine1_data_2 (Tstruct __par_routine1_data_ty noattr))
-    (tptr (Tstruct __par_routine1_data_ty noattr)))
-  (tptr tvoid)) :: nil)) (spawn_thread(k))
+SsequenceT (ScallT (Some _t'3)
+        (Evar _spawn (Tfunction
+                        (Tcons
+                          (tptr (Tfunction
+                                  (Tcons (tptr tvoid) Tnil)
+                                  tint cc_default))
+                          (Tcons (tptr tvoid) Tnil)) tint
+                        cc_default))
+        ((Evar __par_routine1 (Tfunction
+                                (Tcons (tptr tvoid) Tnil)
+                                (tptr tvoid) cc_default)) ::
+          (Ecast
+            (Eaddrof
+              (Evar ___par_routine1_data_2 (Tstruct __par_routine1_data_ty noattr))
+              (tptr (Tstruct __par_routine1_data_ty noattr)))
+            (tptr tvoid)) :: nil)) (spawn_thread(k))
   end.
 
  Fixpoint first_pass (s: statementT) : statementT :=
