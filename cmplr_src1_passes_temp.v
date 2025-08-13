@@ -514,10 +514,13 @@ Definition __par_routine1 : ident := $"_par_routine1".
 Definition ___par_routine1_data_2 : ident := $"__par_routine1_data_2".
 Definition __par_routine1_data_ty : ident := $"_par_routine1_data_ty".
 (*assume existence of function to create new identifiers*)
-Section Thread_spawning.
-  Parameter gen_ident : ident. 
-Definition spawn_thread : statementT :=
-(ScallT None
+(* Section Thread_spawning.
+  Parameter gen_ident : ident.  *)
+Fixpoint spawn_thread (n: nat): statementT :=
+match n with 
+| O => SskipT
+| S k =>
+SsequenceT (ScallT None
 (Evar _spawn (Tfunction
     (Tcons
       (tptr (tptr (Tstruct __opaque_pthread_t noattr)))
@@ -544,7 +547,8 @@ Definition spawn_thread : statementT :=
   (Eaddrof
     (Evar ___par_routine1_data_2 (Tstruct __par_routine1_data_ty noattr))
     (tptr (Tstruct __par_routine1_data_ty noattr)))
-  (tptr tvoid)) :: nil)).
+  (tptr tvoid)) :: nil)) (spawn_thread(k))
+  end.
 
  Fixpoint first_pass (s: statementT) : statementT :=
  match s with
@@ -553,7 +557,7 @@ Definition spawn_thread : statementT :=
   | SloopT a b => SloopT (first_pass a) (first_pass b)  
   | SlabelT a b => SlabelT a (first_pass b)
   | SpragmaT a b c d => match c with 
-          | OMPParallel nt pc rc => spawn_thread
+          | OMPParallel nt pc rc => spawn_thread (nt -1)
           | OMPParallelEnd => SskipT
           | OMPFor a b => SskipT
           | OMPForEnd => SskipT
