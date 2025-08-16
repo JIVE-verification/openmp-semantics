@@ -45,7 +45,7 @@ Require Import compcert.lib.Integers.
 (*Require Import VST.concurrency.common.core_semantics.*)
 Require Import VST.concurrency.openmp_sem.event_semantics.
 Require Export VST.concurrency.openmp_sem.semantics.
-Require Import VST.concurrency.openmp_sem.threadPool.
+Require Import VST.concurrency.openmp_sem.finThreadPool.
 Require Import VST.concurrency.common.machine_semantics.
 Require Import VST.concurrency.openmp_sem.permissions.
 

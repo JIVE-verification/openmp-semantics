@@ -15,7 +15,7 @@ Require Import Coq.ZArith.ZArith.
 Require Import VST.concurrency.openmp_sem.event_semantics.
 Require Export VST.concurrency.openmp_sem.semantics.
 Require Export VST.concurrency.common.lksize.
-Require Import VST.concurrency.openmp_sem.threadPool.
+Require Import VST.concurrency.openmp_sem.finThreadPool.
 
 Require Import VST.concurrency.common.machine_semantics.
 Require Import VST.concurrency.openmp_sem.permissions.
@@ -253,6 +253,12 @@ Module DryHybridMachine.
       | _ => None
       end.
 
+    Definition Krun_at (ct: ctl) : option C :=
+      match ct with
+      | Krun c => Some c
+      | _ => None
+      end.
+
     Definition permMapJoinPair (pmap1 pmap2 pmap3: res) : Prop :=
       permMapJoin pmap1.1 pmap2.1 pmap3.1 ∧
       permMapJoin pmap1.2 pmap2.2 pmap3.2.
@@ -277,14 +283,14 @@ Module DryHybridMachine.
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
       thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=
     | step_parallel :
-        forall (tp' tp'' tp''':thread_pool) c c' ge le m1 m' m''
-          ttree' ttree'' (num_threads:nat) pc rcs new_tids idx rvs
+        forall (tp' tp'' tp''':thread_pool) c (* c' *) ge le m' m''
+          ttree' ttree'' (num_threads:nat) pc rcs (new_tids: list nat) idx rvs
           perm (perms:list res),
           forall
             (* TODO num_thread at least 2? *)
             (Hinv : invariant tp)
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
-            (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m1)
+            (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m')
             (Hc: Kblocked_at (getThreadC cnt0) = Some c)
             (Hat_meta: at_pragma semSem c = Some (idx, OMPParallel num_threads pc rcs))
             (* 1. spawn new threads as fork, add them to team, and split permissions angelically*)
@@ -295,15 +301,15 @@ Module DryHybridMachine.
             (Hperms_length: length perms = num_threads)
             (Htp': ∃ perm_0, nth_error perms 0 = Some perm_0 ∧
                              tp' = updThreadR cnt0 perm_0)
-            (Hc': Some c' = transform_state_parallel c)
+            (* (Hc': Some c' = transform_state_parallel c) *)
             (Htp'': (new_tids, tp'') = addThreads tp c (tl perms))
-            (* 2. add new team to team_tree, sets info aobut parallel construct as a team context *)
+            (* 2. add new team to team_tree, sets info about parallel construct as a team context *)
             (Hle : Some le = get_le c)
             (Hrvs: Some rvs = init_rvs rcs ge le m)
-            (Htree': Some ttree' = spawn_team tid0 (map pos.n new_tids) rvs idx ttree),
+            (Htree': Some ttree' = spawn_team tid0 new_tids rvs idx ttree),
             (* 3. after spawning new threads, all the threads are Krun.
                for each thread in team, do privatization, and add pv_map as thread context. *)
-            let team_tids := tid0::(map pos.n new_tids) in
+            let team_tids := tid0::new_tids in
             forall
             (Htree'': Some (tp''', m'', ttree'') = foldr (
                 (* NOTE it would be more natural to iterate through the siblings and
@@ -1020,27 +1026,28 @@ End DryHybridMachine.
 
 Export DryHybridMachine.
 
-Definition one_thread_tp {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) OrdinalPool.OrdinalThreadPool) :=
-  tp.(OrdinalPool.num_threads) = OrdinalPool.one_pos.
-Definition one_thread_tp' {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) OrdinalPool.OrdinalThreadPool) :=
+Definition one_thread_tp {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) FinPool.FinThreadPool) :=
+  tp.(FinPool.num_threads) = 1.
+Definition one_thread_tp' {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) FinPool.FinThreadPool) :=
   forall i j (cnti:ThreadPool.containsThread tp i) (cntj:ThreadPool.containsThread tp j),
     i=j.
-Lemma one_thread_tp'_equiv {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) OrdinalPool.OrdinalThreadPool) :
+Lemma one_thread_tp'_equiv {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) FinPool.FinThreadPool) :
   one_thread_tp tp -> one_thread_tp' tp.
 Proof.
   intros. unfold one_thread_tp'. unfold one_thread_tp in H. intros.
   destruct tp; simpl in *.
-  rewrite /OrdinalPool.containsThread /= H /= in cntj, cnti; destruct i,j; done.
+  rewrite /FinPool.containsThread /= H /= in cntj, cnti. Lia.lia.
 Qed.
 
-Definition no_lock_res {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) OrdinalPool.OrdinalThreadPool) :=
+Definition no_lock_res {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) FinPool.FinThreadPool) :=
   forall (addr:Address.address),
   ThreadPool.lockRes tp addr = None.
-Definition lock_perm_empty {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) OrdinalPool.OrdinalThreadPool) :=
-  forall i (cnti:ThreadPool.containsThread tp i),
-    (ThreadPool.getThreadR cnti).2 =empty_map.
 
-Lemma one_thread_tp_inv : forall {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) OrdinalPool.OrdinalThreadPool), 
+Definition res_empty (i: access_map * access_map) : Prop := i.2 = empty_map.
+Definition lock_perm_empty {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) FinPool.FinThreadPool) :=
+  forall i, res_empty (tp.(FinPool.perm_maps) !!! i).
+
+Lemma one_thread_tp_inv : forall {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) FinPool.FinThreadPool), 
   one_thread_tp tp ->
   no_lock_res tp ->
   lock_perm_empty tp ->
@@ -1052,8 +1059,10 @@ Proof.
   - specialize (H _ _ cnti cntj). done.
   - specialize (H0 laddr1). rewrite H0 in Hres1; done.
   - specialize (H0 laddr). rewrite H0 in Hres; done.
-  - specialize (H1 i cnti) as ->. split; intros; apply permCoh_empty'.
+  - rewrite /lock_perm_empty /FinPool.getThreadR in H1.
+    rewrite /ThreadPool.getThreadR /= /FinPool.getThreadR.
+    rewrite (H1 (Fin.of_nat_lt cnti)). split; intros; apply permCoh_empty'.
   - specialize (H0 laddr). rewrite H0 in Hres; done.
-  - rewrite /ThreadPool.lr_valid /=  /OrdinalPool.lr_valid. 
+  - rewrite /ThreadPool.lr_valid /=  /FinPool.lr_valid. 
     intros. unfold no_lock_res in H0. simpl in H0. rewrite H0 //.
 Qed.
