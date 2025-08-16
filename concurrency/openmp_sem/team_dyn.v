@@ -230,18 +230,18 @@ Section SiblingTreeZipper.
   End TreeZipperIter.
 
   (* TODO maybe rewrite stree_lookup with fold_tree_zipper *)
-  Program Fixpoint stree_lookup (f: tree_zipper -> bool) tz {measure (tree_pos_measure tz)} : option tree_zipper :=
+  Program Fixpoint _stree_lookup (f: tree_zipper -> bool) tz {measure (tree_pos_measure tz)} : option tree_zipper :=
   if f tz then Some tz else
   let right_res :=
       match go_right tz with
-    | Some tz_r => stree_lookup f tz_r
+    | Some tz_r => _stree_lookup f tz_r
     | None => None 
     end in
   match right_res with
   | Some res => Some res
   | None => 
     match go_down tz with
-    | Some tz_d => stree_lookup f tz_d
+    | Some tz_d => _stree_lookup f tz_d
     | None => None
     end
   end.
@@ -250,6 +250,29 @@ Section SiblingTreeZipper.
   Next Obligation. destruct tz. destruct tis. destruct l; try done. inv Heq_anonymous.
     simpl. rewrite /fmap. lia. Defined.
   Next Obligation. apply measure_wf. apply lt_wf. Defined.
+
+  Lemma stree_lookup_some (f: tree_zipper -> bool) tz tz':
+    f tz = true ->
+    _stree_lookup f tz = Some tz'.
+    
+  Proof. intros H. destruct tz. rewrite /_stree_lookup /=. rewrite /_stree_lookup_func /=.
+  Abort.
+
+  Equations stree_lookup (f: tree_zipper -> bool) tz : option tree_zipper by wf tz tree_zipper_iter_rel :=
+    stree_lookup f (TreeZip this b (h::a) p) :=
+      let tz := (TreeZip this b (h::a) p) in
+      if (f tz) then Some tz else
+      (* look right if possible *)
+        stree_lookup f (TreeZip h (this::b) a p);
+    stree_lookup f (TreeZip (SNode d (h::kids)) b [] p) :=
+      let tz := (TreeZip (SNode d (h::kids)) b [] p) in
+      if (f tz) then Some tz else
+      (* look down if possible *)
+        stree_lookup f (TreeZip h [] kids ((b,d,[])::p));
+    stree_lookup f tz :=
+      if (f tz) then Some tz else None.
+  Next Obligation. rewrite /tree_zipper_iter_rel. rewrite /tree_pos_iter //. Defined.
+  Next Obligation. rewrite /tree_zipper_iter_rel. rewrite /tree_pos_iter //. Defined.
 
   (* go_up is well-founded *)
   Definition tree_pos_measure_up tz : nat :=
@@ -335,9 +358,10 @@ Section TreeZipperTests.
   Example test_stree_lookup :
     stree_lookup (λ x, data $ this x =? 3) 
       (TreeZip (SNode 0 []) [] [(SNode 1 []);(SNode 2 [SNode 3 []])] []) = Some (TreeZip (SNode 3 []) [] [] [([SNode 1 []; SNode 0 []], 2, [])]).
-  Proof.
-    cbv. done.
-  Qed.
+  Proof. 
+    (* match goal with
+    | |- ?x = _ => let a := eval vm_compute in x in idtac a end. *)
+  done. Qed.
 End TreeZipperTests.
 
 Notation " x '.this' " := (this x) (at level 3).
