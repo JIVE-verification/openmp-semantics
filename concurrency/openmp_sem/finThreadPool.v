@@ -1877,7 +1877,7 @@ Module FinPool.
       | right _ => None
       end.
 
-    Definition OrdinalThreadPool: ThreadPool.ThreadPool :=
+    Definition FinThreadPool: ThreadPool.ThreadPool :=
       (@ThreadPool.Build_ThreadPool _ _
                                     t
                                     mkPool
