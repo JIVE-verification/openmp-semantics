@@ -302,7 +302,7 @@ Module DryHybridMachine.
             (Htp': ∃ perm_0, nth_error perms 0 = Some perm_0 ∧
                              tp' = updThreadR cnt0 perm_0)
             (* (Hc': Some c' = transform_state_parallel c) *)
-            (Htp'': (new_tids, tp'') = addThreads tp c (tl perms))
+            (Htp'': (new_tids, tp'') = addThreads tp' c (tl perms))
             (* 2. add new team to team_tree, sets info about parallel construct as a team context *)
             (Hle : Some le = get_le c)
             (Hrvs: Some rvs = init_rvs rcs ge le m)
