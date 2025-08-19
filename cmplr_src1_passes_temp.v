@@ -25,6 +25,18 @@ Definition _k : ident := $"k".
 Definition _l : ident := $"l".
 Definition _main : ident := $"main".
 Definition _printf : ident := $"printf".
+Definition _lock_1 : ident := $"lock_1".
+Definition _lock_2 : ident := $"lock_2".
+Definition _atom_int : ident := $"atom_int".
+Definition ___par_routine1_data_1 : ident := $"__par_routine1_data_1".
+Definition __par_routine1_data_ty : ident := $"_par_routine1_data_ty".
+Definition ___par_routine1_data_2 : ident := $"__par_routine1_data_2".
+Definition _t2 : ident := $"t2".
+Definition _makelock : ident := $"makelock".
+Definition _spawn : ident := $"spawn".
+Definition __par_routine1 : ident := $"_par_routine1".
+Definition _join_thread : ident := $"join_thread".
+Definition _freelock : ident := $"freelock".
 
 Definition v___stringlit_1 := {|
   gvar_info := (tarray tschar 24);
@@ -110,7 +122,7 @@ Local Open Scope Z_scope.
 still on heap *)
 Definition prog_clight' :=
   transl_program prog.
-
+Print prog_clight'.
 (* print clight ast *)
 Example print_f_main_clight : True.
   let p := eval cbn in prog_clight' in
@@ -506,39 +518,44 @@ Fixpoint compiler_to_clight_function (s: statementT) : statement :=
   |_ => Sskip             *)
   end.
 
-Definition _spawn : ident := $"spawn".
 Definition __opaque_pthread_t : ident := $"_opaque_pthread_t".
 Definition __opaque_pthread_attr_t : ident := $"_opaque_pthread_attr_t".
-Definition _t2 : ident := $"t2".
-Definition __par_routine1 : ident := $"_par_routine1".
-Definition ___par_routine1_data_2 : ident := $"__par_routine1_data_2".
-Definition __par_routine1_data_ty : ident := $"_par_routine1_data_ty".
 Definition _t'3 : ident := 130%positive.
 (*assume existence of function to create new identifiers*)
 Section Thread_spawning.
-  Parameter gen_ident : ident. 
-Fixpoint spawn_thread (n: nat): statementT :=
-match n with 
-| O => SskipT
-| S k =>
-SsequenceT (ScallT (Some _t'3)
-        (Evar _spawn (Tfunction
-                        (Tcons
-                          (tptr (Tfunction
-                                  (Tcons (tptr tvoid) Tnil)
-                                  tint cc_default))
-                          (Tcons (tptr tvoid) Tnil)) tint
-                        cc_default))
-        ((Evar __par_routine1 (Tfunction
-                                (Tcons (tptr tvoid) Tnil)
-                                (tptr tvoid) cc_default)) ::
-          (Ecast
-            (Eaddrof
-              (Evar ___par_routine1_data_2 (Tstruct __par_routine1_data_ty noattr))
-              (tptr (Tstruct __par_routine1_data_ty noattr)))
-            (tptr tvoid)) :: nil)) (spawn_thread(k))
+
+  Parameter gen_ident : list ident -> ident.
+
+  Fixpoint spawn_thread (n: nat) (curr_ident: list ident): (statementT * list ident) :=
+  match n with 
+  | O => (SskipT, curr_ident)
+  | S k =>
+    let (tl_stmt, curr_ident') := spawn_thread k curr_ident in
+    let ret_id := gen_ident curr_ident' in
+    let spawn_thread_code :=
+      SsequenceT (ScallT (Some ret_id)
+              (Evar _spawn (Tfunction
+                              (Tcons
+                                (tptr (Tfunction
+                                        (Tcons (tptr tvoid) Tnil)
+                                        tint cc_default))
+                                (Tcons (tptr tvoid) Tnil)) tint
+                              cc_default))
+              ((Evar __par_routine1 (Tfunction
+                                      (Tcons (tptr tvoid) Tnil)
+                                      (tptr tvoid) cc_default)) ::
+                (Ecast
+                  (Eaddrof
+                    (Evar ___par_routine1_data_2 (Tstruct __par_routine1_data_ty noattr))
+                    (tptr (Tstruct __par_routine1_data_ty noattr)))
+                  (tptr tvoid)) :: nil)) tl_stmt in
+    (spawn_thread_code, ret_id::curr_ident')
   end.
 
+Check SpragmaT. 
+Check pragma_info.
+
+Definition post_spawn_thread_code: statementT := (SsetT gen_ident (Etempvar gen_ident tint)).
  Fixpoint first_pass (s: statementT) : statementT :=
  match s with
   | SsequenceT a b => SsequenceT (first_pass a) (first_pass b)
@@ -546,11 +563,10 @@ SsequenceT (ScallT (Some _t'3)
   | SloopT a b => SloopT (first_pass a) (first_pass b)  
   | SlabelT a b => SlabelT a (first_pass b)
   | SpragmaT a b c d => match c with 
-          | OMPParallel nt pc rc => spawn_thread (nt -1)
-          | OMPParallelEnd => SskipT
+          | OMPParallel nt pc rc => spawn_thread (nt - 1) :: SskipT
           | OMPFor a b => SskipT
-          | OMPForEnd => SskipT
-          | OMPBarrier =>SskipT
+          (* | OMPBarrier =>SskipT *) (*may deal with later*)
+          | _ => SskipT
           end
   |_ => SskipT         
   end. 
