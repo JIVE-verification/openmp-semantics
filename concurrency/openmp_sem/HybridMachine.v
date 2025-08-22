@@ -1066,3 +1066,49 @@ Proof.
   - rewrite /ThreadPool.lr_valid /=  /FinPool.lr_valid. 
     intros. unfold no_lock_res in H0. simpl in H0. rewrite H0 //.
 Qed.
+
+Import Events.
+
+Notation trace := (list machine_event).
+
+(* adapted from Verifying Dynamic Race Detection, CPP '17 *)
+Definition locks a m := match a with | external _ (acquire l _) | external _ (release l _) => l = m | _ => False end.
+(*Definition fjs a u := exists t, a = fork t u \/ a = join t u. spawn events don't actually list the threads they spawn... *)
+Definition writes a x := match a with | internal _ (openmp_sem.event_semantics.Write b o v) => fst x = b /\ (o <= snd x < o + Zlength v)%Z | _ => False end.
+Definition accesses a x := match a with | internal _ (openmp_sem.event_semantics.Write b o v) => fst x = b /\ (o <= snd x < o + Zlength v)%Z
+  | internal _ (openmp_sem.event_semantics.Read b o n _) => fst x = b /\ (o <= snd x < o + n)%Z | _ => False end.
+
+Inductive happens_before (tr : trace) i j : Prop := 
+  | hb_prog_order a b (Hlt : i < j) (Ha : nth_error tr i = Some a)
+      (Hb : nth_error tr j = Some b) (Hthread : Events.thread_id a = Events.thread_id b)
+  | hb_locking a b (Hlt : i < j) (Ha : nth_error tr i = Some a)
+      (Hb : nth_error tr j = Some b) m (Hlocka : locks a m) (Hlockb : locks b m)
+(*  | hb_fork_join a b (Hlt : i < j) (Ha : nth_error tr i = Some a)
+      (Hb : nth_error tr j = Some b) 
+      (Hfj : fjs a (thread_of b) \/ fjs b (thread_of a)) *)
+  | hb_trans k (Hhb1 : happens_before tr i k) (Hhb2 : happens_before tr k j).
+
+(*Lemma hb_app : forall m1 i j m2 (Hhb : happens_before m1 i j),
+    happens_before (m1 ++ m2) i j.
+  Proof.
+    intros; induction Hhb.
+    - generalize (nth_error_lt _ _ Ha), (nth_error_lt _ _ Hb); intros.
+      eapply hb_prog_order; eauto; rewrite nth_error_app; clarify.
+    - generalize (nth_error_lt _ _ Ha), (nth_error_lt _ _ Hb); intros.
+      eapply hb_locking; try (rewrite nth_error_app; clarify); eauto.
+    - generalize (nth_error_lt _ _ Ha), (nth_error_lt _ _ Hb); intros.
+      eapply hb_fork_join; try (rewrite nth_error_app; clarify); eauto.
+    - eapply hb_trans; eauto.
+  Qed.*)
+
+Definition race_free (tr : trace) := forall i j (Hdiff : i <> j) a b 
+  (Ha : nth_error tr i = Some a) (Hb : nth_error tr j = Some b)
+  x (Hwrites : writes a x) (Haccesses : accesses b x),
+  happens_before tr i j \/ happens_before tr j i.
+
+Theorem drf_free : forall m0 ge sch tr tree c m sch' tr' tree' c' m',
+  machine_step (HybridMachineSig.ConcurMachineSemantics(ThreadPool := FinPool.FinThreadPool)(HybridMachine := HybridMachineSig.HybridCoarseMachine.HybridCoarseMachine(machineSig := DryHybridMachineSig(ge := ge))) m0) ge sch tr tree c m sch' (tr ++ tr') tree' c' m' ->
+  race_free tr'.
+Proof.
+  
+Admitted.
