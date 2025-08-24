@@ -524,38 +524,41 @@ Definition _t'3 : ident := 130%positive.
 (*assume existence of function to create new identifiers*)
 Section Thread_spawning.
 
-  Parameter gen_ident : list ident -> ident.
+Parameter gen_ident : list ident -> ident.
 
-  Fixpoint spawn_thread (n: nat) (curr_ident: list ident): (statementT * list ident) :=
-  match n with 
-  | O => (SskipT, curr_ident)
-  | S k =>
-    let (tl_stmt, curr_ident') := spawn_thread k curr_ident in
-    let ret_id := gen_ident curr_ident' in
-    let spawn_thread_code :=
-      SsequenceT (ScallT (Some ret_id)
-              (Evar _spawn (Tfunction
-                              (Tcons
-                                (tptr (Tfunction
-                                        (Tcons (tptr tvoid) Tnil)
-                                        tint cc_default))
-                                (Tcons (tptr tvoid) Tnil)) tint
-                              cc_default))
-              ((Evar __par_routine1 (Tfunction
+Fixpoint spawn_thread (n: nat) (curr_ident: list ident): (statementT * list ident) :=
+match n with 
+| O => (SskipT, curr_ident)
+| S k =>
+  let (tl_stmt, curr_ident') := spawn_thread k curr_ident in
+  let ret_id := gen_ident curr_ident' in
+  let spawn_thread_code :=
+    SsequenceT (ScallT (Some ret_id)
+            (Evar _spawn (Tfunction
+                            (Tcons
+                              (tptr (Tfunction
                                       (Tcons (tptr tvoid) Tnil)
-                                      (tptr tvoid) cc_default)) ::
-                (Ecast
-                  (Eaddrof
-                    (Evar ___par_routine1_data_2 (Tstruct __par_routine1_data_ty noattr))
-                    (tptr (Tstruct __par_routine1_data_ty noattr)))
-                  (tptr tvoid)) :: nil)) tl_stmt in
-    (spawn_thread_code, ret_id::curr_ident')
-  end.
+                                      tint cc_default))
+                              (Tcons (tptr tvoid) Tnil)) tint
+                            cc_default))
+            ((Evar __par_routine1 (Tfunction
+                                    (Tcons (tptr tvoid) Tnil)
+                                    (tptr tvoid) cc_default)) ::
+              (Ecast
+                (Eaddrof
+                  (Evar ___par_routine1_data_2 (Tstruct __par_routine1_data_ty noattr))
+                  (tptr (Tstruct __par_routine1_data_ty noattr)))
+                (tptr tvoid)) :: nil)) tl_stmt in
+  (spawn_thread_code, ret_id::curr_ident')
+end.
 
 Check SpragmaT. 
 Check pragma_info.
 
-Definition post_spawn_thread_code: statementT := (SsetT gen_ident (Etempvar gen_ident tint)).
+Definition post_spawn_thread_code: statementT := (ScallT None
+                            (Evar _join_thread (Tfunction (Tcons tint Tnil)
+                                                 tvoid cc_default))
+                            ((Etempvar _t2 tint) :: nil)).
  Fixpoint first_pass (s: statementT) : statementT :=
  match s with
   | SsequenceT a b => SsequenceT (first_pass a) (first_pass b)
@@ -563,7 +566,7 @@ Definition post_spawn_thread_code: statementT := (SsetT gen_ident (Etempvar gen_
   | SloopT a b => SloopT (first_pass a) (first_pass b)  
   | SlabelT a b => SlabelT a (first_pass b)
   | SpragmaT a b c d => match c with 
-          | OMPParallel nt pc rc => spawn_thread (nt - 1) :: SskipT
+          | OMPParallel nt pc rc => SsequenceT (fst (spawn_thread (nt - 1) [])) post_spawn_thread_code
           | OMPFor a b => SskipT
           (* | OMPBarrier =>SskipT *) (*may deal with later*)
           | _ => SskipT
