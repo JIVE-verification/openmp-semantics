@@ -9,9 +9,9 @@ Require Import compcert.common.Memory.
 Require Import compcert.lib.Maps.
 
 Require Import VST.concurrency.lib.setoid_help.
-Require Import VST.concurrency.common.permissions. Import permissions.
+Require Import VST.concurrency.openmp_sem.permissions. Import permissions.
 Require Import VST.concurrency.openmp_sem.Clight_bounds.
-Require Import VST.concurrency.common.permissions.
+Require Import VST.concurrency.openmp_sem.permissions.
 (* Require Import VST.concurrency.lib.Coqlib3. *)
 
 Import FunctionalExtensionality.

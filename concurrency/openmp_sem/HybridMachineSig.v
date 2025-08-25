@@ -684,7 +684,6 @@ Module HybridMachineSig.
                              (hybrid_initial_schedule).
 
 
-      (*
       (** Schedule safety of the coarse-grained machine*)
       Inductive csafe (st : MachState) (m : mem) : nat -> Prop :=
       | Safe_0: csafe st m 0
@@ -701,21 +700,21 @@ Module HybridMachineSig.
       
       
       (** Schedule safety of the coarse-grained machine*)
-      Inductive concur_safe U tp (m : mem) : nat -> Prop :=
-      | concur_Safe_0: concur_safe U tp m 0
-      | concur_HaltedSafe: forall n, halted_machine (U, nil, tp) -> concur_safe U tp m n
-      | concur_Internal : forall tp' m' n
+      Inductive concur_safe U tp ttree (m : mem) : nat -> Prop :=
+      | concur_Safe_0: concur_safe U tp ttree m 0
+      | concur_HaltedSafe: forall n, halted_machine (U, nil, tp, ttree) -> concur_safe U tp ttree m n
+      | concur_Internal : forall tp' ttree' m' n
                      (Hstep: internal_step U tp m tp' m')
-                     (Hsafe: concur_safe U tp' m' n),
-          concur_safe U tp m (S n)
-      | concur_External: forall tp' m' n (tr tr': event_trace)
-                     (Hstep: external_step U tr tp m U tr' tp' m')
-                     (Hsafe: concur_safe U tp' m' n),
-          concur_safe U tp m (S n)
-      | concur_External_Angel: forall tp' m' n (tr tr': event_trace)
-                     (Hstep: external_step U tr tp m (schedSkip U) tr' tp' m')
-                     (Hsafe: forall U'', concur_safe U'' tp' m' n),
-          concur_safe U tp m (S n).
+                     (Hsafe: concur_safe U tp' ttree' m' n),
+          concur_safe U tp ttree m (S n)
+      | concur_External: forall tp' m' n (tr tr': event_trace) ttree'
+                     (Hstep: external_step U tr tp m ttree U tr' tp' m' ttree')
+                     (Hsafe: concur_safe U tp' ttree' m' n),
+          concur_safe U tp ttree m (S n)
+      | concur_External_Angel: forall tp' m' n (tr tr': event_trace) ttree'
+                     (Hstep: external_step U tr tp m ttree (schedSkip U) tr' tp' m' ttree')
+                     (Hsafe: forall U'', concur_safe U'' tp' ttree' m' n),
+          concur_safe U tp ttree m (S n).
       
       (* TODO: Make a new file with safety lemmas. *)
       Lemma csafe_reduce:
@@ -744,9 +743,9 @@ Module HybridMachineSig.
         specialize (IHU H2); discriminate.
       Qed.
 
-      Lemma csafe_trace: forall n U tr tp m,
-        csafe (U, tr, tp) m n ->
-        forall tr', csafe (U, tr', tp) m n.
+      Lemma csafe_trace: forall n U tr tp ttree m,
+        csafe (U, tr, tp, ttree) m n ->
+        forall tr', csafe (U, tr', tp, ttree) m n.
       Proof.
         induction n0; intros; [constructor|].
         inversion H; subst; [constructor; auto | inversion Hstep; subst; simpl in *; try inversion Htstep; subst; try (apply schedSkip_id in HschedS; subst);
@@ -766,9 +765,10 @@ Module HybridMachineSig.
           change U with (yield U) at 2.
           change m'0 with (diluteMem m'0) at 2.
           eapply thread_step; eauto.
-        - eapply AngelSafe; [|intro; eapply IHn0; eauto].
+        (* - eapply AngelSafe; [|intro; eapply IHn0; eauto].
           erewrite cats0.
-          eapply suspend_step; eauto.
+          eapply suspend_step.
+          rewrite /schedSkip /=.
         - eapply AngelSafe; eauto.
           eapply sync_step; eauto.
         - subst.
@@ -779,15 +779,16 @@ Module HybridMachineSig.
           eapply AngelSafe; [|intro; eapply IHn0; eauto].
           erewrite cats0.
           eapply schedfail; eauto.
-      Qed.
+      Qed. *)
+      Admitted.
 
-      Lemma csafe_concur_safe: forall U tr tp m n, csafe (U, tr, tp) m n -> concur_safe U tp m n.
+      (* Lemma csafe_concur_safe: forall U tr tp tre m n, csafe (U, tr, tp, tre) m n -> concur_safe U tp tre m n.
       Proof.
         intros.
         remember (U, tr, tp) as st; generalize dependent tp; revert U tr.
         induction H; intros; subst; simpl in *.
         - constructor.
-        - constructor; auto.
+        - constructor; auto. admit.
         - apply step_equivalence1 in Hstep as [[]|].
           + eapply concur_Internal; eauto.
           + simpl in *.
@@ -827,7 +828,7 @@ Module HybridMachineSig.
             eapply halted_step; eauto.
           + setoid_rewrite List.app_nil_r.
             eapply schedfail; eauto.
-      Qed.
+      Qed. *)
 
       (** Trace of the coarse-grained machine*)
       (* Note that this does not replace csafe - csafe guarantees safety for any rearrangement
@@ -835,11 +836,11 @@ Module HybridMachineSig.
       (* Note also that ctrace does not specify the number of steps required to produce the trace. *)
       Inductive ctrace (st : MachState) (m : mem) : event_trace -> Prop :=
       | Trace_0: ctrace st m nil (* if a state has trace tr, it also has all prefixes of tr *)
-      | Trace_Step : forall tp' m' U' tr tr'
-                     (Hstep: MachStep st m (U',(snd (fst st)) ++ tr,tp') m')
-                     (Hsafe: ctrace (U',(snd (fst st)) ++ tr,tp') m' tr'),
+      | Trace_Step : forall tp' m' U' tr tr' tre'
+                     (Hstep: MachStep st m (U', st.1.1.2 ++ tr, tp', tre') m')
+                     (Hsafe: ctrace (U', st.1.1.2 ++ tr,tp', tre') m' tr'),
           ctrace st m (tr ++ tr').
-    *)
+
     End HybridCoarseMachine.
   End HybridCoarseMachine.
   

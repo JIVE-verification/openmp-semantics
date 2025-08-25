@@ -20,8 +20,10 @@ Require Import VST.concurrency.openmp_sem.finThreadPool.
 Require Import VST.concurrency.common.machine_semantics.
 Require Import VST.concurrency.openmp_sem.permissions.
 Require Import VST.concurrency.openmp_sem.mem_equiv.
-Require Import VST.concurrency.common.bounded_maps.
-Require Import VST.concurrency.common.addressFiniteMap.
+
+Require Import VST.concurrency.openmp_sem.bounded_maps.
+Require Import VST.concurrency.openmp_sem.addressFiniteMap.
+
 Require Import VST.concurrency.common.scheduler.
 Require Import Coq.Program.Program.
 
@@ -55,7 +57,8 @@ Module DryHybridMachine.
   Section DryHybridMachine.
         
     Context {ge:genv}.
-    (** Assume some threadwise semantics *)
+    (** Unlike the original CPM work, the OpenMP semantics is only defined on C,
+        so we don't quantify over semantics (while we probably could). *)
     Instance Sem : Semantics := ClightSem ge.
     
     Context {tpool : @ThreadPool.ThreadPool dryResources Sem}.

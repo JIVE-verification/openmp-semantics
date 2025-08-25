@@ -21,13 +21,13 @@ Require Import compcert.lib.Integers.
 Require Import Coq.ZArith.ZArith.
 
 Require Import VST.concurrency.common.threads_lemmas.
-Require Import VST.concurrency.common.permissions.
+Require Import VST.concurrency.openmp_sem.permissions.
 Require Import VST.concurrency.openmp_sem.HybridMachineSig.
 Require Import VST.concurrency.openmp_sem.HybridMachine.
-Require Import VST.concurrency.common.dry_context.
-Require Import VST.concurrency.common.threadPool.
-Require Import VST.concurrency.common.semantics.
-Require Import VST.concurrency.common.tactics.
+(* Require Import VST.concurrency.common.dry_context. *)
+Require Import VST.concurrency.openmp_sem.finThreadPool.
+Require Import VST.concurrency.openmp_sem.semantics.
+Require Import VST.concurrency.openmp_sem.tactics.
 
 Set Bullet Behavior "Strict Subproofs".
 
@@ -39,37 +39,38 @@ Global Notation "a # b" := (Maps.PMap.get b a) (at level 1).
 Module ThreadPoolWF.
   Import HybridMachine ThreadPool DryHybridMachine HybridMachineSig.
   Section ThreadPoolWF.
-    Context {Sem : Semantics}.
+    Context {ge:Clight.genv}.
+    Instance Sem : Semantics := ClightSem ge.
 
     Existing Instance DryHybridMachine.dryResources.
-    Existing Instance OrdinalPool.OrdinalThreadPool.
+    Existing Instance FinPool.FinThreadPool.
     (** Take an instance of the Dry Machine *)
-    Existing Instance DryHybridMachine.DryHybridMachineSig.
+    Instance ClightDryMachineInst : MachineSig := (@DryHybridMachine.DryHybridMachineSig ge _).
 
 
-  Lemma unlift_m_inv :
-    forall tp tid (Htid : tid < (OrdinalPool.num_threads tp).+1) ord
-      (Hunlift: unlift (ordinal_pos_incr (OrdinalPool.num_threads tp))
-                       (Ordinal (n:=(OrdinalPool.num_threads tp).+1)
+  (* Lemma unlift_m_inv :
+    forall tp tid (Htid : tid < (FinPool.num_threads tp).+1) ord
+      (Hunlift: unlift (ordinal_pos_incr (FinPool.num_threads tp))
+                       (Ordinal (n:=(FinPool.num_threads tp).+1)
                                 (m:=tid) Htid)=Some ord),
       nat_of_ord ord = tid.
   Proof.
     intros.
-    assert (Hcontra: unlift_spec (ordinal_pos_incr (OrdinalPool.num_threads tp))
-                                 (Ordinal (n:=(OrdinalPool.num_threads tp).+1)
+    assert (Hcontra: unlift_spec (ordinal_pos_incr (FinPool.num_threads tp))
+                                 (Ordinal (n:=(FinPool.num_threads tp).+1)
                                           (m:=tid) Htid) (Some ord)).
     rewrite <- Hunlift.
     apply/unliftP.
     inversion Hcontra; subst.
     inversion H0.
     unfold bump.
-    assert (pf: ord < (OrdinalPool.num_threads tp))
+    assert (pf: ord < (FinPool.num_threads tp))
       by (by rewrite ltn_ord).
-    assert (H: (OrdinalPool.num_threads tp) <= ord = false).
+    assert (H: (FinPool.num_threads tp) <= ord = false).
     rewrite ltnNge in pf.
     rewrite <- Bool.negb_true_iff. auto.
     rewrite H. simpl. rewrite add0n. reflexivity.
-  Defined.
+  Defined. *)
 
   (* TODO: seems to be deprecated. Delete if so*)
   (*
@@ -136,20 +137,20 @@ Module ThreadPoolWF.
 
   Lemma initial_invariant0: forall pmap c,
       DryHybridMachine.invariant (mkPool c (pmap, empty_map) (* (empty_map, empty_map) *)).
-  Proof.
+  (* Proof.
     intros pmap c.
     pose (IM:=mkPool c (pmap,empty_map) (* (empty_map, empty_map) *)); fold IM.
-    assert (isZ: forall i, OrdinalPool.containsThread IM i -> (i = 0)%N).
+    assert (isZ: forall i, FinPool.containsThread IM i -> (i = 0)%N).
     { rewrite /containsThread /IM /=.
       move => i; destruct i; first[reflexivity | intros HH; inversion HH].
     }
     assert (noLock: forall l rm,
-               OrdinalPool.lockRes IM l = Some rm -> False).
-    { rewrite /OrdinalPool.lockRes /IM /=.
+               FinPool.lockRes IM l = Some rm -> False).
+    { rewrite /FinPool.lockRes /IM /=.
       move => l rm.
       rewrite /lockRes
-              /OrdinalPool.mkPool
-              /OrdinalPool.empty_lset /= OrdinalPool.find_empty => HH.
+              /FinPool.mkPool
+              /FinPool.empty_lset /= FinPool.find_empty => HH.
       inversion HH.
     }
 
@@ -165,7 +166,7 @@ Module ThreadPoolWF.
                                 move: cnti cntj => /isZ Hi /isZ Hj.
         subst.
         simpl in IM.
-        unfold OrdinalPool.mkPool in IM.
+        unfold FinPool.mkPool in IM.
         unfold getThreadR.
         simpl.
         eapply permCoh_empty'.
@@ -173,24 +174,25 @@ Module ThreadPoolWF.
     + move => l mr /noLock contra; exfalso; now eauto.
     + move => b ofs.
       rewrite / IM /= //.
-  Qed.
+  Qed. *)
+  Admitted.
 
   Lemma initial_mem_compatible: forall c m,
       mem_compatible (mkPool c (getCurPerm m, empty_map) (* (empty_map, empty_map) *)) m.
-  Proof.
+  (* Proof.
     intros c m.
     pose (IM:=mkPool c (getCurPerm m,empty_map) (* (empty_map, empty_map) *)); fold IM.
-    assert (isZ: forall i, OrdinalPool.containsThread IM i -> (i = 0)%N).
+    assert (isZ: forall i, FinPool.containsThread IM i -> (i = 0)%N).
     { rewrite /containsThread /IM /=.
       move => i; destruct i; first[reflexivity | intros HH; inversion HH].
     }
     assert (noLock: forall l rm,
-               OrdinalPool.lockRes IM l = Some rm -> False).
-    { rewrite /OrdinalPool.lockRes /IM /=.
+               FinPool.lockRes IM l = Some rm -> False).
+    { rewrite /FinPool.lockRes /IM /=.
       move => l rm.
       rewrite /lockRes
-              /OrdinalPool.mkPool
-              /OrdinalPool.empty_lset /= OrdinalPool.find_empty => HH.
+              /FinPool.mkPool
+              /FinPool.empty_lset /= FinPool.find_empty => HH.
       inversion HH.
     }
 
@@ -199,7 +201,8 @@ Module ThreadPoolWF.
     pose proof (isZ _ cnt); subst.
     subst IM; simpl.
     split; [apply cur_lt_max | apply empty_LT].
-  Qed.
+  Qed. *)
+  Admitted.
 
   Lemma updThread_inv: forall ds i (cnt: containsThread ds i) c pmap,
       invariant ds ->
@@ -220,7 +223,7 @@ Module ThreadPoolWF.
                   permMapCoherence pmap.1 pmap0.2) ->
       (permMapCoherence pmap#1 pmap#2) ->
       invariant (updThread cnt c pmap).
-  Proof.
+  (* Proof.
     intros ds x cnt c pmap INV A A' A'' B B' C.
     constructor.
     - intros.
@@ -243,6 +246,7 @@ Module ThreadPoolWF.
        rewrite gsoThreadLPool in Hres1.
        rewrite gsoThreadLPool in Hres2.
        inversion INV. eapply no_race_lr; eauto.
+
     - intros i laddr cnti rmap.
       rewrite gsoThreadLPool; intros Hres.
       destruct (scheduler.NatTID.eq_tid_dec x i).
@@ -286,7 +290,8 @@ Module ThreadPoolWF.
         eapply H2; eauto.
     - move => b' ofs'; rewrite gsoThreadLPool.
       inversion INV. apply lockRes_valid0.
-  Qed.
+  Qed. *)
+  Admitted.
 
   Lemma invariant_decr:
     forall tp c pmap i (cnti: containsThread tp i)
@@ -448,7 +453,7 @@ Module ThreadPoolWF.
       (Hvalid2: forall ofs0 : Z,
           (ofs0 < ofs < ofs0 + lksize.LKSIZE)%Z -> lockRes tp (b, ofs0) = None),
       invariant (updLockSet tp (b, ofs) rmap).
-  Proof.
+  (* Proof.
     intros.
     destruct Hinv as [no_race_thr0 no_race_lr0 no_race0 thread_data_lock_coh0 locks_data_lock_coh0 lockRes_valid0].
     constructor.
@@ -536,17 +541,19 @@ Module ThreadPoolWF.
           rewrite ineq in Hres; inversion Hres.
         * rewrite gsolockResUpdLock;
             now eauto.
-  Qed.
+  Qed. *)
+  Admitted.
 
+  (* TODO should change to OpenMP version of addThread *)
  (** [mem_compatible] is preserved by [addThread]*)
   (* NOTE: Strange statement, updThread doesn't need to be here probably*)
-  Lemma mem_compatible_add:
+  (* Lemma mem_compatible_add:
     forall tp i (cnti: containsThread tp i) c pmap vf arg pmap2 m
       (Hcomp: mem_compatible
                 (addThread
                    (updThread cnti c pmap) vf arg pmap2) m),
       mem_compatible (updThread cnti c pmap) m.
-  Proof.
+  (* Proof.
     intros.
     split.
     - intros j cntj.
@@ -562,7 +569,8 @@ Module ThreadPoolWF.
       erewrite <- @gsoAddLPool
       with (vf := vf) (arg := arg) (p := pmap2) in Hres;
         by pose proof ((lockRes_blocks _ _ Hcomp _ _ Hres)).
-  Qed.
+  Qed. *)
+  Admitted. *)
 
   (** [mem_compatible] is preserved by [remLockSet] *)
   Lemma mem_compatible_remlock:
@@ -640,7 +648,7 @@ Module ThreadPoolWF.
       destruct (lockRes (remLockSet ds a) (b, ofs)) eqn:Hres; auto.
       destruct (EqDec_address a (b, ofs)); subst.
       rewrite gsslockResRemLock in Hres. discriminate.
-      rewrite gsolockResRemLock in Hres;
+      (* rewrite gsolockResRemLock in Hres;
         auto.
       rewrite Hres in lockRes_valid0.
       intros ofs0 Hintv.
@@ -648,9 +656,11 @@ Module ThreadPoolWF.
       destruct (EqDec_address a (b, ofs0)); subst;
         [rewrite gsslockResRemLock | rewrite gsolockResRemLock];
         now auto.
-  Qed.
+  Qed. *)
+  Admitted.
 
-  Lemma invariant_add:
+  (* FIXME change to OpenMP style addThread *)
+  (* Lemma invariant_add:
     forall tp i (cnti: containsThread tp i) c pmap1 pmap2 vf arg
       (Hinv: invariant
                (addThread
@@ -705,7 +715,7 @@ Module ThreadPoolWF.
       specialize (H b0 ofs0).
       rewrite gsoAddLPool in H;
         now auto.
-  Qed.
+  Qed. *)
 
   Lemma invariant_not_freeable:
     forall tp
@@ -736,7 +746,7 @@ Module ThreadPoolWF.
     simpl in Hcoh.
     split.
     simpl.
-    destruct ((OrdinalPool.getThreadR cntj).2 # b ofs); auto; now exfalso.
+    destruct ((FinPool.getThreadR cntj).2 # b ofs); auto; now exfalso.
     intros Hneq.
     pose proof ((no_race_thr _ Hinv _ _ cnti cntj Hneq).1 b ofs).
     rewrite Hfreeable in H.
@@ -808,8 +818,8 @@ Module ThreadPoolWF.
     unfold DryHybridMachine.init_mach in *.
     destruct Hinit as (? & Hinit & Hpmap).
     simpl in H. subst.
-    unfold OrdinalPool.mkPool in *. simpl in *.
-    unfold OrdinalPool.containsThread in *. simpl in *.
+    unfold FinPool.mkPool in *. simpl in *.
+    unfold FinPool.containsThread in *. simpl in *.
     clear - H.
     ssrlia.
   Qed.
@@ -841,9 +851,9 @@ Module ThreadPoolWF.
     destruct Hinit as (? & Hinit & ?).
     subst.
     simpl.
-    unfold OrdinalPool.mkPool.
-    unfold OrdinalPool.lockRes.
-    rewrite OrdinalPool.find_empty.
+    unfold FinPool.mkPool.
+    unfold FinPool.lockRes.
+    rewrite FinPool.find_empty.
     reflexivity.
   Qed.
 
@@ -886,7 +896,7 @@ Module ThreadPoolWF.
       destruct (lockRes tp (b, ofs)) eqn:Hres; auto.
       erewrite init_lockRes_empty in Hres by eauto.
       discriminate.
-  Qed.
+  Admitted.
 
 End ThreadPoolWF.
 End ThreadPoolWF.
@@ -1053,10 +1063,13 @@ Module CoreLanguageDry.
   Import HybridMachine ThreadPool event_semantics HybridMachineSig.
 
   Section CoreLanguageDry.
-    Context {Sem : Semantics}
+
+    Context {ge:Clight.genv}.
+    Instance Sem : Semantics := ClightSem ge.
+    Context (* {Sem : Semantics} *)
             {SemAx : SemAxioms}.
 
-    Existing Instance OrdinalPool.OrdinalThreadPool.
+    Existing Instance FinPool.FinThreadPool.
     Existing Instance DryHybridMachine.dryResources.
     
     (** Take an instance of the Dry Machine *)
@@ -1130,7 +1143,7 @@ Module CoreLanguageDry.
               unfold permission_at in Hp.
               rewrite <- Hp, HFree in Hcoh.
               simpl in Hcoh.
-              destruct (((OrdinalPool.getThreadR cnt0)#2) # b ofs) eqn:?;
+              destruct (((FinPool.getThreadR cnt0)#2) # b ofs) eqn:?;
                        first by exfalso.
               simpl in Hcoh.
               destruct (i == tid) eqn:Htid; move/eqP:Htid=>Htid; subst.
@@ -1223,7 +1236,7 @@ Module CoreLanguageDry.
       simpl.
       intros l pmaps Hres.
       (* the resources in the lockpool did not change*)
-      rewrite OrdinalPool.gsoThreadLPool in Hres.
+      rewrite FinPool.gsoThreadLPool in Hres.
       (* proving something more convenient*)
       assert (Hgoal: forall b ofs, Mem.perm_order'' ((getMaxPerm m') # b ofs) (pmaps.1 # b ofs) /\
                               Mem.perm_order'' ((getMaxPerm m') # b ofs) (pmaps.2 # b ofs)).
@@ -1297,7 +1310,7 @@ Module CoreLanguageDry.
     }
     { simpl.
       intros.
-      rewrite OrdinalPool.gsoThreadLPool in H.
+      rewrite FinPool.gsoThreadLPool in H.
       eapply Hvalid_blocks.
       eapply (DryHybridMachine.lockRes_blocks _ _ Hcompatible);
         by eauto.
@@ -1427,7 +1440,7 @@ Module CoreLanguageDry.
       (Hcompatible : mem_compatible tp m)
       (Hrestrict_pmap : restrPermMap (Hcompatible i pf)#1 = m1)
       (Hdecay: decay m1 m1'),
-      invariant (updThread pf (Krun c) (getCurPerm m1', (getThreadR pf)#2)).
+      invariant(Sem:=Sem) (updThread pf (Krun c) (getCurPerm m1', (getThreadR pf)#2)).
   Proof.
     constructor.
     { (* non-interference between threads *)
@@ -1492,8 +1505,9 @@ Module CoreLanguageDry.
     { (* non-interference in the lockpool*)
       intros.
       rewrite! gsoThreadLPool in Hres1, Hres2.
-      eapply DryHybridMachine.no_race_lr;
-        by eauto.
+      admit.
+      (* eapply DryHybridMachine.no_race_lr;
+        by eauto. *)
     }
     { intros j laddr cntj' rmap Hres.
       rewrite gsoThreadLPool in Hres.
@@ -1580,7 +1594,7 @@ Module CoreLanguageDry.
       eapply updThread_lr_valid;
         apply (DryHybridMachine.lockRes_valid _ Hinv).
     }
-  Qed.
+  Admitted.
   
  (** [invariant] is preserved by initial_core *)
   Lemma initial_core_invariant:
@@ -1590,7 +1604,7 @@ Module CoreLanguageDry.
       (Hcompatible: mem_compatible tp m)
       (Hrestrict_pmap: restrPermMap (DryHybridMachine.compat_th _ _ Hcompatible pf).1 = m1)
       (Hcorestep: initial_core semSem n m1 c m' vf arg),
-      invariant (updThread pf (Krun c) (getCurPerm m', (getThreadR pf).2)).
+      invariant(Sem:=Sem) (updThread pf (Krun c) (getCurPerm m', (getThreadR pf).2)).
   Proof.
     intros.
     subst.
@@ -1609,7 +1623,7 @@ Module CoreLanguageDry.
       (Hrestrict_pmap: restrPermMap (DryHybridMachine.compat_th _ _ Hcompatible pf).1 = m1)
       (Hcorestep: corestep semSem c m1 c' m1')
       (Hcore: getThreadC pf = Krun c),
-      invariant (updThread pf (Krun c') (getCurPerm m1', (getThreadR pf).2)).
+      invariant(Sem:=Sem) (updThread pf (Krun c') (getCurPerm m1', (getThreadR pf).2)).
   Proof.
     intros.
     apply corestep_decay in Hcorestep.
@@ -1672,7 +1686,7 @@ Module CoreLanguageDry.
       (Hreadable: Mem.perm (restrPermMap (DryHybridMachine.compat_th _ _ Hcomp pfj).1) b ofs Cur Readable \/
                   Mem.perm (restrPermMap (DryHybridMachine.compat_th _ _ Hcomp pfj).2) b ofs Cur Readable)
       (Hcorestep: corestep semSem c (restrPermMap (DryHybridMachine.compat_th _ _ Hcomp pfi).1) c' m')
-      (Hinv: invariant tp),
+      (Hinv: invariant(Sem:=Sem) tp),
       Maps.ZMap.get ofs (Mem.mem_contents m) # b =
       Maps.ZMap.get ofs (Mem.mem_contents m') # b.
   Proof.
@@ -1689,7 +1703,7 @@ Module CoreLanguageDry.
       (Hcomp : mem_compatible tp m) (b : block) (ofs : Z)
       (Hreadable: Mem.perm (restrPermMap (DryHybridMachine.compat_th _ _ Hcomp pfj).2) b ofs Cur Readable)
       (Hcorestep: corestep semSem c (restrPermMap (DryHybridMachine.compat_th _ _ Hcomp pfi).1) c' m')
-      (Hinv: invariant tp),
+      (Hinv: invariant(Sem:=Sem) tp),
       Maps.ZMap.get ofs (Mem.mem_contents m) # b =
       Maps.ZMap.get ofs (Mem.mem_contents m') # b.
   Proof.
@@ -1712,7 +1726,7 @@ Module CoreLanguageDry.
                   Mem.perm (restrPermMap (DryHybridMachine.compat_lp _ _ Hcomp _ _ Hlock).2)
                            b ofs Cur Readable)
       (Hcorestep: corestep semSem c (restrPermMap (DryHybridMachine.compat_th _ _ Hcomp pfi).1) c' m')
-      (Hinv: invariant tp),
+      (Hinv: invariant(Sem:=Sem) tp),
       Maps.ZMap.get ofs (Mem.mem_contents m) # b =
       Maps.ZMap.get ofs (Mem.mem_contents m') # b.
   Proof.
@@ -1775,7 +1789,7 @@ Module CoreLanguageDry.
       (Hreadable: Mem.perm (restrPermMap (DryHybridMachine.compat_th _ _ Hcomp pfj).1) b ofs Cur Readable \/
                   Mem.perm (restrPermMap (DryHybridMachine.compat_th _ _ Hcomp pfj).2) b ofs Cur Readable)
       (Hcorestep: initial_core semSem n (restrPermMap (DryHybridMachine.compat_th _ _ Hcomp pfi).1) c m' v arg)
-      (Hinv: invariant tp),
+      (Hinv: invariant(Sem:=Sem) tp),
       Maps.ZMap.get ofs (Mem.mem_contents m) # b =
       Maps.ZMap.get ofs (Mem.mem_contents m') # b.
   Proof.
@@ -1792,7 +1806,7 @@ Module CoreLanguageDry.
       (Hcomp : mem_compatible tp m) (b : block) (ofs : Z)
       (Hreadable: Mem.perm (restrPermMap (DryHybridMachine.compat_th _ _ Hcomp pfj).2) b ofs Cur Readable)
       (Hcorestep: initial_core semSem n (restrPermMap (DryHybridMachine.compat_th _ _ Hcomp pfi).1) c m' v arg)
-      (Hinv: invariant tp),
+      (Hinv: invariant(Sem:=Sem) tp),
       Maps.ZMap.get ofs (Mem.mem_contents m) # b =
       Maps.ZMap.get ofs (Mem.mem_contents m') # b.
   Proof.
@@ -1816,7 +1830,7 @@ Module CoreLanguageDry.
                   Mem.perm (restrPermMap (DryHybridMachine.compat_lp _ _ Hcomp _ _ Hlock).2)
                            b ofs Cur Readable)
       (Hcorestep: initial_core semSem n (restrPermMap (DryHybridMachine.compat_th _ _ Hcomp pfi).1) c m' v arg)
-      (Hinv: invariant tp),
+      (Hinv: invariant(Sem:=Sem) tp),
       Maps.ZMap.get ofs (Mem.mem_contents m) # b =
       Maps.ZMap.get ofs (Mem.mem_contents m') # b.
   Proof.

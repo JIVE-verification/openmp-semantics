@@ -11,7 +11,7 @@ Require Import Coq.ZArith.ZArith.
 
 Require Import VST.concurrency.openmp_sem.permissions.
 Require Import compcert.common.Memory. (*for Mem.perm_order'' *)
-Require Import VST.concurrency.common.bounded_maps.
+Require Import VST.concurrency.openmp_sem.bounded_maps.
 Require Import VST.concurrency.openmp_sem.permissions.
 
 Require Import VST.concurrency.openmp_sem.semantics_lemmas.
