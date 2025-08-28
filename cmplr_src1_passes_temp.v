@@ -548,30 +548,21 @@ Definition post_spawn_thread_code: statementT := (ScallT None
           let '(stmt2, pi2, pr2) := (first_pass b curr_ident) in
                   match pi1 with 
                   | Some p => ((SsequenceT stmt1 stmt2), pi1, pr1) 
-                  | None => match pi2 with 
-                      | Some p => ((SsequenceT stmt1 stmt2), pi2, pr2) 
-                      | None => ((SsequenceT stmt1 stmt2), None, None) 
-                      end
+                  | None => ((SsequenceT stmt1 stmt2), pi2, pr2) 
                       end      
   | SifthenelseT a b c => 
       let '(stmt1, pi1, pr1) := (first_pass b curr_ident) in 
       let '(stmt2, pi2, pr2) := (first_pass c curr_ident) in
               match pi1 with 
               | Some p => ((SifthenelseT a stmt1 stmt2), pi1, pr1) 
-              | None => match pi2 with 
-                  | Some p => ((SifthenelseT a stmt1 stmt2), pi2, pr2) 
-                  | None => ((SifthenelseT a stmt1 stmt2), None, None) 
-                  end
+              | None => ((SifthenelseT a stmt1 stmt2), pi2, pr2) 
                   end
   | SloopT a b =>        
       let '(stmt1, pi1, pr1) := (first_pass a curr_ident) in 
       let '(stmt2, pi2, pr2) := (first_pass b curr_ident) in
               match pi1 with 
               | Some p => ((SloopT stmt1 stmt2), pi1, pr1) 
-              | None => match pi2 with 
-                  | Some p => ((SloopT  stmt1 stmt2), pi2, pr2) 
-                  | None => ((SloopT stmt1 stmt2), None, None) 
-                  end
+              | None => ((SloopT  stmt1 stmt2), pi2, pr2) 
                   end
   | SlabelT a b => let '(stmt1, pi1, pr1) := (first_pass b curr_ident) in 
                   match pi1 with 
