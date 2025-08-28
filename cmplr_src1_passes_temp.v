@@ -17,7 +17,7 @@ Module Info.
   Definition big_endian := false.
   Definition source_file := "cmplr_src1.c".
 End Info.
-Compute ((Zpos $"df")+(Zpos $"j")).
+(* Compute ((Zpos $"df")+(Zpos $"j")). *)
 Definition ___stringlit_1 : ident := $"__stringlit_1".
 Definition _i : ident := $"i".
 Definition _j : ident := $"j".
@@ -122,7 +122,6 @@ Local Open Scope Z_scope.
 still on heap *)
 Definition prog_clight' :=
   transl_program prog.
-Print prog_clight'.
 (* print clight ast *)
 Example print_f_main_clight : True.
   let p := eval cbn in prog_clight' in
@@ -183,10 +182,6 @@ Definition f_main_clight :=
         (Ssequence Sskip
            (Sreturn (Some (Econst_int (Int.repr 0) tint))))
   |}.
-Check f_main.
-Check f_main_clight.
-Locate function.
-Search compcert.cfrontend.Csyntax.function.
 
 Definition prog_clight :=
   {|
@@ -220,7 +215,6 @@ Definition prog_clight :=
 Lemma f_main_clight_eq :
   Errors.OK prog_clight = prog_clight'.
 Proof. reflexivity. Qed.
-Locate Econst_int.
 Definition parallel_body : statement :=
   (Ssequence
     (Ssequence Sskip
@@ -292,24 +286,14 @@ Definition f_main_omp :=
   | Spragma a b c => Some s   
   |_ => None            
   end.
-Type extracting_spragma.
   Definition extracted_pragma_parallel_material (f: function): option function:=
   (*TODO: revise argments to mkfunction*)
   match extracting_spragma (fn_body f) with 
   | Some s => Some (mkfunction (tptr tvoid) (fn_callconv f) (fn_params f) (fn_vars f) (fn_temps f) s)
   | None => None
   end.
-  Type extracted_pragma_parallel_material.
-  Compute fn_params f_main_omp.
-  Compute fn_temps f_main_omp.
-  Compute extracted_pragma_parallel_material f_main_omp.
   Definition adding_ident (identifier: (ident * type)) (existing_list: list (ident * type)):=
   identifier::existing_list.
-  Type _i.
-  Type type.
-(* Compute adding_ident (_i, Tint) (fn_temps f_main_omp). *)
-  Compute extracted_pragma_parallel_material (f_main_omp).
-  Search "routine".
 (*design of function: maybe recurse until encountering SPragma with parallel?*)
 (* step 3: find all variables used in a parallel pragma, figure out which ones are private,
    which ones are shared and whihch ones are reduction variables.
@@ -418,7 +402,7 @@ with labeled_statements_to_labeled_statementsT (ls: labeled_statements) : labele
   fn_temps_annot: list (ident * type);
   fn_body_annot: statementT
 }.
-
+(*need to convert parallel_body_T into a Clight function*)
 Definition parallel_body_T : statementT :=
   (SsequenceT
     (SsequenceT SskipT
@@ -498,7 +482,7 @@ Definition extracted_pragma_parallel_material_T (f: annotatedFunction): option a
   | None => None
   end.
 
-  Compute extracted_pragma_parallel_material_T f_main_omp_annot.
+  (* Compute extracted_pragma_parallel_material_T f_main_omp_annot. *)
 
 (*TODO: add all cases and translate SpragmaT into something that's not a pragma*)
 Fixpoint compiler_to_clight_function (s: statementT) : statement :=
@@ -552,27 +536,61 @@ match n with
   (spawn_thread_code, ret_id::curr_ident')
 end.
 
-Check SpragmaT. 
-Check pragma_info.
-
 Definition post_spawn_thread_code: statementT := (ScallT None
                             (Evar _join_thread (Tfunction (Tcons tint Tnil)
                                                  tvoid cc_default))
                             ((Etempvar _t2 tint) :: nil)).
- Fixpoint first_pass (s: statementT) : statementT :=
+(* Definition get_statement (s: statementT) *)
+ Fixpoint first_pass (s: statementT) (curr_ident: list ident) : (statementT * (option pragma_info) * (option statementT)) :=
  match s with
-  | SsequenceT a b => SsequenceT (first_pass a) (first_pass b)
-  | SifthenelseT a b c => SifthenelseT a (first_pass b) (first_pass c)
-  | SloopT a b => SloopT (first_pass a) (first_pass b)  
-  | SlabelT a b => SlabelT a (first_pass b)
+  | SsequenceT a b => 
+          let '(stmt1, pi1, pr1) := (first_pass a curr_ident) in 
+          let '(stmt2, pi2, pr2) := (first_pass b curr_ident) in
+                  match pi1 with 
+                  | Some p => ((SsequenceT stmt1 stmt2), pi1, pr1) 
+                  | None => match pi2 with 
+                      | Some p => ((SsequenceT stmt1 stmt2), pi2, pr2) 
+                      | None => ((SsequenceT stmt1 stmt2), None, None) 
+                      end
+                      end      
+  | SifthenelseT a b c => 
+      let '(stmt1, pi1, pr1) := (first_pass b curr_ident) in 
+      let '(stmt2, pi2, pr2) := (first_pass c curr_ident) in
+              match pi1 with 
+              | Some p => ((SifthenelseT a stmt1 stmt2), pi1, pr1) 
+              | None => match pi2 with 
+                  | Some p => ((SifthenelseT a stmt1 stmt2), pi2, pr2) 
+                  | None => ((SifthenelseT a stmt1 stmt2), None, None) 
+                  end
+                  end
+  | SloopT a b =>        
+      let '(stmt1, pi1, pr1) := (first_pass a curr_ident) in 
+      let '(stmt2, pi2, pr2) := (first_pass b curr_ident) in
+              match pi1 with 
+              | Some p => ((SloopT stmt1 stmt2), pi1, pr1) 
+              | None => match pi2 with 
+                  | Some p => ((SloopT  stmt1 stmt2), pi2, pr2) 
+                  | None => ((SloopT stmt1 stmt2), None, None) 
+                  end
+                  end
+  | SlabelT a b => let '(stmt1, pi1, pr1) := (first_pass b curr_ident) in 
+                  match pi1 with 
+                       | Some p => ((SlabelT a stmt1), pi1, pr1)
+                      | None => ((SlabelT a stmt1), None, None)
+                  end
   | SpragmaT a b c d => match c with 
-          | OMPParallel nt pc rc => SsequenceT (fst (spawn_thread (nt - 1) [])) post_spawn_thread_code
-          | OMPFor a b => SskipT
+          | OMPParallel nt pc rc => ((SsequenceT (fst (spawn_thread (nt - 1) curr_ident)) post_spawn_thread_code), Some a, Some d)
+          | OMPFor i j => (SskipT, Some a, Some d)
           (* | OMPBarrier =>SskipT *) (*may deal with later*)
-          | _ => SskipT
+          | _ => (SskipT, Some a, Some d)
           end
-  |_ => SskipT         
+  |_ => (s, None, None)
   end. 
+Print f_main_omp.
+Definition test: (statementT * (option pragma_info) * (option statementT)). 
+ let x := eval cbn in ((first_pass (fn_body_annot f_main_omp_annot)[])) in refine x. Defined.
+Print test.
+End Thread_spawning.
   (*Need to generate: 
   -a new body (replaces Spragma)*)
   (*pragma label has these options:
