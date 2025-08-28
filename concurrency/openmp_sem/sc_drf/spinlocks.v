@@ -29,18 +29,20 @@ Require Import VST.concurrency.openmp_sem.memory_lemmas.
 Require Import VST.concurrency.openmp_sem.dry_context.
 Require Import VST.concurrency.openmp_sem.dry_machine_lemmas.
 Require Import VST.concurrency.openmp_sem.dry_machine_step_lemmas.
-(* FIXME *)(* Require Import VST.concurrency.openmp_sem.sc_drf.executions. *)
+Require Import VST.concurrency.openmp_sem.sc_drf.executions.
 Require Import VST.msl.Coqlib2.
+Require Import VST.concurrency.openmp_sem.notations.
+Import ssromega.
 
 Set Bullet Behavior "None".
 Set Bullet Behavior "Strict Subproofs".
 
 Module SpinLocks.
   Import HybridMachine HybridMachineSig ThreadPool ThreadPoolWF
-         CoreLanguage CoreLanguageDry AsmContext StepLemmas (* Executions *).
+         CoreLanguage CoreLanguageDry AsmContext StepLemmas Executions.
   Import event_semantics.
   Import Events.
-  
+
   Section SpinLocks.
     Context {ge:Clight.genv}.
     Instance Sem : Semantics := HybridMachine.ClightSem ge.
@@ -52,7 +54,6 @@ Module SpinLocks.
     Existing Instance DryHybridMachine.DryHybridMachineSig.
     Existing Instance dryCoarseMach.
 
-    Existing Instance FineDilMem.
     Open Scope nat.
     (** True if two events access at least one common byte*)
     Definition sameLocation ev1 ev2 :=
@@ -145,17 +146,27 @@ Module SpinLocks.
         (Hlocation: sameLocation evj evi),
         action evj <> Write /\ action evj <> Read.
 
-    Notation fstep := ((corestep (AsmContext.fine_semantics initU))).
+    Notation cstep := ((corestep (MachineSemantics(HybridMachine := dryCoarseMach) initU None))).
 
     Opaque containsThread getThreadR getThreadC t lockRes.
+
+        (** [True] whenever some resource in [tp] has above [Readable] lock-permission on [laddr]*)
+    (* I could not prove the stronger version, where quantification happens inside each case*)
+    Definition isLock tp laddr :=
+      forall ofs, Intv.In ofs (laddr.2, laddr.2 + lksize.LKSIZE)%Z ->
+             (exists i (cnti: containsThread tp i),
+                 Mem.perm_order'' ((getThreadR cnti).2 !!!! (laddr.1) ofs) (Some Readable)) \/
+             (exists laddr' rmap, lockRes tp laddr' = Some rmap /\
+                             Mem.perm_order'' (rmap.2 !!!! (laddr.1) ofs) (Some Readable)).
+
     (** Spinlock clean for a single step*)
-    Lemma fstep_clean:
-      forall U U' tp m addr tr pre ev post tp' m' tidi
+    Lemma cstep_clean:
+      forall U U' tp tre m addr tr pre ev post tp' tre' m' tidi
         (Hlock: lockRes tp addr)
         (HisLock: isLock tp addr)
         (Hlocation: sameLocation ev (external tidi (mklock addr)))
-        (Hstep: fstep (U, tr, tp) m
-                                  (U', tr ++ pre ++ [:: ev] ++ post, tp') m'),
+        (Hstep: cstep (U, tr, tp, tre) m
+                                  (U', tr ++ pre ++ [:: ev] ++ post, tp', tre') m'),
         action ev <> Write /\ action ev <> Read.
     Proof.
       intros.
@@ -177,11 +188,11 @@ Module SpinLocks.
       { (** Case of internal step *)
         (*NOTE: Should spinlock clean also mention free and alloc?*)
         inversion Htstep; subst.
-        apply app_inv_head in H5.
+        apply app_inv_head in H6.
         apply ev_step_elim in Hcorestep.
         (*destruct Hcorestep as [Helim _].*)rename Hcorestep into Helim.
-        apply list_append_map_inv in H5.
-        destruct H5 as (mpre & mpost & Hpre & Hevpost & Hev0).
+        apply list_append_map_inv in H6.
+        destruct H6 as (mpre & mpost & Hpre & Hevpost & Hev0).
         destruct mpost as [|mev mpost];
           simpl in Hevpost; first by discriminate.
         inv Hevpost.
@@ -203,16 +214,18 @@ Module SpinLocks.
           data permission on this [address] by [perm_coh]*)
         assert (Hperm:
                   Mem.perm_order'' (Some Nonempty)
-                                   ((getThreadR Htid).1 !! bl ofs')).
-        { destruct HisLock as [[j [cntj Hperm]] | [laddr [rmap [Hres Hperm]]]].
+                                   ((getThreadR Htid).1 !!!! bl ofs')).
+        (* { destruct HisLock as [[j [cntj Hperm]] | [laddr [rmap [Hres Hperm]]]].
           - pose proof ((thread_data_lock_coh _ Hinv _ cntj).1 _ Htid bl ofs') as Hcoh.
             clear - Hcoh Hperm.
             simpl in Hperm.
-            destruct ((getThreadR Htid).1 !! bl ofs') as [p|]; simpl; auto;
-              destruct ((getThreadR cntj).2 !! bl ofs') as [p0|]; simpl in Hperm;
+            destruct ((getThreadR Htid).1 !!!! bl ofs') as [p|]; simpl; auto;
+              destruct ((getThreadR cntj).2 !!!! bl ofs') as [p0|]; simpl in Hperm;
                 inversion Hperm; subst;
                   simpl in Hcoh; destruct p;
                     try (by exfalso); eauto using perm_order.
+                    all: rewrite /perm_order.
+                    all: constructor.
           - pose proof ((locks_data_lock_coh _ Hinv _ _ Hres).1 _ Htid bl ofs') as Hcoh.
             clear - Hcoh Hperm.
             simpl in Hperm.
@@ -278,13 +291,14 @@ Module SpinLocks.
         simpl; destruct ev0; split; intro Hcontra; by discriminate.
         destruct pre; simpl in H1; inv H1.
       }
-    Qed.
+    Qed. *)
+    Admitted.
 
-    Notation multi_fstep := (@multi_step Sem FineDilMem _ DryHybridMachine.DryHybridMachineSig).
+    Notation multi_cstep := (@multi_step ge HybridCoarseMachine.DilMem _ DryHybridMachine.DryHybridMachineSig).
     (** FineConc is spinlock clean*)
-    Theorem fineConc_clean:
-      forall U tr tp m tp' m'
-        (Hexec: multi_fstep (U, [::], tp) m ([::], tr, tp') m'),
+    Theorem coarseConc_clean:
+      forall U tr tp tre m tp' tre' m'
+        (Hexec: multi_cstep (U, [::], tp, tre) m ([::], tr, tp', tre') m'),
         spinlock_clean tr.
     Proof.
       unfold spinlock_clean.
@@ -292,13 +306,13 @@ Module SpinLocks.
       replace tr with ([::] ++ tr) in Hexec by reflexivity.
       (** break up the trace in the parts of interest*)
       apply @multi_step_inv_ext with (i := i) (ev := evi) in Hexec; auto.
-      destruct Hexec as (U' & U'' & tp'' & m'' & tr'' & tp''' & m'''
+      destruct Hexec as (U' & U'' & tp'' & tre'' & m'' & tr'' & tp''' & tre''' & m'''
                          & Hexec & Hstep & Hexec' & Hsize).
       destruct evi as [|tidi evi'];
         simpl in Hmklock. destruct m0; discriminate.
       destruct evi'; try discriminate.
       simpl in *.
-      rewrite <- app_nil_r with (l := [:: external tidi (mklock a)]) in Hstep;
+      (* rewrite <- app_nil_r with (l := [:: external tidi (mklock a)]) in Hstep;
         rewrite <- app_nil_l with (l := [:: external tidi (mklock a)]) in Hstep;
         rewrite <- app_assoc in Hstep;
       assert (Hsched: U' = tidi :: U'')
@@ -379,7 +393,8 @@ Module SpinLocks.
       rewrite app_assoc in Hstepj.
       eapply fstep_clean; eauto.
       destruct evi; simpl in *; auto. destruct m0; discriminate.
-    Qed.
+    Qed. *)
+    Admitted.
 
     Lemma maximal_competing:
       forall i j tr evi evj
@@ -473,7 +488,7 @@ Module SpinLocks.
         try (destruct (Hext ltac:(auto 2)) as [? | [? | [? | ?]]]; discriminate).
     Qed.
 
-    Lemma fstep_ev_perm:
+    (* Lemma cstep_ev_perm:
       forall U tr tp m U' tr_pre tr_post tp' m' ev
         (Hstep: fstep (U, tr, tp) m (U', tr ++ tr_pre ++ [:: ev] ++ tr_post , tp') m'),
         (waction ev ->
@@ -482,10 +497,10 @@ Module SpinLocks.
            | Some (b, ofs, sz) =>
              forall ofs', Intv.In ofs' (ofs, ofs + Z.of_nat sz)%Z ->
                      (Mem.valid_block m b ->
-                      Mem.perm_order'' ((getThreadR cnt).1 !! b ofs') (Some Writable) \/
-                      Mem.perm_order'' ((getThreadR cnt).2 !! b ofs') (Some Writable)) /\
-                     ((Mem.perm_order'' ((getThreadR cnt').1 !! b ofs') (Some Writable) \/
-                       Mem.perm_order'' ((getThreadR cnt').2 !! b ofs') (Some Writable)) \/
+                      Mem.perm_order'' ((getThreadR cnt).1 !!!! b ofs') (Some Writable) \/
+                      Mem.perm_order'' ((getThreadR cnt).2 !!!! b ofs') (Some Writable)) /\
+                     ((Mem.perm_order'' ((getThreadR cnt').1 !!!! b ofs') (Some Writable) \/
+                       Mem.perm_order'' ((getThreadR cnt').2 !!!! b ofs') (Some Writable)) \/
                       deadLocation tp' m' b ofs')
            | None => False
            end) /\
@@ -495,15 +510,15 @@ Module SpinLocks.
            | Some (b, ofs, sz) =>
              forall ofs', Intv.In ofs' (ofs, ofs + Z.of_nat sz)%Z ->
                      (Mem.valid_block m b ->
-                      Mem.perm_order'' ((getThreadR cnt).1 !! b ofs') (Some Readable) \/
-                      Mem.perm_order'' ((getThreadR cnt).2 !! b ofs') (Some Readable)) /\
-                     ((Mem.perm_order'' ((getThreadR cnt').1 !! b ofs') (Some Readable) \/
-                       Mem.perm_order'' ((getThreadR cnt').2 !! b ofs') (Some Readable)) \/
+                      Mem.perm_order'' ((getThreadR cnt).1 !!!! b ofs') (Some Readable) \/
+                      Mem.perm_order'' ((getThreadR cnt).2 !!!! b ofs') (Some Readable)) /\
+                     ((Mem.perm_order'' ((getThreadR cnt').1 !!!! b ofs') (Some Readable) \/
+                       Mem.perm_order'' ((getThreadR cnt').2 !!!! b ofs') (Some Readable)) \/
                       (tr_pre = [::] /\ tr_post = [::] /\ action ev = Release /\
                        (exists rmap, sz = lksize.LKSIZE_nat /\
                                 lockRes tp' (b, ofs) = Some rmap /\
-                                (Mem.perm_order'' (rmap.1 !! b ofs') (Some Readable) \/
-                                 Mem.perm_order'' (rmap.2 !! b ofs') (Some Readable)))) \/
+                                (Mem.perm_order'' (rmap.1 !!!! b ofs') (Some Readable) \/
+                                 Mem.perm_order'' (rmap.2 !!!! b ofs') (Some Readable)))) \/
                       deadLocation tp' m' b ofs')
            | None => False
            end).
@@ -905,7 +920,7 @@ Module SpinLocks.
           unfold permission_at, Mem.perm in *; now auto.
         + destruct l; simpl in H1;
             now inv H1.
-    Qed.
+    Qed. *)
 
     Lemma waction_caction:
       forall ev,
@@ -955,11 +970,11 @@ Module SpinLocks.
 
 
     Opaque containsThread.
-    (** [FineConc.MachStep] preserves [spinlock_synchronized]*)
-    Lemma fineConc_step_synchronized:
-      forall U0 U U'  tr tp0 m0 tp m tp' m' tr'
-        (Hexec: multi_fstep (U0, [::], tp0) m0 (U, tr, tp) m)
-        (Hstep: fstep (U, tr, tp) m (U', tr ++ tr', tp') m')
+    (** [coarseConc.MachStep] preserves [spinlock_synchronized]*)
+    Lemma coarseConc_step_synchronized:
+      forall U0 U U'  tr tp0 tre0 m0 tp tre m tp' tre' m' tr'
+        (Hexec: multi_cstep (U0, [::], tp0, tre0) m0 (U, tr, tp, tre) m)
+        (Hstep: cstep (U, tr, tp, tre) m (U', tr ++ tr', tp', tre') m')
         (Hsynchronized: spinlock_synchronized tr),
         spinlock_synchronized (tr ++ tr').
     Proof.
@@ -992,20 +1007,20 @@ Module SpinLocks.
         the same thread as [j] and hence not competing*)
         assert (Hk_not_in_tr': (k < length tr)%coq_nat).
         { destruct (lt_dec k (length tr)); auto.
-          erewrite nth_error_app2 in Hk by omega.
+          erewrite nth_error_app2 in Hk by lia.
           destruct Hcompetes_kj.
           apply nth_error_In in Hk.
-          erewrite nth_error_app2 in Hj by omega.
+          erewrite nth_error_app2 in Hj by lia.
           apply nth_error_In in Hj.
-          eapply step_event_tid with (ev := evk) (ev' := evj) in Hstep; eauto.
-          exfalso; auto.
+          contradiction H. eapply step_event_tid; eauto.
+          apply Hstep. 
         }
         erewrite nth_error_app1 in Hk by assumption.
 
         (** To find the state that corresponds to [evk] we break the execution
           in [multi_fstep] chunks and the [FineConc.Machstep] that produces [evk]*)
         destruct (multi_step_inv _ _ Hk Hexec)
-          as (Uk & Uk' & tp_k & m_k & tr0 & pre_k & post_k & tp_k'
+          as (Uk & Uk' & tp_k & tre_k & m_k & tr0 & pre_k & post_k & tp_k' & tre_k'
               & m_k' & Hexeck & Hstepk & Hexec' & Hk_index).
         erewrite! app_nil_l in *.
 
@@ -1073,8 +1088,8 @@ Module SpinLocks.
               eapply multi_step_containsThread; eauto).
 
         (** [b] is valid if someone has permission on it*)
-        assert (Hvalid_mk': forall p, Mem.perm_order'' ((getThreadR cntk').1 !! b ofs) (Some p) \/
-                                 Mem.perm_order'' ((getThreadR cntk').2 !! b ofs) (Some p) ->
+        assert (Hvalid_mk': forall p, Mem.perm_order'' ((getThreadR cntk').1 !!!! b ofs) (Some p) \/
+                                 Mem.perm_order'' ((getThreadR cntk').2 !!!! b ofs) (Some p) ->
                                  Mem.valid_block m_k' b).
         { intros.
           assert (Hlt: permMapLt ((getThreadR cntk').1) (getMaxPerm m_k') /\
@@ -1092,8 +1107,8 @@ Module SpinLocks.
             now eauto.
         }
 
-        assert (Hvalid_m: forall p, Mem.perm_order'' ((getThreadR cntk').1 !! b ofs) (Some p) \/
-                               Mem.perm_order'' ((getThreadR cntk').2 !! b ofs) (Some p) ->
+        assert (Hvalid_m: forall p, Mem.perm_order'' ((getThreadR cntk').1 !!!! b ofs) (Some p) \/
+                               Mem.perm_order'' ((getThreadR cntk').2 !!!! b ofs) (Some p) ->
                                Mem.valid_block m b).
         { intros.
           eapply multi_step_valid_block; eauto.
