@@ -26,7 +26,7 @@ Require Import VST.concurrency.openmp_sem.permissions.
 Require Import VST.concurrency.common.permjoin_def.
 Require Import VST.concurrency.openmp_sem.HybridMachineSig.
 Require Import VST.concurrency.openmp_sem.memory_lemmas.
-(* Require Import VST.concurrency.openmp_sem.dry_context. *)
+Require Import VST.concurrency.openmp_sem.dry_context.
 Require Import VST.concurrency.openmp_sem.dry_machine_lemmas.
 Require Import VST.concurrency.openmp_sem.dry_machine_step_lemmas.
 (* FIXME *)(* Require Import VST.concurrency.openmp_sem.sc_drf.executions. *)
@@ -36,21 +36,21 @@ Set Bullet Behavior "None".
 Set Bullet Behavior "Strict Subproofs".
 
 Module SpinLocks.
-  (* Import HybridMachine HybridMachineSig ThreadPool ThreadPoolWF
-         CoreLanguage CoreLanguageDry AsmContext StepLemmas Executions. *)
+  Import HybridMachine HybridMachineSig ThreadPool ThreadPoolWF
+         CoreLanguage CoreLanguageDry AsmContext StepLemmas (* Executions *).
   Import event_semantics.
   Import Events.
   
   Section SpinLocks.
-    Context {Sem : Semantics}
-            {SemAxioms: SemAxioms}
+    Context {ge:Clight.genv}.
+    Instance Sem : Semantics := HybridMachine.ClightSem ge.
+    Context {SemAxioms: @SemAxioms Sem}
             {initU: seq nat}.
     Variable EM: ClassicalFacts.excluded_middle.
 
-    Existing Instance OrdinalPool.OrdinalThreadPool.
+    Existing Instance FinPool.FinThreadPool.
     Existing Instance DryHybridMachine.DryHybridMachineSig.
-    Existing Instance dryFineMach.
-    Existing Instance bareMach.
+    Existing Instance dryCoarseMach.
 
     Existing Instance FineDilMem.
     Open Scope nat.

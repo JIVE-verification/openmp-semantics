@@ -42,8 +42,8 @@ Ltac inv' H :=
     let H' := fresh in
     inversion H as [H']; clear H; rename H' into H; symmetry in H.
 
-#[local] Transparent Mem.alloc.
-#[local] Transparent Mem.drop_perm.
+(* #[local] Transparent Mem.alloc.
+#[local] Transparent Mem.drop_perm. *)
 
 Arguments Mem.storev: simpl never.
 Arguments Mem.alloc: simpl never.
@@ -155,7 +155,7 @@ Ltac mem_compat_tac :=
     revert cnt';
     rewrite /= /getThreadR /containsThread /num_threads /= => cnt';
     destruct tid'; [|lia]; simpl;
-    split; [apply cur_lt_max|apply empty_LT]
+    split; [ rewrite /getMaxPerm /=; apply cur_lt_max|apply empty_LT]
   |intros;done..].
 
 
@@ -177,7 +177,7 @@ Ltac tp_inv_tac :=
 
 Ltac step_dry_tac_full m Hcompat cnt :=
   eapply (step_dry _ _ _ _ m _ _ _);[
-      apply (restrPermMap_eq (proj1 (Hcompat 0 cnt)))
+      apply (@restrPermMap_eq m (proj1 (Hcompat 0 cnt)))
     | tp_inv_tac
     | rewrite vector.vlookup_lookup //=
     | by apply evstep_fun_correct
@@ -186,7 +186,7 @@ Ltac step_dry_tac_full m Hcompat cnt :=
 
 Ltac step_dry_tac_partial m Hcompat cnt :=
   eapply (step_dry _ _ _ _ m _ _ _);[
-      simpl; apply (restrPermMap_eq (proj1 (Hcompat 0 cnt)))
+      simpl; apply (@restrPermMap_eq m (proj1 (Hcompat 0 cnt)))
     | tp_inv_tac
     | rewrite vector.vlookup_lookup //=
     | ..
@@ -219,7 +219,7 @@ Ltac current_config :=
 Ltac assert_cnt tid cnt Hcompat :=
   match current_config with
   | (?tp, _, ?m) =>
-    assert (cnt: ThreadPool.containsThread tp tid) by (by subst tp);
+    assert (cnt: ThreadPool.containsThread tp tid) by (subst tp; rewrite /= /containsThread //=; lia);
     assert (mem_compatible tp m) as Hcompat by mem_compat_tac
   end.
 
@@ -237,9 +237,9 @@ Ltac Ostep_step_dry_tac tid tp m ttree cnt Hcompat :=
 Ltac thread_step_clean_up cnt Hcompat tp tp' :=
   simpl_updThread;
   clear cnt Hcompat tp;
+  rewrite /diluteMem (* /getCurPerm *) /=;
   (* abbreviate tp *)
-  set_tp_name tp';
-  rewrite /diluteMem /=.
+  set_tp_name tp'.
 
 Ltac thread_step_tac tid tp' :=
   (* create containsThread and mem_compatible proof terms; these are
@@ -300,12 +300,10 @@ Proof.
 
     set (PMap.set xH (λ (ofs : Z) (_ : perm_kind), if Coqlib.proj_sumbool (Coqlib.zle Z0 ofs) && Coqlib.proj_sumbool (Coqlib.zlt ofs (Zpos xH)) then Some Freeable else None)
         (PMap.init (λ (_ : Z) (_ : perm_kind), None))) as m1_mem_access in Hm.
-    match goal with |  H: context [Mem.drop_perm ?m_term _ _ _ _] |- _ => set m_term as m_init in H end.
 
     rewrite /Mem.drop_perm in Hm.
     repeat destruct_match_q Hm.
-    inversion Hm; subst m0.
-    clear Hm.
+    inv Hm.
     destruct_match_q Heqo.
     match type of Heqo with
     | Some ?m_term = Some m => remember m_term as m1_def eqn:Hm1_def
@@ -318,10 +316,12 @@ Proof.
 
     (** take 1st step *)
 
-    rewrite /m_init /= -/m_init in Hm1_def.
+    rewrite  /= in Hm1_def.
 
     pose tid:nat:=0.
+    subst.
     destruct (Mem.alloc m Z0 (Zpos (xO (xO xH)))) as [m2_0 b_i] eqn:Hm2_0.
+
     destruct (Mem.alloc m2_0 Z0 (Zpos (xO (xO xH)))) as [m2_1 b_count] eqn:Hm2_1.
 
     assert (Hb_i'' : b_i = Mem.nextblock m).
@@ -331,38 +331,27 @@ Proof.
     assert (Hb_count': b_count = xI xH).
     { rewrite /Mem.alloc /= in Hm2_1. injection Hm2_1 => <-_ //.
       rewrite /Mem.alloc /= in Hm2_0. injection Hm2_0 => _ <- /=.
-        lia. }
+        lia. } *)
 
-    assert_cnt 0 cnt Hcompat.
+    eexists.
 
-    eapply (rt1n_trans Ostate Ostep _ (_, _, _, ttree, diluteMem _)).
-    { 
-        (* build preconditions for evstep *)
-        (* compute f *)
-        rewrite /Genv.find_symbol /Genv.genv_symb in Hb.
-        unfold PTree.get in Hb.
-        simpl in Hb.
-        inv' Hb.
-        rewrite Hb /Genv.find_funct_ptr  /= in Hf.
-        inv' Hf.
+    (* assert_cnt 0 cnt Hcompat. *)
+    thread_step_tac_partial 0 tp1.
+    {
+      rewrite /Genv.find_symbol /Genv.genv_symb in Hb.
+      unfold PTree.get in Hb.
+      simpl in Hb.
+      inv' Hb.
+      rewrite Hb /Genv.find_funct_ptr  /= in Hf.
+      inv' Hf.
 
-        (* take a threadStep *)
-        rewrite /Ostep /MachStep /=;
-        eapply (thread_step 0 _ tp _ _ _ _ [] ttree _ _ _);
-        rewrite /= /DryHybridMachine.threadStep;
-
-
-        step_dry_tac m Hcompat cnt.
-        {
-            apply evstep_fun_correct.
-            rewrite Hf /cl_evstep_fun.
-            simpl decide; unfold decide.
-            cbn. unfold_mbind. rewrite Hm2_0 Hm2_1 /=. done.
-        }
-        done.
-    }
+      apply evstep_fun_correct.
+      rewrite /cl_evstep_fun /=.
+      done. }
+    { done. }
+    simpl_mem.
     thread_step_clean_up cnt Hcompat tp tp2.
-
+    
     (** take 2nd step *)
     thread_step_tac 0 tp3.
 
@@ -370,20 +359,6 @@ Proof.
     thread_step_tac 0 tp4.
 
     (** take 4th step *)
-
-    destruct (Mem.storev Mint32 m2_1 (Vptr b_i Ptrofs.zero) (Vint (Int.repr Z0))) as [m5|] eqn:Hm5.
-    2:{ (* not_writable is False *)
-        contradict Hm5.
-        Transparent Mem.store.
-        rewrite  /Mem.storev /Mem.store.
-        destruct (Mem.valid_access_dec m2_1 Mint32 b_i (Ptrofs.unsigned Ptrofs.zero) Writable) as [|not_writable]; try done.
-        contradict not_writable.
-        eapply Mem.valid_access_alloc_other. apply Hm2_1.
-        apply Mem.valid_access_freeable_any.
-        apply (Mem.valid_access_alloc_same _ _ _ _ _ Hm2_0); try done.
-        rewrite /BinInt.Z.divide. exists Z0. done.
-    }
-    
     thread_step_tac_partial 0 tp4.
     1: {
             apply evstep_fun_correct.
@@ -392,10 +367,24 @@ Proof.
             unfold_mbind.
             rewrite Cop.cast_val_casted; last by constructor.
             simpl.
-            rewrite Hm5 //.
+            Transparent Mem.store.
+            rewrite  /Mem.storev /Mem.store /=.
+
+            destruct (Mem.valid_access_dec _ _ _ _ _) as [|not_writable]; try done.
+            contradict not_writable.
+
+            eapply Mem.valid_access_alloc_other.
+            rewrite /Mem.alloc /=.
+            
+            apply Hm2_1.
+            apply Mem.valid_access_freeable_any.
+            apply (Mem.valid_access_alloc_same _ _ _ _ _ Hm2_0); try done.
+            rewrite /BinInt.Z.divide. exists Z0. done.
     }
     1: { done. }
     thread_step_clean_up cnt Hcompat tp4 tp5.
+
+
 
     (* take 5th step *)
     thread_step_tac 0 tp5.
@@ -403,8 +392,14 @@ Proof.
     (* take 6th step *)
     thread_step_tac 0 tp6.
     
-    (* take 7th step: suspend_step_pragma *)
+    (* take 7th step: suspend_step_pragma
+       TODO automate this *)
     assert_cnt 0 cnt7 Hcompat7.
+       match current_config with
+      | (?tp, _, ?m) =>
+        set m as m5
+      end.
+        
     eapply (rt1n_trans Ostate Ostep _ (_, _, _, ttree, diluteMem _)).
     {
         rewrite /Ostep /MachStep /=.
@@ -412,7 +407,7 @@ Proof.
         eapply (SuspendThreadPragma _ _ _ _ _ _ _ _ Hcompat7).
         { rewrite vector.vlookup_lookup //=. }
         { simpl. unfold DryHybridMachine.install_perm.
-          rewrite (restrPermMap_eq (proj1 (Hcompat7 0 _))) //. }
+          rewrite (@restrPermMap_eq m5 (proj1 (Hcompat7 0 _))) //. }
         { done. }
         { tp_inv_tac. }
         simpl.
@@ -463,12 +458,14 @@ Proof.
     assert (Hamap8 : amap8 = (PMap.set b_count (int_perm $ Some Freeable) $
                                           PMap.set b_i (int_perm $ Some Freeable) curPerm_m1)).
     { 
-      clear -Hm5  Hm2_1 Hm2_0 Hm Hm1_def m1_mem_access m_init Hb_i' Hb_count'.
+      clear - Hm2_1 Hm2_0 Hm Hm1_def m1_mem_access m_init Hb_i' Hb_count'.
       rewrite /amap8 /=.
       rewrite /Mem.alloc /= in Hm2_0.
       injection Hm2_0; intros Hb_i Hm2_0_def.
       rewrite /Mem.alloc /= in Hm2_1.
       injection Hm2_1; intros Hb_count Hm2_1_def.
+      subst.
+
       rewrite  /Mem.storev /Mem.store /= in Hm5.
       destruct (Mem.valid_access_dec m2_1 Mint32 b_i (Ptrofs.unsigned Ptrofs.zero) Writable) eqn:Hm5_eq; [|done].
       inversion Hm5.
@@ -574,6 +571,62 @@ Proof.
     }
     thread_step_clean_up tp8 cnt8 Hcompat8 tp9.
 
+
+  
+      match current_config with
+  | (?tp, _, ?m) =>
+    assert (cnt: ThreadPool.containsThread tp 0) by (subst tp; rewrite /= /containsThread //=; lia);
+    assert (mem_compatible tp m) as Hcompat 
+  end.
+  {  simpl; constructor;
+  [ let tid' := fresh "tid" in
+   let cnt' := fresh "cnt" in
+    intros tid' cnt';
+    revert cnt';
+    rewrite /= /getThreadR /containsThread /num_threads /= => cnt'
+    (* ;
+    destruct tid'; [|lia]; simpl;
+    split; [apply cur_lt_max|apply empty_LT] *)
+  |intros;done..].
+
+  destruct tid0. 
+  - simpl; split. 
+  { rewrite /getMaxPerm /curPerm_m1 /=. }
+
+  
+  [apply cur_lt_max|apply empty_LT].
+  Ltac solve_permMapLt :=
+    solve [lia (* tid out of bound *)
+    | 
+    ]
+    destruct tid'; [|lia]; simpl;
+    split; [apply cur_lt_max|apply empty_LT]
+  
+  }
+
+    (* execute left thread  *)
+    (* thread_step_tac 0 tp9. *)
+    let tid := constr:(0) in
+  (* create containsThread and mem_compatible proof terms; these are
+     part of the new configuration, so have to be done before applying
+     rt1n_trans that instantiates the evar for the new state *)
+  let cnt := fresh "cnt" in
+  let Hcompat := fresh "Hcompat" in
+  assert_cnt tid cnt Hcompat;
+  match current_config with
+  | (?tp, ?ttree, ?m) =>
+    eapply (rt1n_trans Ostate Ostep _ (_, _, _, ttree, diluteMem _));
+    (* must solve step_dry completely *)
+    first (by (
+        (* take a threadStep *)
+        rewrite /Ostep /MachStep /=;
+        eapply (thread_step tid _ tp _ m _ _ _ _ _ _ _);
+        rewrite /= /DryHybridMachine.threadStep;
+        step_dry_tac m Hcompat cnt
+    ))
+
+    (* thread_step_clean_up cnt Hcompat tp tp' *)
+  end.
 
 
 Admitted.

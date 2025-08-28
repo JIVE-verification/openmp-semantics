@@ -877,7 +877,7 @@ floyd/floyd.coq: floyd/proofauto.vo
 	@echo 'coqdep ... >.depend'
 ifeq ($(COMPCERT_NEW),true)
 	# DEPENDENCIES VARIANT COMPCERT_NEW
-	$(COQDEP) $(DEPFLAGS) 2>&1 >.depend `find $(filter $(wildcard *), $(DIRS) refinedVST concurrency/common concurrency/compiler concurrency/juicy concurrency/util paco concurrency/sc_drf OMPcompilerVerif) -name "*.v"` | grep -v 'Warning:.*found in the loadpath' || true
+	$(COQDEP) $(DEPFLAGS) 2>&1 >.depend `find $(filter $(wildcard *), $(DIRS) refinedVST concurrency/common concurrency/compiler concurrency/juicy concurrency/util paco concurrency/sc_drf concurrency/openmp_sem concurrency/openmp_sem/sc_drf OMPcompilerVerif) -name "*.v"` | grep -v 'Warning:.*found in the loadpath' || true
 	@echo "" >>.depend
 else
 	# DEPENDENCIES DEFAULT

@@ -19,19 +19,19 @@ Require Import compcert.lib.Integers.
 
 Require Import Coq.ZArith.ZArith.
 
-Require Import VST.concurrency.common.threadPool.
+Require Import VST.concurrency.openmp_sem.finThreadPool.
 Require Import VST.concurrency.common.threads_lemmas.
-Require Import VST.concurrency.common.permissions.
+Require Import VST.concurrency.openmp_sem.permissions.
 Require Import VST.concurrency.common.permjoin_def.
-Require Import VST.concurrency.common.HybridMachineSig.
-Require Import VST.concurrency.common.semantics.
-Require Import VST.concurrency.memory_lemmas.
+Require Import VST.concurrency.openmp_sem.HybridMachineSig.
+Require Import VST.concurrency.openmp_sem.semantics.
+Require Import VST.concurrency.openmp_sem.memory_lemmas.
 (* Require Import VST.concurrency.common.ClightSemanticsForMachines. *)
-Require Import VST.concurrency.common.dry_context.
-Require Import VST.concurrency.common.dry_machine_lemmas.
-Require Import VST.concurrency.common.dry_machine_step_lemmas.
-Require Import VST.concurrency.common.erased_machine.
-Require Import VST.concurrency.common.tactics.
+Require Import VST.concurrency.openmp_sem.dry_context.
+Require Import VST.concurrency.openmp_sem.dry_machine_lemmas.
+Require Import VST.concurrency.openmp_sem.dry_machine_step_lemmas.
+(* Require Import VST.concurrency.common.erased_machine. *)
+Require Import VST.concurrency.openmp_sem.tactics.
 Require Import compcert.lib.Coqlib.
 Require Import VST.msl.Coqlib2.
 Import Tactics.
@@ -57,7 +57,7 @@ Module Executions.
     
     (* Existing Instance FineDilMem. *)
     Existing Instance HybridFineMachine.scheduler.
-    Existing Instance OrdinalPool.OrdinalThreadPool.
+    Existing Instance FinPool.FinThreadPool.
     Context {Hbs : MachineSig}.
 
     (** Reflexive-transitive closure of machine step relation*)
@@ -68,11 +68,13 @@ Module Executions.
     | Step_trans : forall i U U'
                      (tp tp' tp'' : t)
                      tr tr' tr''
+                     tre tre' tre''
                      (m m' m'' : mem),
-        MachStep (i :: U, tr, tp) m (U, tr ++ tr', tp') m' ->
-        multi_step (U, tr ++ tr', tp') m' (U', tr ++ tr' ++ tr'', tp'') m'' ->
-        multi_step (i :: U,tr,tp) m (U',tr ++ tr' ++ tr'',tp'') m''.
+        MachStep (i :: U, tr, tp, tre) m (U, tr ++ tr', tp', tre') m' ->
+        multi_step (U, tr ++ tr', tp', tre') m' (U', tr ++ tr' ++ tr'', tp'', tre'') m'' ->
+        multi_step (i :: U, tr, tp, tre) m (U', tr ++ tr' ++ tr'',tp'', tre'') m''.
 
+    (* TODO change to coarse exec *)
     (** Complete executions (until the schedule is empty) of the FineConc machine*)
     Inductive fine_execution :
       MachState -> mem -> MachState -> mem -> Prop :=

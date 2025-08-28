@@ -74,7 +74,7 @@ Module ThreadPool.
         ; resourceList_spec: forall i tp
             (cnti: containsThread tp i),
             List.nth_error (resourceList tp) i = Some (getThreadR cnti)          
-        ;  containsThread_dec_:
+        ;  containsThread_dec:
              forall i tp, {containsThread tp i} + { ~ containsThread tp i}
         ; maybeContainsThread tp tid : option (containsThread tp tid) 
         (*Proof Irrelevance of contains*)
@@ -426,7 +426,7 @@ Module ThreadPool.
              forall {tp} c pmap j
                (Heq: j = latestThread tp)
                (cnt': containsThread (addThread tp c pmap) j),
-               getThreadC cnt' = Krun c
+               getThreadC cnt' = Kblocked c
 
         ;  gsoAddRes :
              forall {tp} c pmap j
@@ -667,7 +667,7 @@ Module OrdinalPool.
       let tp' := mk new_num_threads
          (fun (n : 'I_new_num_threads) =>
             match unlift new_tid n with
-            | None => Krun c
+            | None => Kblocked c
             | Some n' => tp n'
             end)
          (fun (n : 'I_new_num_threads) =>
@@ -676,7 +676,8 @@ Module OrdinalPool.
             | Some n' => (perm_maps tp) n'
             end)
          (lset tp) (* (extra tp) *) in
-      (new_num_threads, tp').
+      (* (num_threads tp) is the pos version of the new tid *)
+      ((num_threads tp), tp').
 
     Definition addThread (tp : t) (c : semC) (pmap : res) : t :=
       (addThread' tp c pmap).2.
@@ -1445,7 +1446,7 @@ Module OrdinalPool.
       forall {tp} c pmap j
         (Heq: j = latestThread tp)
         (cnt': containsThread (addThread tp c pmap) j),
-        getThreadC cnt' = Krun c.
+        getThreadC cnt' = Kblocked c.
     Proof.
       intros. subst.
       simpl.
