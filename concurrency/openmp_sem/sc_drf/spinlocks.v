@@ -488,9 +488,9 @@ Module SpinLocks.
         try (destruct (Hext ltac:(auto 2)) as [? | [? | [? | ?]]]; discriminate).
     Qed.
 
-    (* Lemma cstep_ev_perm:
-      forall U tr tp m U' tr_pre tr_post tp' m' ev
-        (Hstep: fstep (U, tr, tp) m (U', tr ++ tr_pre ++ [:: ev] ++ tr_post , tp') m'),
+    Lemma cstep_ev_perm:
+      forall U tr tp tre m U' tr_pre tr_post tp' tre' m' ev
+        (Hstep: cstep (U, tr, tp, tre) m (U', tr ++ tr_pre ++ [:: ev] ++ tr_post, tp', tre') m'),
         (waction ev ->
          forall (cnt: containsThread tp (thread_id ev)) (cnt': containsThread tp' (thread_id ev)),
            match location ev with
@@ -501,7 +501,7 @@ Module SpinLocks.
                       Mem.perm_order'' ((getThreadR cnt).2 !!!! b ofs') (Some Writable)) /\
                      ((Mem.perm_order'' ((getThreadR cnt').1 !!!! b ofs') (Some Writable) \/
                        Mem.perm_order'' ((getThreadR cnt').2 !!!! b ofs') (Some Writable)) \/
-                      deadLocation tp' m' b ofs')
+                      deadLocation(ge:=ge) tp' m' b ofs')
            | None => False
            end) /\
         (caction ev ->
@@ -540,13 +540,14 @@ Module SpinLocks.
                 destruct X; simpl in H; congruence
               end.
       - (** case of internal steps*)
-        apply app_inv_head in H5; subst.
+        apply app_inv_head in H6; subst.
         (** proof that the [thread_id] of the event and the head of the schedule match*)
         assert (Hin: List.In ev (List.map [eta internal tid] ev0))
-          by (rewrite H5; apply in_app; right; simpl; auto).
+          by (rewrite H6; apply in_app; right; simpl; auto).
         apply in_map_iff in Hin.
         destruct Hin as [mev [? Hin]].
         subst.
+        
         assert (Hwritable:
                   (waction (internal tid mev) ->
                    forall (cnt : containsThread tp (thread_id (internal tid mev)))
@@ -560,7 +561,7 @@ Module SpinLocks.
                           Mem.perm_order'' (((getThreadR cnt)#2) # b ofs') (Some Writable)) /\
                          ((Mem.perm_order'' (((getThreadR cnt')#1) # b ofs') (Some Writable) \/
                            Mem.perm_order'' (((getThreadR cnt')#2) # b ofs') (Some Writable)) \/
-                          deadLocation tp' (diluteMem m'0) b ofs')
+                          deadLocation tp' (diluteMem(DiluteMem:=HybridCoarseMachine.DilMem) m') b ofs')
                      | None => False
                      end) ).
         { simpl in *; inversion Htstep; subst.
@@ -1151,7 +1152,7 @@ Module SpinLocks.
         (** We proceed by a case analysis on whether [thread_id evj] was in
             the threadpool at index k. If not then there must have been a
             spawn event between u and j and we are done *)
-        destruct (containsThread_dec_ (thread_id evj) tp_k')
+        destruct (containsThread_dec (thread_id evj) tp_k')
           as [cntj_k' | Hnot_contained].
         { (** Case [thread_id evj] is in the threadpool*)
           (** by [compete_cases] there are two main cases:
@@ -1162,8 +1163,8 @@ Module SpinLocks.
           (** *** Proving that the permissions required for [evk] and [evj]
               are above [Readable] and incompatible*)
 
-          assert (Hpermissions: ((Mem.perm_order'' ((getThreadR cntk').1 !! b ofs) (Some Readable) \/
-                                  Mem.perm_order'' ((getThreadR cntk').2 !! b ofs) (Some Readable)) \/
+          assert (Hpermissions: ((Mem.perm_order'' ((getThreadR cntk').1 !!!! b ofs) (Some Readable) \/
+                                  Mem.perm_order'' ((getThreadR cntk').2 !!!! b ofs) (Some Readable)) \/
                                  (pre_k = [::] /\
                                   post_k = [::] /\
                                   action evk = Release /\
@@ -1172,15 +1173,15 @@ Module SpinLocks.
                                       lockRes tp_k' (b, ofsk) = Some rmap /\
                                       (Mem.perm_order'' ((rmap#1) # b ofs) (Some Readable) \/
                                       Mem.perm_order'' ((rmap#2) # b ofs) (Some Readable))))) /\
-                                (Mem.perm_order'' ((getThreadR cntj).1 !! b ofs) (Some Readable) \/
-                                 Mem.perm_order'' ((getThreadR cntj).2 !! b ofs) (Some Readable)) /\
+                                (Mem.perm_order'' ((getThreadR cntj).1 !!!! b ofs) (Some Readable) \/
+                                 Mem.perm_order'' ((getThreadR cntj).2 !!!! b ofs) (Some Readable)) /\
                                 (waction evk ->
-                                 Mem.perm_order'' ((getThreadR cntk').1 !! b ofs) (Some Writable) \/
-                                 Mem.perm_order'' ((getThreadR cntk').2 !! b ofs) (Some Writable)) /\
+                                 Mem.perm_order'' ((getThreadR cntk').1 !!!! b ofs) (Some Writable) \/
+                                 Mem.perm_order'' ((getThreadR cntk').2 !!!! b ofs) (Some Writable)) /\
                                 (waction evj ->
-                                 Mem.perm_order'' ((getThreadR cntj).1 !! b ofs) (Some Writable) \/
-                                 Mem.perm_order'' ((getThreadR cntj).2 !! b ofs) (Some Writable))).
-          { destruct(fstep_ev_perm _ _ _ Hstepk) as [Hwritek Hreadk].
+                                 Mem.perm_order'' ((getThreadR cntj).1 !!!! b ofs) (Some Writable) \/
+                                 Mem.perm_order'' ((getThreadR cntj).2 !!!! b ofs) (Some Writable))).
+          { destruct(cstep_ev_perm _ _ _ Hstepk) as [Hwritek Hreadk].
             destruct(fstep_ev_perm _ _ _ Hstep) as [Hwritej Hreadj].
             rewrite Hloc_j in Hwritej Hreadj.
             rewrite Hloc_k in Hwritek, Hreadk.

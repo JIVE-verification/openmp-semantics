@@ -1329,7 +1329,7 @@ Module Executions.
       eapply event_semantics.free_list_cases;
         now eauto.
     Qed.
-
+*)
     Lemma elim_perm_valid_block:
       forall m T m' b ofs ofs' bytes
         (Hintv: Intv.In ofs' (ofs, (ofs + Z.of_nat (length bytes))%Z))
@@ -1368,7 +1368,10 @@ Module Executions.
               left.
               pose proof (MemoryLemmas.mem_storebytes_cur _ _ _ _ _ Hstore b ofs') as Heq.
               rewrite! getCurPerm_correct in Heq.
-              rewrite Heq. now eauto.
+              rewrite Heq. split; eauto. rewrite /permission_at.
+              rewrite /Mem.perm in H.
+              destruct ((Mem.mem_access m'') !!!! b ofs' Cur) eqn:?; try done.
+              inv H; done.
             }
             { (** If [(b,ofs')] was not freed in [T]*)
               right.
