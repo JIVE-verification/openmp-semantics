@@ -18,11 +18,11 @@ Require Import List. Import ListNotations.
 
 (* The concurrent machinery*)
 (*Require Import VST.concurrency.common.core_semantics.*)
+Require Import VST.concurrency.openmp_sem.semantics.
 Require Import VST.sepcomp.mem_lemmas.
 Require Import VST.concurrency.memsem_lemmas.
 Require Import VST.concurrency.common.scheduler.
 Require Import VST.concurrency.openmp_sem.HybridMachineSig.
-Require Import VST.concurrency.openmp_sem.semantics.
 Require Import VST.concurrency.common.lksize.
 Require Import VST.concurrency.openmp_sem.permissions.
 Require Import VST.concurrency.openmp_sem.dry_machine_lemmas.
@@ -69,13 +69,13 @@ Qed.
 Proof.
   constructor.
   - intros.
-    apply mem_step_obeys_cur_write; auto.
+    apply openmp_sem.semantics_lemmas.mem_step_obeys_cur_write; auto.
     eapply corestep_mem; eauto.
   - intros.
     apply ev_step_ax2 in H as [].
     eapply CLC_step_decay; simpl in *; eauto.
   - intros.
-    apply mem_forward_nextblock, mem_step_forward.
+    apply mem_forward_nextblock, openmp_sem.semantics_lemmas.mem_step_forward.
     eapply corestep_mem; eauto.
   - intros; simpl.
     destruct q; auto.
