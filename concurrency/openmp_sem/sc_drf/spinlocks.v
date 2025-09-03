@@ -52,7 +52,7 @@ Module SpinLocks.
 
     Existing Instance FinPool.FinThreadPool.
     Existing Instance DryHybridMachine.DryHybridMachineSig.
-    Existing Instance dryCoarseMach.
+    Existing Instance dryFineMach.
 
     Open Scope nat.
     (** True if two events access at least one common byte*)
@@ -146,7 +146,7 @@ Module SpinLocks.
         (Hlocation: sameLocation evj evi),
         action evj <> Write /\ action evj <> Read.
 
-    Notation cstep := ((corestep (MachineSemantics(HybridMachine := dryCoarseMach) initU None))).
+    Notation cstep := ((corestep (MachineSemantics(HybridMachine := dryFineMach) initU None))).
 
     Opaque containsThread getThreadR getThreadC t lockRes.
 
@@ -294,7 +294,7 @@ Module SpinLocks.
     Qed. *)
     Admitted.
 
-    Notation multi_cstep := (@multi_step ge HybridCoarseMachine.DilMem _ DryHybridMachine.DryHybridMachineSig).
+    Notation multi_cstep := (@multi_step ge FineDilMem _ DryHybridMachine.DryHybridMachineSig).
     (** FineConc is spinlock clean*)
     Theorem coarseConc_clean:
       forall U tr tp tre m tp' tre' m'
@@ -561,7 +561,7 @@ Module SpinLocks.
                           Mem.perm_order'' (((getThreadR cnt)#2) # b ofs') (Some Writable)) /\
                          ((Mem.perm_order'' (((getThreadR cnt')#1) # b ofs') (Some Writable) \/
                            Mem.perm_order'' (((getThreadR cnt')#2) # b ofs') (Some Writable)) \/
-                          deadLocation tp' (diluteMem(DiluteMem:=HybridCoarseMachine.DilMem) m') b ofs')
+                          deadLocation tp' (diluteMem(DiluteMem:=FineDilMem) m'0) b ofs')
                      | None => False
                      end) ).
         { simpl in *; inversion Htstep; subst.
@@ -753,9 +753,9 @@ Module SpinLocks.
                   now eauto.
           }
       - (** case of external steps *)
-        apply app_inv_head in H5.
+        apply app_inv_head in H6.
         destruct (tr_pre); simpl;
-        inv H5.
+        inv H6.
         assert (Hwritable:
                   (waction (external tid ev0) ->
                    forall (cnt : containsThread tp (thread_id (external tid ev0)))
@@ -810,11 +810,7 @@ Module SpinLocks.
                   destruct Archi.ptr64; simpl in *;
                   ssromega).
             replace ((Z.to_nat (ofs' - Ptrofs.intval ofs)).+1) with
-            (Z.to_nat (ofs' - Ptrofs.intval ofs +1)) in Hneq_perms
-              by (zify;
-                  erewrite! Z2Nat.id
-                    by (unfold lksize.LKSIZE in *; simpl in *; ssromega);
-                  omega).
+            (Z.to_nat (ofs' - Ptrofs.intval ofs +1)) in Hneq_perms by lia.
             now eauto.
         }
         split; auto.
@@ -906,14 +902,11 @@ Module SpinLocks.
                 ssromega).
           replace ((Z.to_nat (ofs' - Ptrofs.intval ofs)).+1) with
           (Z.to_nat (ofs' - Ptrofs.intval ofs +1)) in Hneq_perms
-            by (zify;
-                erewrite! Z2Nat.id
-                  by (unfold lksize.LKSIZE in *; simpl in *; ssromega);
-                omega).
+            by lia.
           eapply po_trans; eauto; simpl;
           eauto using perm_order.
-        + simpl in Haction.
-            by exfalso.
+        (* + simpl in Haction.
+            by exfalso. *)
         + intros ofs' Hintv.
           Tactics.pf_cleanup.
           specialize (Haccess _ Hintv).
@@ -921,7 +914,7 @@ Module SpinLocks.
           unfold permission_at, Mem.perm in *; now auto.
         + destruct l; simpl in H1;
             now inv H1.
-    Qed. *)
+    Qed.
 
     Lemma waction_caction:
       forall ev,
@@ -1014,7 +1007,9 @@ Module SpinLocks.
           erewrite nth_error_app2 in Hj by lia.
           apply nth_error_In in Hj.
           contradiction H. eapply step_event_tid; eauto.
-          apply Hstep. 
+          rewrite /cstep /= in Hstep.
+          rewrite /MachStep /=.
+          apply Hstep.
         }
         erewrite nth_error_app1 in Hk by assumption.
 
@@ -1182,7 +1177,7 @@ Module SpinLocks.
                                  Mem.perm_order'' ((getThreadR cntj).1 !!!! b ofs) (Some Writable) \/
                                  Mem.perm_order'' ((getThreadR cntj).2 !!!! b ofs) (Some Writable))).
           { destruct(cstep_ev_perm _ _ _ Hstepk) as [Hwritek Hreadk].
-            destruct(fstep_ev_perm _ _ _ Hstep) as [Hwritej Hreadj].
+            destruct(cstep_ev_perm _ _ _ Hstep) as [Hwritej Hreadj].
             rewrite Hloc_j in Hwritej Hreadj.
             rewrite Hloc_k in Hwritek, Hreadk.
             (** First we prove that [(b, ofs)] cannot be a [deadLocation] *)
@@ -1256,23 +1251,23 @@ Module SpinLocks.
 
           (** By the [invariant] permissions of [thread_id evk] and
           [thread_id evj] will have compatible permissions at [tp] *)
-          assert (Hcompatible11_j: perm_union ((getThreadR cntk'_j).1 !! b ofs)
-                                              ((getThreadR cntj).1 !! b ofs))
+          assert (Hcompatible11_j: perm_union ((getThreadR cntk'_j).1 !!!! b ofs)
+                                              ((getThreadR cntj).1 !!!! b ofs))
             by (destruct ((no_race_thr _ Hinv _ _ cntk'_j cntj Hthreads_neq).1 b ofs) as [pu Hcompatiblek'j];
                  rewrite Hcompatiblek'j; auto).
 
-          assert (Hcompatible12_j: perm_coh ((getThreadR cntk'_j).1 !! b ofs)
-                                            ((getThreadR cntj).2 !! b ofs))
+          assert (Hcompatible12_j: perm_coh ((getThreadR cntk'_j).1 !!!! b ofs)
+                                            ((getThreadR cntj).2 !!!! b ofs))
             by (pose proof ((thread_data_lock_coh _ Hinv _ cntj).1 _ cntk'_j b ofs);
                  auto).
 
-          assert (Hcompatible21_j: perm_coh ((getThreadR cntj).1 !! b ofs)
-                                              ((getThreadR cntk'_j).2 !! b ofs))
+          assert (Hcompatible21_j: perm_coh ((getThreadR cntj).1 !!!! b ofs)
+                                              ((getThreadR cntk'_j).2 !!!! b ofs))
             by (pose proof ((thread_data_lock_coh _ Hinv _ cntk'_j).1 _ cntj b ofs);
                  auto).
 
-          assert (Hcompatible22_j: perm_union ((getThreadR cntk'_j).2 !! b ofs)
-                                              ((getThreadR cntj).2 !! b ofs))
+          assert (Hcompatible22_j: perm_union ((getThreadR cntk'_j).2 !!!! b ofs)
+                                              ((getThreadR cntj).2 !!!! b ofs))
             by (destruct ((no_race_thr _ Hinv _ _ cntk'_j cntj Hthreads_neq).2 b ofs) as [pu Hcompatiblek'j];
                  rewrite Hcompatiblek'j; auto).
 
@@ -1280,16 +1275,16 @@ Module SpinLocks.
           destruct Hcases as [[Hractionk Hwactionj] | [Hwactionk _]].
           { (** Case [evk] is an [raction] and [evj] is an [waction]*)
             specialize (Hwritablej Hwactionj).
-            assert (Hpermk'_j: ~ Mem.perm_order'' ((getThreadR cntk'_j).1 !! b ofs) (Some Readable)
-                               /\ ~ Mem.perm_order'' ((getThreadR cntk'_j).2 !! b ofs) (Some Readable)).
+            assert (Hpermk'_j: ~ Mem.perm_order'' ((getThreadR cntk'_j).1 !!!! b ofs) (Some Readable)
+                               /\ ~ Mem.perm_order'' ((getThreadR cntk'_j).2 !!!! b ofs) (Some Readable)).
             { clear - Hcompatible11_j Hcompatible12_j Hcompatible21_j
                                       Hcompatible22_j Hwritablej Hthreads_neq.
               destruct Hwritablej as [Hwritablej | Hwritablej];
-                [destruct ((getThreadR cntj).1 !! b ofs) as [p1 | ] |
-                  destruct ((getThreadR cntj).2 !! b ofs) as [p1 | ]]; simpl in Hwritablej;
+                [destruct ((getThreadR cntj).1 !!!! b ofs) as [p1 | ] |
+                  destruct ((getThreadR cntj).2 !!!! b ofs) as [p1 | ]]; simpl in Hwritablej;
               inv Hwritablej;
-              destruct ((getThreadR cntk'_j).1 !! b ofs);
-              destruct ((getThreadR cntk'_j).2 !! b ofs);
+              destruct ((getThreadR cntk'_j).1 !!!! b ofs);
+              destruct ((getThreadR cntk'_j).2 !!!! b ofs);
               simpl; split; intros Hcontra;
               inv Hcontra; simpl in *;
               now auto.
@@ -1309,9 +1304,9 @@ Module SpinLocks.
                   now auto).
             (** Hence by [permission_decrease_execution] we have four cases
             for how the permissions of [thread_id evk] dropped*)
-            destruct (permission_decrease_execution _ b ofs cntk' cntk'_j Hexec' Hperm_k_drop)
-              as (tr_pre_u & tru & ? & ? & tp_pre_u & m_pre_u &
-                  tp_dec & m_dec & Hexec_pre_u & Hstepu & Hexec_post_u & evu & Hspec_u).
+            destruct (permission_decrease_execution(initU:=initU) _ b ofs cntk' cntk'_j Hexec' Hperm_k_drop)
+              as (tr_pre_u & tru & ? & ? & tp_pre_u & tre_pre_u & m_pre_u &
+                  tp_dec & tre_dec & m_dec & Hexec_pre_u & Hstepu & Hexec_post_u & evu & Hspec_u).
             destruct Hspec_u as [Hfreed | [Hspawned | [Hfreelock | [Hmklock | Hrelease]]]].
               { (** Case permissions dropped by a [Free] event. This leads to a
                   contradiction because it would be a [deadLocation] *)
@@ -1473,8 +1468,8 @@ Module SpinLocks.
               - (** Case [(bu, ofsu)] is still a lock at [tp]*)
                 (** By the [invariant] its permissions must have dropped because
                 [thread_id evj] has a Writable permission at that location*)
-                assert (Hperm_res: ~ Mem.perm_order'' (rmap'.1 !! b ofs) (Some Readable) /\
-                                   ~ Mem.perm_order'' (rmap'.2 !! b ofs) (Some Readable)).
+                assert (Hperm_res: ~ Mem.perm_order'' (rmap'.1 !!!! b ofs) (Some Readable) /\
+                                   ~ Mem.perm_order'' (rmap'.2 !!!! b ofs) (Some Readable)).
                 { clear - Hinv Hres Hwritablej.
                   destruct ((no_race _ Hinv _ _ cntj _ Hres).1 b ofs) as [pu Hcomp].
                   destruct ((no_race _ Hinv _ _ cntj _ Hres).2 b ofs) as [pu2 Hcomp2].
