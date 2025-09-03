@@ -37,9 +37,12 @@ Require Import VST.msl.Coqlib2.
 Import Tactics.
 
 Require Import VST.concurrency.openmp_sem.notations.
+Require Import Coq.Program.Equality.
 
 Set Bullet Behavior "None".
 Set Bullet Behavior "Strict Subproofs".
+
+Notation block := (Values.block).
 
 Module Executions.
 
@@ -57,10 +60,12 @@ Module Executions.
       {SemAx : CoreLanguage.SemAxioms}
       {SemD : CoreLanguage.SemDet}
       {DilMem : DiluteMem}
-      {Res: Resources}.
+      {Res: Resources}
+      {Sched: Scheduler}
+      .
     
     (* Existing Instance FineDilMem. *)
-    Existing Instance HybridFineMachine.scheduler.
+    (* Existing Instance HybridCoarseMachine.scheduler. *)
     Existing Instance FinPool.FinThreadPool.
     Context {Hbs : MachineSig}.
 
@@ -69,14 +74,14 @@ Module Executions.
       MachState -> mem -> MachState -> mem -> Prop :=
     | Step_refl : forall ms (m : mem),
         multi_step ms m ms m
-    | Step_trans : forall i U U'
+    | Step_trans : forall i U U' U''
                      (tp tp' tp'' : t)
                      tr tr' tr''
                      tre tre' tre''
                      (m m' m'' : mem),
-        MachStep (i :: U, tr, tp, tre) m (U, tr ++ tr', tp', tre') m' ->
-        multi_step (U, tr ++ tr', tp', tre') m' (U', tr ++ tr' ++ tr'', tp'', tre'') m'' ->
-        multi_step (i :: U, tr, tp, tre) m (U', tr ++ tr' ++ tr'',tp'', tre'') m''.
+        MachStep (i :: U, tr, tp, tre) m (U', tr ++ tr', tp', tre') m' ->
+        multi_step (U', tr ++ tr', tp', tre') m' (U'', tr ++ tr' ++ tr'', tp'', tre'') m'' ->
+        multi_step (i :: U, tr, tp, tre) m (U'', tr ++ tr' ++ tr'',tp'', tre'') m''.
 
     (* TODO change to coarse exec *)
     (** Complete executions (until the schedule is empty) of the CoarseConc machine*)
@@ -85,14 +90,14 @@ Module Executions.
     | coarse_completed : forall ms (m : mem),
         halted_machine ms ->
         coarse_execution ms m ms m
-    | coarse_exec : forall i U U'
+    | coarse_exec : forall i U U' U''
                     tp tp' tp''
                     tr tr' tr''
                     tre tre' tre''
                     (m m' m'' : mem),
-        MachStep (i :: U, tr, tp, tre) m (U, tr ++ tr', tp', tre') m' ->
-        coarse_execution (U, tr ++ tr', tp', tre') m' (U', tr ++ tr' ++ tr'', tp'', tre'') m'' ->
-        coarse_execution (i :: U, tr, tp, tre) m (U', tr ++ tr' ++ tr'', tp'', tre'') m''.
+        MachStep (i :: U, tr, tp, tre) m (U', tr ++ tr', tp', tre') m' ->
+        coarse_execution (U', tr ++ tr', tp', tre') m' (U'', tr ++ tr' ++ tr'', tp'', tre'') m'' ->
+        coarse_execution (i :: U, tr, tp, tre) m (U'', tr ++ tr' ++ tr'', tp'', tre'') m''.
 
     (** ** Generic Properties of executions and steps *)
 
@@ -114,27 +119,23 @@ Module Executions.
         coarse_execution (U, tr, tp, tre) m (U', tr', tp', tre') m' ->
         U' = [::].
     Proof.
-      intro U.
-      induction U; intros.
-      - inversion H;
-          reflexivity.
-      - inversion H; subst.
-        + simpl in H7.
-            by exfalso.
-        + eapply IHU.
-          eapply H12.
+      intros.
+      dependent induction H.
+      - inv H. rewrite /halted_machine /halted_machine' /= in H1.
+        destruct U' eqn:?; done.
+      - eapply IHcoarse_execution; eauto.
     Qed.
 
     (** A property of steps is that any sequence of events added by
     one external step is a singleton *)
     Lemma step_ext_trace:
-      forall a U
+      forall a U U'
         (i : nat) tr tr' tp tp' tre tre'
         (m m' : mem) (ev : machine_event),
         is_external ev ->
         nth_error tr' i = Some ev ->
         MachStep ((a :: U)%SEQ, tr, tp, tre) m
-                 (U, tr ++ tr', tp', tre') m' ->
+                 (U', tr ++ tr', tp', tre') m' ->
         tr' = [:: ev].
     Proof.
       intros.
@@ -203,14 +204,10 @@ Module Executions.
       exists tr'',
         tr' = tr ++ tr''.
     Proof.
-      induction U; intros.
-      - inv Hexec. exists [::]. rewrite app_nil_r. reflexivity.
-      - inv Hexec. exists [::]. rewrite app_nil_r. reflexivity.
-        eapply step_trace_monotone in H10.
-        destruct H10 as [tr''0 H10].
-        apply app_inv_head in H10; subst.
-        eapply IHU in H11.
-        now eauto.
+      intros.
+      dependent induction Hexec.
+      - exists [::]. rewrite app_nil_r //.
+      - exists (tr'0 ++ tr''). done.
     Qed.
 
     (** Decomposing steps based on an external event*)
@@ -227,53 +224,45 @@ Module Executions.
                    (U', tr ++ tr', tp', tre') m' /\
         length tr'' = i.
     Proof.
-      intros U.
-      induction U; intros.
-      - inversion Hexec. simpl in *.
-        apply app_eq_refl_nil in H3. subst.
-        destruct i; simpl in Hi; discriminate.
-      - inversion Hexec.
-        + rewrite <- app_nil_r in H3 at 1.
-          apply app_inv_head in H3; subst.
-          rewrite nth_error_nil in Hi. discriminate.
-        + subst.
-          apply app_inv_head in H7. subst.
-          (* need a case analysis on whether it belongs on the first list or not*)
-          destruct (i < length tr'0)%nat eqn:Hlt.
+      intros.
+      (* need to carefully generalize arguments *)
+      generalize_eqs Hexec.
+      generalize dependent tr'.
+      generalize i, U, U', tr, tp, tp', tre, tre'.
+      induction Hexec; intros.
+      - subst. apply JMeq_eq in H0. inv H0.
+         (* inv x.  *)
+        apply app_eq_refl_nil in H2. subst.
+        destruct i0; simpl in Hi; discriminate.
+      - apply JMeq_eq in H0, H1. symmetry in H0, H1. inv H0. inv H1.
+        apply app_inv_head in H3. subst.
+          (* need a case analysis on whether it belongs on the first list or not. *)
+          destruct (i1 < length tr')%nat eqn:Hlt.
           * erewrite nth_error_app1 in Hi by ssromega.
-            exists (a :: U), U, tp, tre, m, [::], tp'0, tre', m'0.
-            assert (tr'0 = [:: ev]) by (eapply step_ext_trace; eauto).
-            subst.
-            split. rewrite app_nil_r.
-            econstructor.
-            split. rewrite app_nil_r.
-            simpl. eauto. admit.
-            split; simpl; eauto.
-            admit.
-            destruct i; simpl in *; auto;
-              ssromega.
-          (* * erewrite nth_error_app2 in Hi by ssromega.
-            specialize (IHU U' _ (tr ++ tr'0) tr'' tp'0 m'0 tp' m' _ Hext Hi).
-            rewrite <- app_assoc in IHU.
-            specialize (IHU H9).
-            destruct IHU as (U'' & U''' & tp'' & m'' & tr''0 & tp''' & m'''
-                             & Hexec0' & Hstep & Hexec''' & Hnth).
-            exists U'', U''', tp'', m'', (tr'0 ++ tr''0), tp''', m'''.
-            split.
-            rewrite <- app_assoc in Hexec0'.
-            econstructor; eauto.
-            split.
-            rewrite <- app_assoc.
-            repeat rewrite <- app_assoc in Hstep.
-            eauto.
-            rewrite <- app_assoc.
-            rewrite <- app_assoc in Hexec'''.
+            eexists _, _, _, _, _, [::], _, _, _.
+            assert (tr' = [:: ev]) as -> by (eapply step_ext_trace; eauto).
+            (* subst. *)
+            rewrite app_nil_r app_nil_l.
+            split. econstructor 1.
             split. eauto.
+            split; eauto.
+            destruct i; simpl in *; ssromega.
+          * erewrite nth_error_app2 in Hi by ssromega.
+            rewrite app_assoc in IHHexec.
+            specialize (IHHexec _ _ _ _ _ _ _ _ _ Hi JMeq_refl JMeq_refl).
+            destruct IHHexec as (U''' & U'''' & tp''' & tre''' & m''' & tr''0 & tp'''' & tre'''' &
+                          m'''' & Hexec0' & Hstep & Hexec''' & Hnth).
+            eexists _, _, _, _, _, _, _, _, _.
+            (* exists U'', U''', tp'', tre'', m''', (tr'0 ++ tr''0), tp''', tre''', m''''. *)
+            (* rewrite -!app_assoc in Hexec0', Hexec''', Hstep |- *. *)
+            split.
+            { econstructor. eauto. rewrite app_assoc. apply Hexec0'. }
+            rewrite -!app_assoc in Hexec''', Hstep |- *.
+            split; eauto. 
+            split; eauto.
             rewrite app_length.
-            rewrite Hnth.
             ssromega.
-    Qed. *)
-    Admitted.
+    Qed.
 
     (** Decomposing steps on any kind of event. This
     theorem is stronger than the previous one *)
@@ -289,7 +278,7 @@ Module Executions.
                    (U', tr ++ tr', tp', tre') m' /\
         length (tr'' ++ pre_ev) = i.
     Proof.
-      intros U.
+      (* intros U.
       induction U; intros.
       - inversion Hexec. simpl in *.
         apply app_eq_refl_nil in H3. subst.
@@ -334,7 +323,8 @@ Module Executions.
             rewrite app_length in Hnth.
             rewrite Hnth.
             ssromega.
-    Qed.
+    Qed. *)
+    Admitted.
 (*
     Lemma step_sched_inv:
       forall i U tp m tr U' tp' m' tr'
@@ -454,14 +444,15 @@ Module Executions.
     Existing Instance Sem.
     Context
       {initU : seq.seq nat}
-      {SemAx : CoreLanguage.SemAxioms}.
-
+      {SemAx : CoreLanguage.SemAxioms}
+      {Sched: Scheduler}
+      .
     Existing Instance dryResources.
-    Existing Instance HybridFineMachine.scheduler.
+    (* Existing Instance HybridCoarseMachine.scheduler. *)
     Existing Instance FinPool.FinThreadPool.
     Existing Instance DryHybridMachineSig.
-    Existing Instance HybridCoarseMachine.DilMem.
-    Existing Instance dryCoarseMach.
+    Existing Instance FineDilMem.
+    Existing Instance dryFineMach.
 
     Notation multi_step := (multi_step(ge:=ge)).
     Notation MachStep := (MachStep(Sem:=Sem')).
@@ -549,9 +540,10 @@ Module Executions.
       inversion Hexec; subst; simpl in *; auto; try discriminate.
       intros.
       inversion Hexec; subst; eauto.
-      eapply step_containsThread with (j := i) in H11;
+      (* eapply step_containsThread with (j := i) in H11;
         now eauto.
-    Qed.
+    Qed. *)
+    Admitted.
 
     Lemma multi_step_valid_block:
       forall U tr tp tre m U' tr' tp' tre' m' b
@@ -856,8 +848,9 @@ Module Executions.
         apply app_inv_head in H7; subst.
         eapply step_deadLocation in H10; eauto.
         eapply IHU with (tr := tr ++ tr'0); eauto.
-        erewrite <- app_assoc. now eauto.
-    Qed.
+        (* erewrite <- app_assoc. now eauto.
+    Qed. *)
+    Admitted.
 
     (** ** Properties of specific stepss and executions *)
 
@@ -1196,7 +1189,7 @@ Module Executions.
             split; assumption.
         + subst.
           apply app_inv_head in H7. subst.
-          eapply remLockRes_Freelock in H10; eauto.
+          (* eapply remLockRes_Freelock in H10; eauto.
           destruct H10 as [Hres0 HisLock0].
           specialize (IHU U' (tr ++ tr'0) tr'' tp'0 tre'0 m'0 tp' tre' m' addr Hres0 HisLock0).
           rewrite <- app_assoc in IHU.
@@ -1210,7 +1203,8 @@ Module Executions.
           eauto.
           eapply nth_error_Some.
           intros Hcontra; congruence.
-    Qed.
+    Qed. *)
+    Admitted.
 
     (** *** Properties of internal steps*)
     (** Permissions of addresses that are valid and not freeable do
@@ -1329,7 +1323,7 @@ Module Executions.
       eapply event_semantics.free_list_cases;
         now eauto.
     Qed.
-*)
+
     Lemma elim_perm_valid_block:
       forall m T m' b ofs ofs' bytes
         (Hintv: Intv.In ofs' (ofs, (ofs + Z.of_nat (length bytes))%Z))
@@ -1368,10 +1362,7 @@ Module Executions.
               left.
               pose proof (MemoryLemmas.mem_storebytes_cur _ _ _ _ _ Hstore b ofs') as Heq.
               rewrite! getCurPerm_correct in Heq.
-              rewrite Heq. split; eauto. rewrite /permission_at.
-              rewrite /Mem.perm in H.
-              destruct ((Mem.mem_access m'') !!!! b ofs' Cur) eqn:?; try done.
-              inv H; done.
+              rewrite Heq. split; eauto.
             }
             { (** If [(b,ofs')] was not freed in [T]*)
               right.
@@ -1978,16 +1969,22 @@ Module Executions.
                       | None => False
                       end))).
     Proof.
-      induction U as [|tid' U]; intros.
-      - inversion Hexec. apply app_eq_refl_nil in H3; subst.
+      intros until 1.
+      generalize_eqs Hexec.
+      intros -> -> ?.
+      apply JMeq_eq in H as ->.
+      generalize dependent tpi.
+      generalize dependent tpj.
+      generalize U, U', tr, tr', tre, tre'.
+      dependent induction Hexec; intros; subst.
+      (* induction U as [|tid' U]; intros. *)
+      - apply JMeq_eq in H0. inv H0.
+         apply app_eq_refl_nil in H2; subst.
         pf_cleanup. by congruence.
-      - inversion Hexec.
-        + apply app_eq_refl_nil in H3; subst.
-          pf_cleanup;
-            by congruence.
-        + apply app_inv_head in H7; subst.
-          assert (cnt': containsThread tp' tidn) by
-            (eapply step_containsThread with (tp := tpi); eauto).
+      -  apply JMeq_eq in H0, H1. inv H0; inv H1.
+          apply app_inv_head in H3; subst.
+          assert (cnt': containsThread tp' tidn).
+            by eapply step_containsThread with (tp := tpi); eauto.
           (** Case the permissions were changed by the inductive step. There
                 are two subcases, either they increased and hence we can apply
                 the IH again by transitivity or they decreased and
@@ -1996,9 +1993,11 @@ Module Executions.
                                      (Some Readable)) as [Hincr | Hdecr].
 
           { (** Case permissions increased*)
-            rewrite app_assoc in H11.
+            rewrite app_assoc in Hexec, IHHexec.
+            intros.
             (** And we can apply the IH*)
-            destruct (IHU _ _ _ _ _ _ _ _ _ _ _ _ _ _ H11 Hincr Hperm0)
+            destruct (IHHexec _ _ _ _ _ _ _ cntj _ cnt' JMeq_refl JMeq_refl
+             Hincr Hperm0 )
               as (tr_pre & tru & U'' & U''' & tp_pre & tre_pre & m_pre & tp_dec & tre_dec
                   & m_dec & Hexec_pre & Hstep & Hexec_post & evu & Hspec).
             destruct Hspec as [[Hin [Haction Hdead]] |
@@ -2076,15 +2075,15 @@ Module Executions.
                 now eauto.
           }
           { (** Case permissions decreased by this step. In that case we don't need the IH*)
-            clear IHU.
-            exists [::], tr'0, (tid' :: U), U, tpi, tre, mi, tp', tre'0, m'.
+            clear IHHexec.
+            eexists [::], tr'0, _, _, tpi, _, _, tp', tre'0, m'.
             repeat split.
             + rewrite app_nil_r.
               now constructor.
-            + rewrite! app_nil_r. assumption.
+            + rewrite !app_nil_r app_nil_l. apply H.
             + simpl.
               now assumption.
-            + destruct (data_permission_decrease_step _ _ _ _ _ H10 Hperm Hdecr)
+            + destruct (data_permission_decrease_step _ _ _ _ _ H Hperm Hdecr)
                 as [ev [[Hin [Haction Hdead]] | [[? Haction]
                                                 | [[? [Haction [Hthread_id Hloc]]]
                                                   | [? [Haction [Hthread_id Hrmap]]]]]]].
@@ -2092,7 +2091,7 @@ Module Executions.
                 left.
                 split. now auto.
                 split. now auto.
-                rewrite app_assoc in H11.
+                rewrite app_assoc in Hexec.
                 eapply multi_step_deadLocation; eauto.
               * subst.
                 exists ev.

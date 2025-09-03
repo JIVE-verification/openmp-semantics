@@ -245,12 +245,13 @@ Module StepLemmas.
     intros.
     inversion Hstep; simpl in *; subst;
       try (inversion Htstep; eauto); eauto.
+  (* FIXME case for pragma step *)
   Admitted.
 
   Lemma step_containsThread :
-    forall tp tp' m m' i j U tr tr' ttree ttree'
+    forall tp tp' m m' i j U U' tr tr' ttree ttree'
       (cntj: containsThread tp j)
-      (Hstep: MachStep (i :: U, tr, tp, ttree) m (U, tr', tp', ttree') m'),
+      (Hstep: MachStep (i::U, tr, tp, ttree) m (U', tr', tp', ttree') m'),
       containsThread tp' j.
   Proof.
     intros.
@@ -267,7 +268,7 @@ Module StepLemmas.
                                        (*NOTE: automation broke here*)
                  (* | [ |- FinPool.containsThread _ _ (FinPool.addThread _ _ _ _) _] => *)
                  (*   eapply FinPool.cntAdd; auto *)
-                 end.
+                 end.             
     (* eapply FinPool.cntAdd; eauto. *)
   Admitted.
 
@@ -881,9 +882,8 @@ Module StepLemmas.
     Proof.
       intros.
       rewrite! restrPermMap_Cur.
-      erewrite gsoThreadR_execution; eauto.
-    (* Qed. *)
-    Admitted.
+      split; erewrite gsoThreadR_execution; eauto.
+    Qed.
 
     (** Lifting [corestep_disjoint_val] to [internal_step]*)
     Lemma internal_step_disjoint_val :
