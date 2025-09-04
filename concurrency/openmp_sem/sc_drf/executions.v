@@ -234,7 +234,7 @@ Module Executions.
          (* inv x.  *)
         apply app_eq_refl_nil in H2. subst.
         destruct i0; simpl in Hi; discriminate.
-      - apply JMeq_eq in H0, H1. symmetry in H0, H1. inv H0. inv H1.
+      - elim H0. apply JMeq_eq in H0, H1. symmetry in H0, H1. inv H0. inv H1.
         apply app_inv_head in H3. subst.
           (* need a case analysis on whether it belongs on the first list or not. *)
           destruct (i1 < length tr')%nat eqn:Hlt.
@@ -1977,7 +1977,6 @@ Module Executions.
       generalize dependent tpj.
       generalize U, U', tr, tr', tre, tre'.
       dependent induction Hexec; intros; subst.
-      (* induction U as [|tid' U]; intros. *)
       - apply JMeq_eq in H0. inv H0.
          apply app_eq_refl_nil in H2; subst.
         pf_cleanup. by congruence.
@@ -1996,8 +1995,7 @@ Module Executions.
             rewrite app_assoc in Hexec, IHHexec.
             intros.
             (** And we can apply the IH*)
-            destruct (IHHexec _ _ _ _ _ _ _ cntj _ cnt' JMeq_refl JMeq_refl
-             Hincr Hperm0 )
+            destruct (IHHexec _ _ _ _ _ _ _ cntj _ cnt' JMeq_refl JMeq_refl Hincr Hperm0)
               as (tr_pre & tru & U'' & U''' & tp_pre & tre_pre & m_pre & tp_dec & tre_dec
                   & m_dec & Hexec_pre & Hstep & Hexec_post & evu & Hspec).
             destruct Hspec as [[Hin [Haction Hdead]] |
@@ -2302,14 +2300,18 @@ Module Executions.
                       | None => False
                       end))).
     Proof.
-      induction U as [|tid' U]; intros.
-      - inversion Hexec. apply app_eq_refl_nil in H3; subst.
+      intros until 1.
+      generalize_eqs Hexec.
+      intros -> -> ?.
+      apply JMeq_eq in H as ->.
+      generalize dependent tpi.
+      generalize dependent tpj.
+      generalize U, U', tr, tr', trei, trej.
+      induction Hexec; intros; subst.
+      - apply JMeq_eq in H0; inv H0. apply app_eq_refl_nil in H2; subst.
         pf_cleanup. by congruence.
-      - inversion Hexec.
-        + apply app_eq_refl_nil in H3; subst.
-          pf_cleanup;
-            by congruence.
-        + apply app_inv_head in H7; subst.
+      - apply JMeq_eq in H0, H1; inv H0; inv H1.
+          apply app_inv_head in H3; subst.
           assert (cnt': containsThread tp' tidn)
             by (eapply step_containsThread with (tp := tpi); eauto).
           (** Case the permissions were changed by the inductive step. There
@@ -2320,9 +2322,9 @@ Module Executions.
                                      (Some Readable)) as [Hincr | Hdecr].
 
           { (** Case permissions increased*)
-            rewrite app_assoc in H11.
+            rewrite app_assoc in IHHexec.
             (** And we can apply the IH*)
-            destruct (IHU _ _ _ _ _ _ _ _ _ _ _ _ _ _ H11 Hincr Hperm0)
+            destruct (IHHexec _ _ _ _ _ _ _ cntj _ cnt' JMeq_refl JMeq_refl Hincr Hperm0)
               as (tr_pre & tru & U'' & U''' & tp_pre & tre_pre & m_pre & tp_dec & tre_dec
                   & m_dec & Hexec_pre & Hstep & Hexec_post & evu & Hspec).
             destruct Hspec as [[Hin [Haction Hdead]] |
@@ -2400,15 +2402,15 @@ Module Executions.
                 now eauto.
           }
           { (** Case permissions decreased by this step. In that case we don't need the IH*)
-            clear IHU.
-            exists [::], tr'0, (tid' :: U), U, tpi, trei, mi, tp', tre', m'.
+            clear IHHexec.
+            eexists [::], tr'0, _, _, tpi, _, _, tp', _, m'.
             repeat split.
             + rewrite app_nil_r.
               now constructor.
-            + rewrite! app_nil_r. assumption.
+            + rewrite app_nil_r app_nil_l. apply H.
             + simpl.
               now assumption.
-            + destruct (lock_permission_decrease_step _ _ _ _ _ H10 Hperm Hdecr)
+            + destruct (lock_permission_decrease_step _ _ _ _ _ H Hperm Hdecr)
                 as [ev [[Hin [Haction Hdead]] | [[? Haction]
                                                 | [[? [Haction [Hthread_id Hloc]]]
                                                   | [? [Haction [Hthread_id Hrmap]]]]]]].
@@ -2416,7 +2418,7 @@ Module Executions.
                 left.
                 split. now auto.
                 split. now auto.
-                rewrite app_assoc in H11.
+                rewrite app_assoc in Hexec.
                 eapply multi_step_deadLocation; eauto.
               * subst.
                 exists ev.
