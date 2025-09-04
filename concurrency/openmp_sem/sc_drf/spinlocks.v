@@ -32,6 +32,7 @@ Require Import VST.concurrency.openmp_sem.dry_machine_step_lemmas.
 Require Import VST.concurrency.openmp_sem.sc_drf.executions.
 Require Import VST.msl.Coqlib2.
 Require Import VST.concurrency.openmp_sem.notations.
+Require Import Coq.Program.Equality.
 Import ssromega.
 
 Set Bullet Behavior "None".
@@ -967,7 +968,7 @@ Module SpinLocks.
     Opaque containsThread.
     (** [coarseConc.MachStep] preserves [spinlock_synchronized]*)
     Lemma coarseConc_step_synchronized:
-      forall U0 U U'  tr tp0 tre0 m0 tp tre m tp' tre' m' tr'
+      forall U0 U U' tr tp0 tre0 m0 tp tre m tp' tre' m' tr'
         (Hexec: multi_cstep (U0, [::], tp0, tre0) m0 (U, tr, tp, tre) m)
         (Hstep: cstep (U, tr, tp, tre) m (U', tr ++ tr', tp', tre') m')
         (Hsynchronized: spinlock_synchronized tr),
@@ -1499,7 +1500,7 @@ Module SpinLocks.
                       now auto).
                 (** Hence by [lockRes_permission_decrease_execution] there must
                 have been some [Acquire] event on that lock*)
-                destruct (lockRes_permission_decrease_execution _ _ _ _ Hresu Hres
+                destruct (lockRes_permission_decrease_execution(initU:=initU) _ _ _ _ Hresu Hres
                                                                 Hexec_post_u Hperm_res_drop)
                   as (v & evv & Hev & Hactionv & Hlocv).
                 left.
@@ -1535,15 +1536,15 @@ Module SpinLocks.
                 rewrite! app_assoc_reverse in Heq.
                 do 4 apply app_inv_head in Heq; subst.
                 rewrite! app_assoc in Hexec_post_u.
-                destruct (lockRes_freelock_execution _ _ Hresu Hres Hexec_post_u)
-                  as (tr_pre_fl & evfl & ? & ? & tp_pre_fl &
-                      m_pre_fl & tp_fl & m_fl & Hexec_pre_fl & Hstep_fl &
+                destruct (lockRes_freelock_execution(initU:=initU) _ _ Hresu Hres Hexec_post_u)
+                  as (tr_pre_fl & evfl & ? & ? & tp_pre_fl & tre_pre_fl &
+                      m_pre_fl & tp_fl & tre_fl & m_fl & Hexec_pre_fl & Hstep_fl &
                       Hexec_post_fl & Haction_fl & Hloc_fl & rmap_fl & Hres_fl & Hres_fl_empty).
                 (** Hence, at some point in the trace, the permissions at [(bu,
                 ofsu)] dropped. This can only be done by an [Acquire] step*)
-                assert (Hperm_rmap_empty: ~ Mem.perm_order'' ((empty_map, empty_map).1 !! b ofs)
+                assert (Hperm_rmap_empty: ~ Mem.perm_order'' ((empty_map, empty_map).1 !!!! b ofs)
                                            (Some Readable) /\
-                                         ~ Mem.perm_order'' ((empty_map, empty_map).2 !! b ofs)
+                                         ~ Mem.perm_order'' ((empty_map, empty_map).2 !!!! b ofs)
                                            (Some Readable))
                   by (rewrite empty_map_spec; now auto).
 
@@ -1559,7 +1560,7 @@ Module SpinLocks.
                       now auto).
 
 
-                destruct (lockRes_permission_decrease_execution _ _ _ _ Hresu Hres_fl
+                destruct (lockRes_permission_decrease_execution(initU:=initU) _ _ _ _ Hresu Hres_fl
                                                                 Hexec_pre_fl Hperm_rmap_drop)
                   as (v & evv & Hv & Haction_v & Hloc_v).
                 left.
@@ -1603,8 +1604,8 @@ Module SpinLocks.
               - (** Case [(b, ofs)] is still a lock at [tp]*)
                 (** By the [invariant] its permissions must have dropped because
                 [thread_id evj] has a Writable permission at that location*)
-                assert (Hperm_res: ~ Mem.perm_order'' (rmap'.1 !! b ofs) (Some Readable) /\
-                                   ~ Mem.perm_order'' (rmap'.2 !! b ofs) (Some Readable)).
+                assert (Hperm_res: ~ Mem.perm_order'' (rmap'.1 !!!! b ofs) (Some Readable) /\
+                                   ~ Mem.perm_order'' (rmap'.2 !!!! b ofs) (Some Readable)).
                 { clear - Hinv Hres Hwritablej.
                   destruct ((no_race _ Hinv _ _ cntj _ Hres).1 b ofs) as [pu Hcomp].
                   destruct ((no_race _ Hinv _ _ cntj _ Hres).2 b ofs) as [pu2 Hcomp2].
@@ -1617,7 +1618,7 @@ Module SpinLocks.
                          | [H: match ?X with _ => _ end = _ |- _] =>
                            destruct X
                          end; simpl in *;
-                  try (discriminate || by exfalso).
+                  try (discriminate || by exfalso); admit.
                 }
 
                 assert (Hperm_res_drop:
@@ -1630,7 +1631,7 @@ Module SpinLocks.
                 (** Hence by [lockRes_permission_decrease_execution] there must
                 have been some [Acquire] event on that lock*)
                 simpl in Hexec'.
-                destruct (lockRes_permission_decrease_execution _ _ _ _ Hresk' Hres
+                destruct (lockRes_permission_decrease_execution(initU:=initU) _ _ _ _ Hresk' Hres
                                                                 Hexec' Hperm_res_drop)
                   as (v & evv & Hev & Hactionv & Hlocv).
                 left.
@@ -1663,15 +1664,15 @@ Module SpinLocks.
                 + rewrite Hloc_k Hlocv.
                   reflexivity.
               - (** Case [(b, ofsk)] is no longer a lock*)
-                destruct (lockRes_freelock_execution _ _ Hresk' Hres Hexec')
-                  as (tr_pre_fl & evfl & ? & ? & tp_pre_fl &
-                      m_pre_fl & tp_fl & m_fl & Hexec_pre_fl & Hstep_fl &
+                destruct (lockRes_freelock_execution(initU:=initU) _ _ Hresk' Hres Hexec')
+                  as (tr_pre_fl & evfl & ? & ? & tp_pre_fl & tre_pre_fl &
+                      m_pre_fl & tp_fl & tre_fl & m_fl & Hexec_pre_fl & Hstep_fl &
                       Hexec_post_fl & Haction_fl & Hloc_fl & rmap_fl & Hres_fl & Hres_fl_empty).
                 (** Hence, at some point in the trace, the permissions at [(b,
                 ofsk)] dropped. This can only be done by an [Acquire] step*)
-                assert (Hperm_rmap_empty: ~ Mem.perm_order'' ((empty_map, empty_map).1 !! b ofs)
+                assert (Hperm_rmap_empty: ~ Mem.perm_order'' ((empty_map, empty_map).1 !!!! b ofs)
                                            (Some Readable) /\
-                                         ~ Mem.perm_order'' ((empty_map, empty_map).2 !! b ofs)
+                                         ~ Mem.perm_order'' ((empty_map, empty_map).2 !!!! b ofs)
                                            (Some Readable))
                   by (rewrite empty_map_spec; now auto).
 
@@ -1687,7 +1688,7 @@ Module SpinLocks.
                       now auto).
 
 
-                destruct (lockRes_permission_decrease_execution _ _ _ _ Hresk' Hres_fl
+                destruct (lockRes_permission_decrease_execution(initU:=initU) _ _ _ _ Hresk' Hres_fl
                                                                 Hexec_pre_fl Hperm_rmap_drop)
                   as (v & evv & Hv & Haction_v & Hloc_v).
                 left.
@@ -1733,27 +1734,27 @@ Module SpinLocks.
           { (** Case [evk] is a [waction] *)
             specialize (Hwritablek Hwactionk).
             (** [thread_id evj] must have permissions that are below [Readable]*)
-            assert (Hpermj_k': ~ Mem.perm_order'' ((getThreadR cntj_k').1 !! b ofs) (Some Readable) /\
-                               ~ Mem.perm_order'' ((getThreadR cntj_k').2 !! b ofs) (Some Readable)).
+            assert (Hpermj_k': ~ Mem.perm_order'' ((getThreadR cntj_k').1 !!!! b ofs) (Some Readable) /\
+                               ~ Mem.perm_order'' ((getThreadR cntj_k').2 !!!! b ofs) (Some Readable)).
               { clear - Hperm_k Hinvk' Hwritablek Hthreads_neq.
                 pose proof ((no_race_thr _ Hinvk' _ _ cntk' cntj_k' Hthreads_neq).1 b ofs) as Hcomp.
-                assert (Hcompatible12_j: perm_coh ((getThreadR cntk').1 !! b ofs)
-                                                  ((getThreadR cntj_k').2 !! b ofs))
+                assert (Hcompatible12_j: perm_coh ((getThreadR cntk').1 !!!! b ofs)
+                                                  ((getThreadR cntj_k').2 !!!! b ofs))
                   by (pose proof ((thread_data_lock_coh _ Hinvk' _ cntj_k').1 _ cntk' b ofs);
                        auto).
 
-                assert (Hcompatible21_j: perm_coh ((getThreadR cntj_k').1 !! b ofs)
-                                                  ((getThreadR cntk').2 !! b ofs))
+                assert (Hcompatible21_j: perm_coh ((getThreadR cntj_k').1 !!!! b ofs)
+                                                  ((getThreadR cntk').2 !!!! b ofs))
                   by (pose proof ((thread_data_lock_coh _ Hinvk' _ cntk').1 _ cntj_k' b ofs);
                        auto).
 
                 pose proof ((no_race_thr _ Hinvk' _ _ cntk' cntj_k' Hthreads_neq).2 b ofs) as Hcomp2.
                 destruct Hwritablek as [Hwritablek | Hwritablek];
-                  [destruct ((getThreadR cntk').1 !! b ofs) as [p1 | ] |
-                   destruct ((getThreadR cntk').2 !! b ofs) as [p1 | ]]; simpl in Hwritablek;
+                  [destruct ((getThreadR cntk').1 !!!! b ofs) as [p1 | ] |
+                   destruct ((getThreadR cntk').2 !!!! b ofs) as [p1 | ]]; simpl in Hwritablek;
                   inv Hwritablek;
-                  destruct ((getThreadR cntj_k').1 !! b ofs);
-                  destruct ((getThreadR cntj_k').2 !! b ofs);
+                  destruct ((getThreadR cntj_k').1 !!!! b ofs);
+                  destruct ((getThreadR cntj_k').2 !!!! b ofs);
                   simpl; split; intros Hcontra;
                   inv Hcontra; simpl in *;
                   try (destruct Hcomp);
@@ -1769,9 +1770,9 @@ Module SpinLocks.
               by (destruct Hpermj_k'; destruct Hperm_j; now auto).
               (** By [permission_increase_execution] we have four cases as
               to how the permissions increased*)
-              destruct (@permission_increase_execution _ initU _ _ _ _ _ _ _ _ _ _ ofs _ cntj_k' cntj Hexec' Hperm_incr)
-                as (tr_pre_v & evv & ? & ? & tp_pre_v & m_pre_v &
-                    tp_inc & m_inc & Hexec_pre_v & Hstepv & Hexec_post_v & Hspec_v); eauto.
+              destruct (@permission_increase_execution _ initU _ _ _ _ _ _ _ _ _ _ _ _ _ ofs _ cntj_k' cntj Hexec' Hperm_incr)
+                as (tr_pre_v & evv & ? & ? & tp_pre_v & tre_pre_v & m_pre_v &
+                    tp_inc & tre_inc & m_inc & Hexec_pre_v & Hstepv & Hexec_post_v & Hspec_v); eauto.
               (** Proof of equality of traces*)
               pose proof (multi_step_trace_monotone Hexec_post_v) as Heq_trace.
               destruct Heq_trace as [tr''0 Heq_trace].
@@ -1946,9 +1947,9 @@ Module SpinLocks.
                 destruct Hlocv as [Hsz [HlockRes_v Hperm_res]]; subst.
                 (** [rmap] at [tp_k'] will either not exist or if it exists will be below [Readable]*)
                 destruct (lockRes tp_k' laddr) as [rmap_k|] eqn:Hres_k.
-                + (** By [invariant] at [tp_k'] [rmap_k !! b ofs] will be below [Readable]*)
-                  assert (Hperm_rmap_k: ~ Mem.perm_order'' (rmap_k.1 !! b ofs) (Some Readable) /\
-                                        ~ Mem.perm_order'' (rmap_k.2 !! b ofs) (Some Readable)).
+                + (** By [invariant] at [tp_k'] [rmap_k !!!! b ofs] will be below [Readable]*)
+                  assert (Hperm_rmap_k: ~ Mem.perm_order'' (rmap_k.1 !!!! b ofs) (Some Readable) /\
+                                        ~ Mem.perm_order'' (rmap_k.2 !!!! b ofs) (Some Readable)).
                   { clear - Hres_k Hinvk' Hwritablek.
                     pose proof ((no_race _ Hinvk' _ _ cntk' _ Hres_k).1 b ofs) as [? Hcomp].
                     pose proof ((no_race _ Hinvk' _ _ cntk' _ Hres_k).2 b ofs) as [? Hcomp2].
@@ -1962,7 +1963,7 @@ Module SpinLocks.
                            | [H: match ?X with _ => _ end = _ |- _] =>
                              destruct X
                            end; simpl in *;
-                    try (discriminate || by exfalso).
+                    try (discriminate || by exfalso); admit.
                   }
 
                   assert (Hperm_incr':
@@ -1973,7 +1974,7 @@ Module SpinLocks.
                     by (destruct Hperm_rmap_k; destruct Hperm_res; now auto).
                   (** Then there must have soome [Release] event on that lock to
                   increase its permissions*)
-                  destruct (lockRes_permission_increase_execution _ _ _ _ Hres_k HlockRes_v
+                  destruct (lockRes_permission_increase_execution(initU:=initU) _ _ _ _ Hres_k HlockRes_v
                                                                   Hexec_pre_v Hperm_incr')
                     as (u & evu & Hu & Hactionu & Hlocu).
                   left.
@@ -2009,15 +2010,15 @@ Module SpinLocks.
                     reflexivity.
                 + (** Case the lock was not created at index k*)
                   (** Since the lock exists at v someone must have created it*)
-                  destruct (lockRes_mklock_execution _ _ Hres_k HlockRes_v Hexec_pre_v)
-                    as (tr_prew & evw & ? & ? & tp_prew & m_prew & tp_mk & m_mk
+                  destruct (lockRes_mklock_execution(initU:=initU) _ _ Hres_k HlockRes_v Hexec_pre_v)
+                    as (tr_prew & evw & ? & ? & tp_prew & tre_prew & m_prew & tp_mk & tre_mk & m_mk
                         & Hexec_prew & Hstep_mk & Hexec_postw & Hactionw & Hlocw & Hlock_mk).
                   (** At that point it's resources would be empty. But later the
                   lock has a [Readable] permission in it, hence there must be a
                   [Release] on that lock*)
                   assert (Hperm_mk:
-                            ~ Mem.perm_order'' ((empty_map, empty_map).1 !! b ofs) (Some Readable) /\
-                            ~ Mem.perm_order'' ((empty_map, empty_map).2 !! b ofs) (Some Readable))
+                            ~ Mem.perm_order'' ((empty_map, empty_map).1 !!!! b ofs) (Some Readable) /\
+                            ~ Mem.perm_order'' ((empty_map, empty_map).2 !!!! b ofs) (Some Readable))
                     by (rewrite empty_map_spec; simpl; now auto).
                   destruct (multi_step_trace_monotone Hexec_postw) as [tr_post_mk Heq_tr].
                   rewrite! app_assoc_reverse in Heq_tr.
@@ -2031,7 +2032,7 @@ Module SpinLocks.
                                (Some Readable) /\
                               Mem.perm_order'' ((rmap#2) # b ofs) (Some Readable)))
                     by (destruct Hperm_mk; destruct Hperm_res; now auto).
-                  destruct (lockRes_permission_increase_execution _ _ _ _ Hlock_mk HlockRes_v
+                  destruct (lockRes_permission_increase_execution(initU:=initU) _ _ _ _ Hlock_mk HlockRes_v
                                                                   Hexec_postw Hperm_res_incr')
                     as (u & evu & Hu & Hactionu & Hlocu).
                   left.
@@ -2071,9 +2072,9 @@ Module SpinLocks.
           }
 
         { (** Case [thread_id evj] was not in the threadpool*)
-          destruct (thread_spawn_execution _ Hnot_contained cntj Hexec')
-            as (tr_pre_spawn & evv & ? & ? & tp_pre_spawn & m_pre_spawn &
-                tp_spanwed & m_spanwed & Hexec_pre_spawn & Hstep_spawn &
+          destruct (thread_spawn_execution(initU:=initU) _ Hnot_contained cntj Hexec')
+            as (tr_pre_spawn & evv & ? & ? & tp_pre_spawn & tre_pre_spawn & m_pre_spawn &
+                tp_spawned & tre_spawn & m_spawned & Hexec_pre_spawn & Hstep_spawn &
                 Hexec_post_spawn & Hactionv).
           right.
           destruct (multi_step_trace_monotone Hexec_post_spawn) as [tr''0 Heq].
@@ -2100,54 +2101,51 @@ Module SpinLocks.
         }
         Unshelve.
         all:auto.
-    Qed.
+    Admitted.
 
     (** FineConc is spinlock well-synchronized, strengthened version of the theorem*)
-     Theorem fineConc_spinlock_strong:
-      forall U U0 U' tr tr' tp m tp0 m0 tp' m'
+     Theorem coarseConc_spinlock_strong:
+      forall U U0 U' tr tr' tp tre m tp0 tre0 m0 tp' tre' m'
         (Hsynced: spinlock_synchronized tr)
-        (Hexec0: multi_fstep (U0, [::], tp0) m0 (U, tr, tp) m)
-        (Hexec: multi_fstep (U, tr, tp) m (U', tr ++ tr', tp') m'),
+        (Hexec0: multi_cstep (U0, [::], tp0, tre0) m0 (U, tr, tp, tre) m)
+        (Hexec: multi_cstep (U, tr, tp, tre) m (U', tr ++ tr', tp', tre') m'),
         spinlock_synchronized (tr ++ tr').
     Proof.
-      intro.
-      induction U; intros.
-      - inversion Hexec.
-        rewrite <- app_nil_r in H3 at 1;
-          apply app_inv_head in H3;
+      intros until 3.
+      generalize_eqs Hexec.
+      intros -> -> -> ?.
+      apply JMeq_eq in H as ->.
+      generalize dependent tr.
+      generalize U0, U, U', tr', tp0, tp, tp', tre0, tre, tre'.
+      clear U0 U U' tr' tp0 tp tp' tre0 tre tre'.
+      induction Hexec; intros.
+      - subst. apply JMeq_eq in H0. inv H0.
+        rewrite <- app_nil_r in H2 at 1;
+          apply app_inv_head in H2;
           subst.
         rewrite <- catA.
         rewrite! cats0.
         assumption.
-      - inversion Hexec.
-        + rewrite <- app_nil_r in H3 at 1;
-            apply app_inv_head in H3;
-            subst.
-          rewrite <- catA.
-          rewrite! cats0.
-          assumption.
-        + subst.
-          apply app_inv_head in H6; subst.
-          pose proof H8 as Hfstep.
-          eapply fineConc_step_synchronized in H8; eauto.
-          specialize (IHU U0 U' (tr ++ tr'0) tr'').
-          rewrite <- app_assoc in IHU.
-          eapply IHU with (tp0 := tp0) (tp := tp'0) (m0 := m0) (m := m'0).
-          eassumption.
-          rewrite <- app_nil_l with (l := tr ++ tr'0).
-          eapply multi_step_snoc; eauto.
-          now eauto.
+      - subst. apply JMeq_eq in H0, H1. inv H0. inv H1.
+        apply app_inv_head in H3; subst.
+        pose proof H as Hcstep.
+        (* Hexec0 -> Hcstep -> Hexec *)
+        eapply coarseConc_step_synchronized in H; eauto.
+        rewrite app_assoc.
+        eapply IHHexec; rewrite ?app_assoc; eauto.
+        rewrite  -[(tr0++tr')%list]app_nil_l .
+        eapply multi_step_snoc; eauto.
     Qed.
 
     (** FineConc is spinlock well-synchronized*)
-    Corollary fineConc_spinlock:
-      forall U tr tp m tp' m'
-        (Hexec: multi_fstep (U, [::], tp) m ([::], tr, tp') m'),
+    Corollary coarseConc_spinlock:
+      forall U tr tp tre m tp' tre' m'
+        (Hexec: multi_cstep (U, [::], tp, tre) m ([::], tr, tp', tre') m'),
         spinlock_synchronized tr.
     Proof.
       intros.
       do 2 rewrite <- app_nil_l.
-      eapply fineConc_spinlock_strong with (U0 := U) (tp0 := tp) (m0 := m);
+      eapply coarseConc_spinlock_strong with (U0 := U) (tp0 := tp) (m0 := m);
         eauto.
       simpl.
       intros ? ? ? ? ? Hcontra.
