@@ -47,7 +47,8 @@ Module SpinLocks.
     Context {ge:Clight.genv}.
     Instance Sem : Semantics := HybridMachine.ClightSem ge.
     Context {SemAxioms: @SemAxioms Sem}
-            {initU: seq nat}.
+            {initU: seq nat}
+            {SemD : SemDet}.
     Variable EM: ClassicalFacts.excluded_middle.
 
     Existing Instance FinPool.FinThreadPool.
@@ -294,7 +295,7 @@ Module SpinLocks.
     Qed. *)
     Admitted.
 
-    Notation multi_cstep := (@multi_step ge FineDilMem _ DryHybridMachine.DryHybridMachineSig).
+    Notation multi_cstep := (@multi_step ge FineDilMem _ HybridFineMachine.scheduler DryHybridMachine.DryHybridMachineSig).
     (** FineConc is spinlock clean*)
     Theorem coarseConc_clean:
       forall U tr tp tre m tp' tre' m'
@@ -1015,7 +1016,7 @@ Module SpinLocks.
 
         (** To find the state that corresponds to [evk] we break the execution
           in [multi_fstep] chunks and the [FineConc.Machstep] that produces [evk]*)
-        destruct (multi_step_inv _ _ Hk Hexec)
+        destruct (multi_step_inv(initU:=initU) _ _ Hk Hexec)
           as (Uk & Uk' & tp_k & tre_k & m_k & tr0 & pre_k & post_k & tp_k' & tre_k'
               & m_k' & Hexeck & Hstepk & Hexec' & Hk_index).
         erewrite! app_nil_l in *.
@@ -1482,7 +1483,7 @@ Module SpinLocks.
                          | [H: match ?X with _ => _ end = _ |- _] =>
                            destruct X
                          end; simpl in *;
-                  try (discriminate || by exfalso).
+                  try (discriminate || by exfalso); admit.
                 }
                 pose proof (multi_step_trace_monotone Hexec_post_u) as [tr''0 Heq].
                 rewrite! app_assoc_reverse in Heq.

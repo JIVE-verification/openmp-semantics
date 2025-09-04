@@ -452,7 +452,6 @@ Module Executions.
     Existing Instance FinPool.FinThreadPool.
     Existing Instance DryHybridMachineSig.
     Existing Instance FineDilMem.
-    Existing Instance dryFineMach.
 
     Notation multi_step := (multi_step(ge:=ge)).
     Notation MachStep := (MachStep(Sem:=Sem')).
