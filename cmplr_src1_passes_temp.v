@@ -508,127 +508,141 @@ Fixpoint compiler_to_clight_function (s: statementT) : statement :=
 
 Definition __opaque_pthread_t : ident := $"_opaque_pthread_t".
 Definition __opaque_pthread_attr_t : ident := $"_opaque_pthread_attr_t".
-Definition _t'3 : ident := 130%positive.
 (*assume existence of function to create new identifiers*)
-Section Thread_spawning.
 
-Parameter gen_ident : list ident -> ident.
+Section SpawnPass.
 
-Fixpoint spawn_thread (n: nat) (idents: list ident):
-   (statementT *
-    list ident * (* all identifiers in the program, including the type name for par routine argument *)
-    ident (* type name for par routine argument *)
-   ) :=
-match n with 
-| O => (SskipT, [], $"") 
-| S k =>
-  let '(tl_stmt, idents', ident) := spawn_thread k idents in
-  let ret_id := gen_ident idents' in
-  let spawn_thread_code :=
-    SsequenceT (ScallT (Some ret_id)
-            (Evar _spawn (Tfunction
-                            (Tcons
-                              (tptr (Tfunction
+  Parameter gen_ident : list ident -> ident.
+
+  Fixpoint spawn_thread (n: nat) (idents: list ident) (rou_id rou_arg_type_id: ident):
+    (statementT *
+      list ident (* all identifiers in the program, including the type name for par routine argument *)
+    ) :=
+  match n with 
+  | O => (SskipT, []) 
+  | S k =>
+    let '(tl_stmt, idents') := spawn_thread k idents rou_id rou_arg_type_id in
+    let rou_arg_id := gen_ident idents' in
+    let spawn_ret_id := gen_ident (rou_arg_id::idents') in
+    let init_rou_arg_code := SskipT (* TODO *) in
+    let spawn_thread_code :=
+      ScallT (Some spawn_ret_id)
+              (Evar _spawn (Tfunction
+                              (Tcons
+                                (tptr (Tfunction
+                                        (Tcons (tptr tvoid) Tnil)
+                                        tint cc_default))
+                                (Tcons (tptr tvoid) Tnil)) tint
+                              cc_default))
+              ((Evar rou_id (Tfunction
                                       (Tcons (tptr tvoid) Tnil)
-                                      tint cc_default))
-                              (Tcons (tptr tvoid) Tnil)) tint
-                            cc_default))
-            ((Evar __par_routine1 (Tfunction
-                                    (Tcons (tptr tvoid) Tnil)
-                                    (tptr tvoid) cc_default)) ::
-              (Ecast
-                (Eaddrof
-                  (Evar ___par_routine1_data_2 (Tstruct __par_routine1_data_ty noattr))
-                  (tptr (Tstruct __par_routine1_data_ty noattr)))
-                (tptr tvoid)) :: nil)) tl_stmt in
-  (spawn_thread_code, ret_id::idents', $"")
-end.
-
-Definition post_spawn_thread_code: statementT := (ScallT None
-                            (Evar _join_thread (Tfunction (Tcons tint Tnil)
-                                                 tvoid cc_default))
-                            ((Etempvar _t2 tint) :: nil)).
-
-Definition gen_par_func (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction :=
-  let arg_id := gen_ident idents in
-  let params := ((arg_id, (tptr tvoid)) :: nil) in
-  let f_body := s_body in
-  makeAnnotatedFunction
-    (tptr tvoid)
-    cc_default
-    params
-    nil
-    ([(arg_id, (tptr (Tstruct arg_ty noattr)))] ++ temp_vars)
-    (* TO generate f_body of parallel routine f:
-       1. cast argument to correct type
-       2. setup shared variable: a variable `i` to be shared becomes its reference version `_i`,
-          initialized at beginning of f, and all `i`'s become `*_i`
-       3. declare private vars
-       4. declare & init shared vars
-
-       How to 
-    *)
-    f_body.
-
-(* Definition get_statement (s: statementT) *)
-Fixpoint first_pass (s: statementT) (idents: list ident) temp_vars : (statementT * (list ident) * (list annotatedFunction)) :=
- match s with
-  | SsequenceT a b => 
-          let '(stmt1, idents', pr1) := (first_pass a idents temp_vars) in 
-          let '(stmt2, idents'', pr2) := (first_pass b idents' temp_vars) in
-          ((SsequenceT stmt1 stmt2), idents'', pr1++pr2)
-  | SifthenelseT a b c =>   
-      (* FIXME fix statements below in SsequenceT style *)
-      let '(stmt1, idents', pr1) := (first_pass b idents temp_vars) in 
-      let '(stmt2, idents'', pr2) := (first_pass c idents' temp_vars) in
-              ((SifthenelseT a stmt1 stmt2), idents'', pr1++pr2)
-  | SloopT a b =>        
-      let '(stmt1, idents', pr1) := (first_pass a idents temp_vars) in 
-      let '(stmt2, idents'', pr2) := (first_pass b idents temp_vars) in
-              ((SloopT stmt1 stmt2), idents'', pr1++pr2)
-  | SlabelT a b => let '(stmt1, idents', pr1) := (first_pass b idents temp_vars) in 
-                  ((SlabelT a stmt1), idents', pr1)
-  | SpragmaT a b c s_body => match c with 
-          | OMPParallel nt pc rc =>
-             let '(new_body, idents', routine_arg_ty) := spawn_thread (nt - 1) idents in
-             (SsequenceT new_body post_spawn_thread_code,
-              idents',
-              [(gen_par_func idents' s_body routine_arg_ty temp_vars)])
-          | OMPFor i j => (s, [], [])
-          (* | OMPBarrier =>SskipT *) (*may deal with later*)
-          | _ => (SskipT, [], [])
-          end
-  |_ => (s, [], [])
+                                      (tptr tvoid) cc_default)) ::
+                (Ecast
+                  (Eaddrof
+                    (Evar rou_arg_id (Tstruct rou_arg_type_id noattr))
+                    (tptr (Tstruct rou_arg_type_id noattr)))
+                  (tptr tvoid)) :: nil) in
+      let code := SsequenceT tl_stmt spawn_thread_code in
+    (code, spawn_ret_id::rou_arg_id::idents')
   end.
-Print f_main_omp.
-(* Definition test: (statementT * (option pragma_info) * (option statementT)). 
- let x := eval cbn in ((first_pass (fn_body_annot f_main_omp_annot)[])) in refine x. Defined. *)
-(* Print test. *)
-End Thread_spawning.
-  (*Need to generate: 
-  -a new body (replaces Spragma)*)
-  (*pragma label has these options:
-  Variant pragma_label : Type :=
-  | OMPParallel (num_threads: nat)
-                (privatization_clause: privatization_clause_type)
-                (reduction_clauses: list reduction_clause_type)
-  | OMPParallelEnd
-  | OMPFor (privatization_clause: privatization_clause_type)
-           (reduction_clauses: list reduction_clause_type)
-  | OMPForEnd
-  | OMPBarrier
-.
-pthread_create has this signature: https://man7.org/linux/man-pages/man3/pthread_create.3.html
-Final argument (in c) is the variables used
+  Definition post_spawn_thread_code: statementT := (ScallT None
+    (Evar _join_thread (Tfunction (Tcons tint Tnil)
+                        tvoid cc_default))
+    ((Etempvar _t2 tint) :: nil)).
 
-TODO:
-Plan for compiler passes:
-First pass cannot lose information in pragma_info and pragma_label
-First pass: maybe it maintains the parallel pragma, maybe statementT to statementT
-(just about parallel pragma; translate SParallel to c code)
+  Definition spawn_threads_pass n idents :=
+    spawn_thread n idents (gen_ident idents) (gen_ident idents).
+    (* 1. call spawn_thread to generate n threads
+       2. init args for the main thread
+       3. main thread runs routine
+       4. joins spawned threads *)
 
-When we are sure we don't need any pragma information then we can compile to statement
+  Definition gen_par_func (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction :=
+    let arg_id := gen_ident idents in
+    let params := ((arg_id, (tptr tvoid)) :: nil) in
+    let f_body := s_body in
+    makeAnnotatedFunction
+      (tptr tvoid)
+      cc_default
+      params
+      nil
+      ([(arg_id, (tptr (Tstruct arg_ty noattr)))] ++ temp_vars)
+      (* TO generate f_body of parallel routine f:
+        1. cast argument to correct type
+        2. setup shared variable: a variable `i` to be shared becomes its reference version `_i`,
+            initialized at beginning of f, and all `i`'s become `*_i`
+        3. declare private vars
+        4. declare & init shared vars
 
-Second pass: 
+        How to 
+      *)
+      f_body.
+  (* Definition parallel_region : (statementT * (list ident) * (list annotatedFunction)) :=
+     let '(new_body, idents', routine_arg_ty) := spawn_thread (nt - 1) idents in
+              (SsequenceT new_body post_spawn_thread_code,
+                idents',
+                [(gen_par_func idents' s_body routine_arg_ty temp_vars)]). *)
 
-*)
+  (* Definition get_statement (s: statementT) *)
+  Fixpoint first_pass (s: statementT) (idents: list ident) temp_vars : (statementT * (list ident) * (list annotatedFunction)) :=
+  match s with
+    | SsequenceT a b => 
+            let '(stmt1, idents', pr1) := (first_pass a idents temp_vars) in 
+            let '(stmt2, idents'', pr2) := (first_pass b idents' temp_vars) in
+            ((SsequenceT stmt1 stmt2), idents'', pr1++pr2)
+    | SifthenelseT a b c =>   
+        (* FIXME fix statements below in SsequenceT style *)
+        let '(stmt1, idents', pr1) := (first_pass b idents temp_vars) in 
+        let '(stmt2, idents'', pr2) := (first_pass c idents' temp_vars) in
+                ((SifthenelseT a stmt1 stmt2), idents'', pr1++pr2)
+    | SloopT a b =>        
+        let '(stmt1, idents', pr1) := (first_pass a idents temp_vars) in 
+        let '(stmt2, idents'', pr2) := (first_pass b idents temp_vars) in
+                ((SloopT stmt1 stmt2), idents'', pr1++pr2)
+    | SlabelT a b => let '(stmt1, idents', pr1) := (first_pass b idents temp_vars) in 
+                    ((SlabelT a stmt1), idents', pr1)
+    | SpragmaT a b c s_body => match c with 
+            | OMPParallel nt pc rc =>
+              let '(new_body, idents') := spawn_threads_pass (nt - 1) idents in
+              (SsequenceT new_body post_spawn_thread_code,
+                idents',
+                [(gen_par_func idents' s_body (gen_ident idents') temp_vars)])
+            | OMPFor i j => (s, [], [])
+            (* | OMPBarrier =>SskipT *) (*may deal with later*)
+            | _ => (SskipT, [], [])
+            end
+    |_ => (s, [], [])
+    end.
+  (* Definition test: (statementT * (option pragma_info) * (option statementT)). 
+  let x := eval cbn in ((first_pass (fn_body_annot f_main_omp_annot)[])) in refine x. Defined. *)
+  (* Print test. *)
+
+End SpawnPass.
+
+    (*Need to generate: 
+    -a new body (replaces Spragma)*)
+    (*pragma label has these options:
+    Variant pragma_label : Type :=
+    | OMPParallel (num_threads: nat)
+                  (privatization_clause: privatization_clause_type)
+                  (reduction_clauses: list reduction_clause_type)
+    | OMPParallelEnd
+    | OMPFor (privatization_clause: privatization_clause_type)
+            (reduction_clauses: list reduction_clause_type)
+    | OMPForEnd
+    | OMPBarrier
+  .
+  pthread_create has this signature: https://man7.org/linux/man-pages/man3/pthread_create.3.html
+  Final argument (in c) is the variables used
+
+  TODO:
+  Plan for compiler passes:
+  First pass cannot lose information in pragma_info and pragma_label
+  First pass: maybe it maintains the parallel pragma, maybe statementT to statementT
+  (just about parallel pragma; translate SParallel to c code)
+
+  When we are sure we don't need any pragma information then we can compile to statement
+
+  Second pass: 
+
+  *)
