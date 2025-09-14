@@ -551,7 +551,10 @@ Section SpawnPass.
     ((Etempvar _t2 tint) :: nil)).
 
   Definition spawn_threads_pass n idents :=
-    spawn_thread n idents (gen_ident idents) (gen_ident idents).
+    match spawn_thread n idents (gen_ident idents) (gen_ident idents) with 
+      | (a,b) => (SsequenceT a post_spawn_thread_code, b)
+      end.
+  Type spawn_threads_pass.
     (* 1. call spawn_thread to generate n threads
        2. init args for the main thread
        3. main thread runs routine
