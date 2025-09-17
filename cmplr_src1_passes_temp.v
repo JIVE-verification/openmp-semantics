@@ -552,12 +552,28 @@ Section SpawnPass.
 
   Definition spawn_threads_pass n idents :=
     match spawn_thread n idents (gen_ident idents) (gen_ident idents) with 
-      | (a,b) => (SsequenceT a post_spawn_thread_code, b)
+      | (a,b) => (SsequenceT (SsequenceT (
+                    SsequenceT 
+                      a (SsequenceT (SassignT
+                (Efield
+                  (Evar ___par_routine1_data_1 (Tstruct __par_routine1_data_ty noattr))
+                  _i (tptr tint)) (Eaddrof (Evar _i tint) (tptr tint))) (SassignT
+                  (Efield
+                    (Evar ___par_routine1_data_1 (Tstruct __par_routine1_data_ty noattr))
+                    _k (tptr tint)) (Eaddrof (Evar _k tint) (tptr tint))))) (ScallT None
+                          (Evar __par_routine1 (Tfunction
+                                                 (Tcons (tptr tvoid) Tnil)
+                                                 (tptr tvoid) cc_default))
+                          ((Ecast
+                             (Eaddrof
+                               (Evar ___par_routine1_data_1 (Tstruct __par_routine1_data_ty noattr))
+                               (tptr (Tstruct __par_routine1_data_ty noattr)))
+                             (tptr tvoid)) :: nil))) post_spawn_thread_code, b)
       end.
   Type spawn_threads_pass.
     (* 1. call spawn_thread to generate n threads
-       2. init args for the main thread
-       3. main thread runs routine
+       2. init args for the main thread (line 58 in target c code)
+       3. main thread runs routine (Scall)
        4. joins spawned threads *)
 
   Definition gen_par_func (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction :=
@@ -571,7 +587,7 @@ Section SpawnPass.
       nil
       ([(arg_id, (tptr (Tstruct arg_ty noattr)))] ++ temp_vars)
       (* TO generate f_body of parallel routine f:
-        1. cast argument to correct type
+        1. cast argument to correct type (Ecast)
         2. setup shared variable: a variable `i` to be shared becomes its reference version `_i`,
             initialized at beginning of f, and all `i`'s become `*_i`
         3. declare private vars
@@ -579,7 +595,9 @@ Section SpawnPass.
 
         How to 
       *)
-      f_body.
+      (SsequenceT (SsetT (gen_ident idents)
+    (Ecast (Etempvar (gen_ident idents) (tptr tvoid))
+      (tptr (Tstruct __par_routine1_data_ty noattr)))) f_body).
   (* Definition parallel_region : (statementT * (list ident) * (list annotatedFunction)) :=
      let '(new_body, idents', routine_arg_ty) := spawn_thread (nt - 1) idents in
               (SsequenceT new_body post_spawn_thread_code,
