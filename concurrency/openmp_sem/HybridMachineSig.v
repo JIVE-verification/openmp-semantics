@@ -89,13 +89,28 @@ footprints of permissions moved  when applicable*)
   (*  move this to  VST.concurrency.common.permissions*)
   Definition delta_content := (Maps.PTree.t (Z -> option memval)).
   Inductive sync_event : Type :=
+  (* why is delta_content optional? *)
   | release : address -> option delta_content -> sync_event
   | acquire : address -> option delta_content -> sync_event
   | mklock :  address -> sync_event
   | freelock : address -> sync_event
-  | spawn : address -> option delta_content -> option delta_content -> sync_event
-  | failacq: address -> sync_event.
-  
+  (* In OpenMP, we do not allow spawn for now. *)
+  (* | spawn : address -> option delta_content -> option delta_content -> sync_event *)
+  | failacq: address -> sync_event
+  (* parent tid & delta of its permission, and spawned threads' tid & delta of their permission *)
+  | omp_par : nat -> list nat -> sync_event
+  (* TODO uncomment omp_par_end, omp_for, omp_for_end when proving omp events are well bracketed,
+     probably easier than race free and less important *)
+  (* does not synchronize anything; synchronization is done with two omp_bar events *)
+  (* | omp_par_end : sync_event *)
+  (* does not synchronize anything *)
+  (* | omp_for : sync_event *)
+  (* does not synchronize anything *)
+  (* | omp_for_end : sync_event *)
+  (* all teammates' tids and delta of their permissions *)
+  | omp_bar : list nat -> sync_event
+  .
+
   (** Machine Events *)
   Inductive machine_event : Type :=
   | internal: nat -> mem_event -> machine_event
@@ -117,7 +132,15 @@ footprints of permissions moved  when applicable*)
   | Mklock : act
   | Freelock : act
   | Failacq : act
-  | Spawn : act.
+  (* | Spawn : act *)
+  | OmpPar : act
+  | OmpParEnd : act
+  | OmpFor : act
+  | OmpForEnd : act
+  | OmpReductionBegin : act
+  | OmpReductionEnd : act
+  | OmpBar : act
+  .
 
   Definition is_internal ev :=
     match ev with
@@ -147,7 +170,14 @@ footprints of permissions moved  when applicable*)
       | mklock _ => Mklock
       | freelock _ => Freelock
       | failacq _ => Failacq
-      | spawn _ _ _ => Spawn
+      (* | spawn _ _ _ => Spawn *)
+      | omp_par _ _ => OmpPar
+      (* | omp_par_end => OmpParEnd
+      | omp_for => OmpFor
+      | omp_for_end => OmpForEnd
+      | omp_reduction_begin _ _ => OmpReductionBegin
+      | omp_reduction_end _ _ => OmpReductionEnd *)
+      | omp_bar _ => OmpBar
       end
     end.
 
@@ -165,8 +195,10 @@ footprints of permissions moved  when applicable*)
       | acquire addr _ => Some (addr, lksize.LKSIZE_nat)
       | mklock addr => Some (addr, lksize.LKSIZE_nat)
       | freelock addr => Some (addr, lksize.LKSIZE_nat)
-      | spawn addr _ _ => Some (addr, lksize.LKSIZE_nat)
+      (* | spawn addr _ _ => Some (addr, lksize.LKSIZE_nat) *)
       | failacq addr => Some (addr, lksize.LKSIZE_nat)
+      (* openmp events do not access (therefore will not compete at such) a location *)
+      | _ => None
       end
     end.
 
@@ -241,7 +273,7 @@ Module HybridMachineSig.
         ; pragmaStep:
         forall {tid0 ms m} {ttree: team_tree},
             containsThread ms tid0 -> mem_compatible ms m ->
-            thread_pool -> mem -> team_tree -> Prop
+            thread_pool -> mem -> team_tree -> list machine_event -> Prop
 
         ;  syncstep_equal_run:
              forall b i tp m cnt cmpt tp' m' tr ,
@@ -419,12 +451,12 @@ Module HybridMachineSig.
           (HschedS: schedSkip U = U'),        (*Schedule Forward*)
           machine_step U tr ms m ttree U' tr ms m ttree
     | pragma_step:
-        forall tid U ms ms' m m' tr ttree ttree'
+        forall tid U ms ms' m m' tr ttree ttree' tr'
           (HschedN: schedPeek U = Some tid)
           (Htid: containsThread ms tid)
           (Hcmpt: mem_compatible ms m)
-          (HpragmaStep: @pragmaStep _ _ _ _ ttree Htid Hcmpt ms' m' ttree'),
-          machine_step U tr ms m ttree (yield U) tr ms' (diluteMem m') ttree'.
+          (HpragmaStep: @pragmaStep _ _ _ _ ttree Htid Hcmpt ms' m' ttree' tr'),
+          machine_step U tr ms m ttree (yield U) (tr++tr') ms' (diluteMem m') ttree'.
 
     Definition MachStep (c:MachState) (m:mem)
                (c':MachState) (m':mem) :=
@@ -572,12 +604,12 @@ Module HybridMachineSig.
             (HschedS: schedSkip U = U'),        (*Schedule Forward*)
             external_step U tr ms m ttree U' tr ms m ttree
       | pragma_step':
-        forall tid U ms ms' m m' tr ttree ttree'
+        forall tid U ms ms' m m' tr ttree ttree' tr'
           (HschedN: schedPeek U = Some tid)
           (Htid: containsThread ms tid)
           (Hcmpt: mem_compatible ms m)
-          (HpragmaStep: @pragmaStep _ _ _ _ ttree Htid Hcmpt ms' m' ttree'),
-          external_step U tr ms m ttree (yield U) tr ms' (diluteMem m') ttree'.
+          (HpragmaStep: @pragmaStep _ _ _ _ ttree Htid Hcmpt ms' m' ttree' tr'),
+          external_step U tr ms m ttree (yield U) (tr ++ tr') ms' (diluteMem m') ttree'.
 
       (*Symmetry*)
       (* These steps are basically the same: *)

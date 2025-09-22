@@ -284,7 +284,7 @@ Module DryHybridMachine.
 
     Inductive pragma_step {tid0 tp m} {ttree: team_tree}
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
-      thread_pool -> mem -> (* sync_event -> *) team_tree -> Prop :=
+      thread_pool -> mem -> team_tree -> list machine_event -> Prop :=
     | step_parallel :
         forall (tp' tp'' tp''':thread_pool) c (* c' *) ge le m' m''
           ttree' ttree'' (num_threads:nat) pc rcs (new_tids: list nat) idx rvs
@@ -334,14 +334,14 @@ Module DryHybridMachine.
                 let tp' := updThreadC cnt_i (Krun c') in
                 Some (tp', m', ttree')
               ) (Some (tp'', m', ttree')) team_tids),
-              pragma_step cnt0 Hcompat tp''' m'' ttree''
+              pragma_step cnt0 Hcompat tp''' m'' ttree'' [external tid0 $ omp_par tid0 new_tids]
     (* End of a parallel region. 
        End a privatization and reduction scope, combine results to memory.
        Collect permission for threads at the end of its parallel region and transfer to parent.
        non-parent teammates are halted. *)
     | step_parallel_end :
         forall tp' tp'' tp''' m' m'' ttree' tz' ttree'' ttree''' mates_tids le_lst rvs
-        permSum cnt_parent (par_ctx:parallel_construct_context) idx
+        permSum cnt_parent (par_ctx:parallel_construct_context) idx evs
           (Hinv : invariant tp)
           (* 1. pop the team's parallel context, verify that
             every thread is stuck at the same OMPParallelEnd as recorded in the context, 
@@ -391,8 +391,11 @@ Module DryHybridMachine.
           (Hfireteam: Some ttree''' = tz ← team_fire tid0 (from_stree ttree''); to_stree tz)
           (* 4. give collected permission back to parent. *)
           (Hcnt_parent: Some cnt_parent = maybeContainsThread tp'' tid0)
-          (Htp''': tp''' = updThreadR cnt_parent permSum),
-          pragma_step cnt0 Hcompat tp''' m'' ttree'''
+          (Htp''': tp''' = updThreadR cnt_parent permSum)
+          (Hevs : evs = [external tid0 $ omp_bar mates_tids;
+                         (* FIXME add reduction related internal events; can we just quantify over these events? *)
+                         external tid0 $ omp_bar mates_tids]),
+          pragma_step cnt0 Hcompat tp''' m'' ttree''' evs
     | step_for :
       forall c c' c'' ge le le' te stmt cln lb incr 
        (team_workloads : list $ list chunk) my_workload
@@ -428,9 +431,9 @@ Module DryHybridMachine.
       (Hc'': Some c'' = transform_state_for c' my_workload cln)
       (* 4. update tp with the new c'' *)
       (Htp': tp' = updThread cnt0 (Krun c'') threadPerm),
-      pragma_step cnt0 Hcompat tp' m' ttree''
+      pragma_step cnt0 Hcompat tp' m' ttree'' []
    | step_for_end:
-    forall tp' m' m'' tz' ttree' ttree'' mates_tids le_lst work_split rvs idx
+    forall tp' m' m'' tz' ttree' ttree'' mates_tids le_lst work_split rvs idx evs
       (Hinv : invariant tp)
       (* 1. every thread must be stuck at OMPForEnd. Collect their le,
         combine reduction contribution to memory. *)
@@ -473,8 +476,11 @@ Module DryHybridMachine.
             Some (tp', m', ttree')
           | _ => None
           end)
-        (Some (tp, m', ttree')) mates_tids),
-        pragma_step cnt0 Hcompat tp' m'' ttree''
+        (Some (tp, m', ttree')) mates_tids)
+        (Hevs : evs = [external tid0 $ omp_bar mates_tids;
+                         (* FIXME add reduction related internal events; can we just quantify over these events? *)
+                         external tid0 $ omp_bar mates_tids]),
+        pragma_step cnt0 Hcompat tp' m'' ttree'' evs
     | step_barrier :
       (* if all teammates are at barrier, move them across the barrier. *)
       (* TODO need to check that team exec context is None. *)
@@ -491,7 +497,7 @@ Module DryHybridMachine.
           | _ => None
           end)
         (Some tp) mates_tids),
-        pragma_step cnt0 Hcompat tp' m ttree
+        pragma_step cnt0 Hcompat tp' m ttree [external tid0 $ omp_bar mates_tids]
     .
 
     Definition threadStep: forall {tid0 ms m},
@@ -546,7 +552,7 @@ Module DryHybridMachine.
     Definition pragmaStep:
       forall {tid0 ms m ttree},
         containsThread ms tid0 -> mem_compatible ms m ->
-        thread_pool -> mem -> team_tree -> Prop:=
+        thread_pool -> mem -> team_tree -> list machine_event -> Prop:=
       @pragma_step.
 
     Inductive ext_step {isCoarse:bool} {tid0 tp m}

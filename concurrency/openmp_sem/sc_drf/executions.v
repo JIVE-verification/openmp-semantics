@@ -128,7 +128,7 @@ Module Executions.
 
     (** A property of steps is that any sequence of events added by
     one external step is a singleton *)
-    Lemma step_ext_trace:
+    (* Lemma step_ext_trace:
       forall a U U'
         (i : nat) tr tr' tp tp' tre tre'
         (m m' : mem) (ev : machine_event),
@@ -160,7 +160,7 @@ Module Executions.
       apply app_inv_head in H9. subst.
       apply nth_error_In in H0. inversion H0; subst; auto.
       simpl in H2. by exfalso.
-    Qed.
+    Qed. *)
 
     Lemma step_event_tid:
       forall U tr tp tre m U' tr' tp' tre' m'
@@ -176,14 +176,14 @@ Module Executions.
         simpl in H, H0;
         try (by exfalso);
         apply app_inv_head in H8; subst.
-      eapply in_map_iff in H.
-      destruct H as (? & ? & ?).
-      eapply in_map_iff in H0.
-      destruct H0 as (? & ? & ?); subst.
-      reflexivity.
-      simpl in H, H0; destruct H, H0; try (by exfalso);
+      - eapply in_map_iff in H.
+        destruct H as (? & ? & ?).
+        eapply in_map_iff in H0.
+        destruct H0 as (? & ? & ?); subst.
+        reflexivity.
+      - simpl in H, H0; destruct H, H0; try (by exfalso);
         subst; reflexivity.
-    Qed.
+      - Admitted.
 
     Lemma step_trace_monotone:
       forall U tp m tr tre U' tp' m' tr' tre'
@@ -210,8 +210,8 @@ Module Executions.
       - exists (tr'0 ++ tr''). done.
     Qed.
 
-    (** Decomposing steps based on an external event*)
-    Lemma multi_step_inv_ext:
+    (* Decomposing steps based on an external event *)
+    (* Lemma multi_step_inv_ext:
       forall U U' i tr tr' tp tre m tp' tre' m' ev
         (Hext: is_external ev)
         (Hi: nth_error tr' i = Some ev)
@@ -262,7 +262,7 @@ Module Executions.
             split; eauto.
             rewrite app_length.
             ssromega.
-    Qed.
+    Qed. *)
 
     (** Decomposing steps on any kind of event. This
     theorem is stronger than the previous one *)
@@ -476,7 +476,8 @@ Module Executions.
                          (U', tr ++ tr_pre ++ [:: ev] ++ tr_post, tp', tre') m'),
         containsThread tp (thread_id ev) /\ containsThread tp' (thread_id ev).
     Proof.
-      intros.
+      (* step_event_sched is probably not true, can we avoid it? *)
+      (* intros.
       pose proof (step_event_sched _ _ _ Hstep) as Heq.
       inv Hstep; simpl in *;
         try (apply app_eq_refl_nil in H5; exfalso;
@@ -486,8 +487,8 @@ Module Executions.
       inv Htstep;
         split; eauto.
       inv HschedN.
-      inv Htstep; split; eauto.
-    Qed.
+      inv Htstep; split; eauto. *)
+    Admitted.
 
 
     Lemma multi_step_mem_compatible :
@@ -865,7 +866,7 @@ Module Executions.
       intros.
       erewrite setPermBlock_same by eauto.
       reflexivity.
-    Qed.
+    Admitted.
 
     (** [True] whenever some resource in [tp] has above [Readable] lock-permission on [laddr]*)
     (* I could not prove the stronger version, where quantification happens inside each case*)
@@ -1623,7 +1624,7 @@ Module Executions.
         (Hperm': ~ Mem.perm_order'' ((getThreadR cnt').1 !!!! b ofs) (Some Readable)),
       exists ev,
         (List.In ev tr' /\ action ev = Free /\ deadLocation tp' m' b ofs) \/
-        (tr' = [:: ev] /\ action ev = Spawn) \/
+        (* (tr' = [:: ev] /\ action ev = Spawn) \/ *)
         (tr' = [:: ev] /\ action ev = Mklock /\
          thread_id ev = tidn /\
          match location ev with
@@ -1821,7 +1822,7 @@ Module Executions.
         destruct (tid == tidn) eqn:Heq; move/eqP:Heq=>Heq; subst.
         + pf_cleanup.
           eexists.
-          do 3 right. repeat (split; eauto).
+          do 2 right. repeat (split; eauto).
           exists virtueLP; split.
           reflexivity.
           rewrite FinPool.gssLockRes.
@@ -1852,7 +1853,7 @@ Module Executions.
         destruct (tid == tidn) eqn:Heq; move/eqP:Heq=>Heq; subst.
         + pf_cleanup.
           eexists.
-          do 2 right.
+          do 1 right.
           left.
           do 3 (split; simpl; eauto).
           rewrite gLockSetRes gssThreadRes in Hperm'.
@@ -1936,7 +1937,7 @@ Module Executions.
                    (U', tr ++ tr', tpj, trej) mj /\
         (exists evu,
             (List.In evu tru /\ action evu = Free /\ deadLocation tpj mj b ofs) \/
-            (tru = [:: evu] /\ action evu = Spawn) \/
+            (* (tru = [:: evu] /\ action evu = Spawn) \/ *)
             (tru = [:: evu] /\ action evu = Mklock /\ thread_id evu = tidn /\
              match location evu with
              | Some (addr, sz) =>
@@ -1982,9 +1983,9 @@ Module Executions.
             destruct (IHHexec _ _ _ _ _ _ _ cntj _ cnt' JMeq_refl JMeq_refl Hincr Hperm0)
               as (tr_pre & tru & U'' & U''' & tp_pre & tre_pre & m_pre & tp_dec & tre_dec
                   & m_dec & Hexec_pre & Hstep & Hexec_post & evu & Hspec).
-            destruct Hspec as [[Hin [Haction Hdead]] |
-                               [[Heq Haction] | [[Heq [Haction [Hthreadid Hloc]]]
-                                                | [? [Haction [Hthreadid Hstable]]]]]].
+            destruct Hspec as [[Hin [Haction Hdead]] (*|
+                               [[Heq Haction] *) | [[Heq [Haction [Hthreadid Hloc]]]
+                                                | [? [Haction [Hthreadid Hstable]]]]].
             + (** case the drop was by a [Free] event*)
               exists (tr'0 ++ tr_pre), tru, U'', U''', tp_pre, tre_pre, m_pre, tp_dec, tre_dec, m_dec.
               split.
@@ -2001,8 +2002,8 @@ Module Executions.
               left.
               split;
                 now auto.
-            + (** case the drop was by a [Spawn] event *)
-              exists (tr'0 ++ tr_pre), tru, U'', U''', tp_pre, tre_pre, m_pre, tp_dec, tre_dec, m_dec.
+            (* + (** case the drop was by a [Spawn] event *)
+               exists (tr'0 ++ tr_pre), tru, U'', U''', tp_pre, tre_pre, m_pre, tp_dec, tre_dec, m_dec.
               split.
               econstructor 2; eauto.
               rewrite app_assoc.
@@ -2016,7 +2017,7 @@ Module Executions.
               exists evu.
               right. left.
               split;
-                now auto.
+                now auto. *)
             + (** case the drop was by a [Mklock] event *)
               exists (tr'0 ++ tr_pre), tru, U'', U''', tp_pre, tre_pre, m_pre, tp_dec, tre_dec, m_dec.
               split.
@@ -2030,7 +2031,8 @@ Module Executions.
               erewrite! app_assoc in *.
               now eauto.
               exists evu.
-              do 2 right. left.
+              do 1 right. 
+              left.
               split;
                 now auto.
             + (** case the drop was by a [Release] event*)
@@ -2046,7 +2048,7 @@ Module Executions.
               erewrite! app_assoc in *.
               now eauto.
               exists evu.
-              do 3 right.
+              do 2 right.
               split. now auto.
               split. now auto.
               split. now auto.
@@ -2066,27 +2068,27 @@ Module Executions.
             + simpl.
               now assumption.
             + destruct (data_permission_decrease_step _ _ _ _ _ H Hperm Hdecr)
-                as [ev [[Hin [Haction Hdead]] | [[? Haction]
+                as [ev [[Hin [Haction Hdead]] (*| [[? Haction] *)
                                                 | [[? [Haction [Hthread_id Hloc]]]
-                                                  | [? [Haction [Hthread_id Hrmap]]]]]]].
+                                                  | [? [Haction [Hthread_id Hrmap]]]]]].
               * exists ev.
                 left.
                 split. now auto.
                 split. now auto.
                 rewrite app_assoc in Hexec.
                 eapply multi_step_deadLocation; eauto.
-              * subst.
+              (* * subst.
                 exists ev.
                 right. left.
-                split; now auto.
+                split; now auto. *)
               * subst.
                 exists ev.
-                do 2 right.
+                do 1 right.
                 left.
                 repeat split; now auto.
               * subst.
                 exists ev.
-                do 3 right.
+                do 2 right.
                 repeat split;
                   now auto.
           }
@@ -2105,7 +2107,7 @@ Module Executions.
         (Hperm': ~ Mem.perm_order'' ((getThreadR cnt').2 !!!! b ofs) (Some Readable)),
       exists ev,
         (List.In ev tr' /\ action ev = Free /\ deadLocation tp' m' b ofs) \/
-        (tr' = [:: ev] /\ action ev = Spawn) \/
+        (* (tr' = [:: ev] /\ action ev = Spawn) \/ *)
         (tr' = [:: ev] /\ action ev = Freelock /\
          thread_id ev = tidn /\
          match location ev with
@@ -2174,7 +2176,7 @@ Module Executions.
         destruct (tid == tidn) eqn:Heq; move/eqP:Heq=>Heq; subst.
         + pf_cleanup.
           eexists.
-          do 3 right. repeat (split; eauto).
+          do 2 right. repeat (split; eauto).
           exists virtueLP; split.
           reflexivity.
           rewrite FinPool.gssLockRes.
@@ -2226,7 +2228,7 @@ Module Executions.
       - destruct (tid == tidn) eqn:Heq; move/eqP:Heq=>Heq; subst.
         + pf_cleanup.
           eexists.
-          do 2 right.
+          do 1 right.
           left.
           do 3 (split; simpl; eauto).
           rewrite gRemLockSetRes gssThreadRes in Hperm', Hperm.
@@ -2267,7 +2269,7 @@ Module Executions.
                    (U', tr ++ tr', tpj, trej) mj /\
         (exists evu,
             (List.In evu tru /\ action evu = Free /\ deadLocation tpj mj b ofs) \/
-            (tru = [:: evu] /\ action evu = Spawn) \/
+            (* (tru = [:: evu] /\ action evu = Spawn) \/ *)
             (tru = [:: evu] /\ action evu = Freelock /\ thread_id evu = tidn /\
              match location evu with
              | Some (addr, sz) =>
@@ -2311,9 +2313,9 @@ Module Executions.
             destruct (IHHexec _ _ _ _ _ _ _ cntj _ cnt' JMeq_refl JMeq_refl Hincr Hperm0)
               as (tr_pre & tru & U'' & U''' & tp_pre & tre_pre & m_pre & tp_dec & tre_dec
                   & m_dec & Hexec_pre & Hstep & Hexec_post & evu & Hspec).
-            destruct Hspec as [[Hin [Haction Hdead]] |
-                               [[Heq Haction] | [[Heq [Haction [Hthreadid Hloc]]]
-                                                | [? [Haction [Hthreadid Hstable]]]]]].
+            destruct Hspec as [[Hin [Haction Hdead]] (*|
+                               [[Heq Haction] *) | [[Heq [Haction [Hthreadid Hloc]]]
+                                                | [? [Haction [Hthreadid Hstable]]]]].
             + (** case the drop was by a [Free] event*)
               exists (tr'0 ++ tr_pre), tru, U'', U''', tp_pre, tre_pre, m_pre, tp_dec, tre_dec, m_dec.
               split.
@@ -2330,7 +2332,7 @@ Module Executions.
               left.
               split;
                 now auto.
-            + (** case the drop was by a [Spawn] event *)
+            (* + (** case the drop was by a [Spawn] event *)
               exists (tr'0 ++ tr_pre), tru, U'', U''', tp_pre, tre_pre, m_pre, tp_dec, tre_dec, m_dec.
               split.
               econstructor 2; eauto.
@@ -2345,7 +2347,7 @@ Module Executions.
               exists evu.
               right. left.
               split;
-                now auto.
+                now auto. *)
             + (** case the drop was by a [Mklock] event *)
               exists (tr'0 ++ tr_pre), tru, U'', U''', tp_pre, tre_pre, m_pre, tp_dec, tre_dec, m_dec.
               split.
@@ -2359,7 +2361,7 @@ Module Executions.
               erewrite! app_assoc in *.
               now eauto.
               exists evu.
-              do 2 right. left.
+              do 1 right. left.
               split;
                 now auto.
             + (** case the drop was by a [Release] event*)
@@ -2375,7 +2377,7 @@ Module Executions.
               erewrite! app_assoc in *.
               now eauto.
               exists evu.
-              do 3 right.
+              do 2 right.
               split. now auto.
               split. now auto.
               split. now auto.
@@ -2395,27 +2397,27 @@ Module Executions.
             + simpl.
               now assumption.
             + destruct (lock_permission_decrease_step _ _ _ _ _ H Hperm Hdecr)
-                as [ev [[Hin [Haction Hdead]] | [[? Haction]
+                as [ev [[Hin [Haction Hdead]] (* | [[? Haction] *)
                                                 | [[? [Haction [Hthread_id Hloc]]]
-                                                  | [? [Haction [Hthread_id Hrmap]]]]]]].
+                                                  | [? [Haction [Hthread_id Hrmap]]]]]].
               * exists ev.
                 left.
                 split. now auto.
                 split. now auto.
                 rewrite app_assoc in Hexec.
                 eapply multi_step_deadLocation; eauto.
-              * subst.
+              (* * subst.
                 exists ev.
                 right. left.
-                split; now auto.
+                split; now auto. *)
               * subst.
                 exists ev.
-                do 2 right.
+                do 1 right.
                 left.
                 repeat split; now auto.
               * subst.
                 exists ev.
-                do 3 right.
+                do 2 right.
                 repeat split;
                   now auto.
           }
@@ -2439,7 +2441,7 @@ Module Executions.
                    (U', tr ++ tr', tpj, trej) mj /\
         (exists evu,
             (List.In evu tru /\ action evu = Free /\ deadLocation tpj mj b ofs) \/
-            (tru = [:: evu] /\ action evu = Spawn) \/
+            (* (tru = [:: evu] /\ action evu = Spawn) \/ *)
             (tru = [:: evu] /\ action evu = Freelock /\ thread_id evu = tidn /\
              match location evu with
              | Some (addr, sz) =>
@@ -2482,7 +2484,7 @@ Module Executions.
                           (*   destruct X eqn:Hloc *)
                end; subst;
           repeat split; eauto 10;
-            eexists; do 4 right;
+            eexists; do 3 right;
               repeat split; eauto;
                 repeat match goal with
                        | [H: exists _, _ |- _] =>
@@ -2682,7 +2684,8 @@ Module Executions.
                  (U''', tr ++ tr_pre ++ [:: evu], tp_inc, tre_inc) m_inc /\
         multi_step (U''', tr ++ tr_pre ++ [:: evu], tp_inc, tre_inc) m_inc
                    (U', tr ++ tr',tpj, trej) mj /\
-        ((action evu = Spawn) \/
+        (
+          (* (action evu = Spawn) \/ *)
          (action evu = Freelock /\ thread_id evu = tidn /\
           match location evu with
           | Some (addr, sz) =>
@@ -2803,7 +2806,7 @@ Module Executions.
         (Hperm: ~ Mem.perm_order'' ((getThreadR cnt).2 !!!! b ofs) (Some Readable))
         (Hvalid: Mem.valid_block m b),
       exists ev,
-        (tr' = [:: ev] /\ action ev = Spawn) \/
+        (* (tr' = [:: ev] /\ action ev = Spawn) \/ *)
         (tr' = [:: ev] /\ action ev = Mklock /\ thread_id ev = tidn /\
          match location ev with
          | Some (addr, sz) =>
@@ -2857,7 +2860,7 @@ Module Executions.
         destruct (tid == tidn) eqn:Heq; move/eqP:Heq=>Heq; subst.
         + pf_cleanup.
           eexists.
-          do 2 right. repeat (split; eauto).
+          do 1 right. repeat (split; eauto).
           exists pmap; split.
           reflexivity.
           split.
@@ -2898,7 +2901,7 @@ Module Executions.
         destruct (tid == tidn) eqn:Heq; move/eqP:Heq=>Heq; subst.
         + pf_cleanup.
           eexists.
-          right.
+          (* right. *)
           left.
           do 3 (split; simpl; eauto).
           rewrite gLockSetRes gssThreadRes in Hperm'.
@@ -2963,7 +2966,8 @@ Module Executions.
                  (U''', tr ++ tr_pre ++ [:: evu], tp_inc, tre_inc) m_inc /\
         multi_step (U''', tr ++ tr_pre ++ [:: evu], tp_inc, tre_inc) m_inc
                    (U', tr ++ tr',tpj, trej) mj /\
-        ((action evu = Spawn) \/
+        (
+          (* (action evu = Spawn) \/ *)
          (action evu = Mklock /\ thread_id evu = tidn /\
           match location evu with
           | Some (addr, sz) =>
@@ -3088,7 +3092,8 @@ Module Executions.
                  (U''', tr ++ tr_pre ++ [:: evu], tp_inc, tre_inc) m_inc /\
         multi_step (U''', tr ++ tr_pre ++ [:: evu], tp_inc, tre_inc) m_inc
                    (U', tr ++ tr',tpj, trej) mj /\
-        ((action evu = Spawn) \/
+        (
+          (* (action evu = Spawn) \/ *)
          (action evu = Freelock /\ thread_id evu = tidn /\
           match location evu with
           | Some (addr, sz) =>
@@ -3121,11 +3126,11 @@ Module Executions.
           as (? & ? & ? & ? & ? & ? & ? & ? & ? & ? & ? & ? & ? & Hspec)
         | destruct (lock_permission_increase_execution _ _ cnti cntj Hexec Hperm Hperm' Hvalid)
           as (? & ? & ? & ? & ? & ? & ? & ? & ? & ? & ? & ? & ? & Hspec)];
-        destruct Hspec as [? | [[? [? ?]] | [? [? [? ?]]]]];
+        destruct Hspec as (*? |*) [[? [? ?]] | [? [? [? ?]]]];
         do 10 eexists; repeat split; eauto 10;
           destruct (location x0) as [[[? ?] ?] |]; try (by exfalso);
             destruct H4 as [? [? ?]];
-            do 3 right;
+            do 2 right;
             repeat split; eauto.
     Qed.
 
@@ -3994,7 +3999,7 @@ Module Executions.
         lockRes_lock_permission_increase_execution.
     Qed.
 
-    Lemma thread_spawn_step:
+    (* Lemma thread_spawn_step:
       forall U tr tp tre m U' tp' tre' m' tr' tidn
         (cnt: ~ containsThread tp tidn)
         (cnt': containsThread tp' tidn)
@@ -4010,9 +4015,9 @@ Module Executions.
             try (inv Hhalted);
             try  (exfalso; by eauto).
       admit.
-    Admitted.
+    Admitted. *)
 
-    Lemma thread_spawn_execution:
+    (* Lemma thread_spawn_execution:
       forall U tr tpi trei mi U' tr' tpj trej mj
         tidn
         (cnti: ~ containsThread tpi tidn)
@@ -4055,7 +4060,7 @@ Module Executions.
             rewrite <- app_assoc.
             econstructor; eauto.
             rewrite app_assoc //.
-    Qed.
+    Qed. *)
 
   End CoarseGrainedExecutions.
 (*

@@ -1,7 +1,7 @@
 From Coq Require Import String ZArith.
 From compcert Require Import Clight Cop Clightdefs AST Integers Ctypes Values Memory Globalenvs.
 From compcert Require Import -(notations) lib.Maps.
-From VST.concurrency.openmp_sem Require Import notations clight_fun.
+From VST.concurrency.openmp_sem Require Import notations clight_fun event_semantics.
 From RecordUpdate Require Import RecordSet.
 Import RecordSetNotations.
 

@@ -34,6 +34,7 @@ Require Import VST.msl.Coqlib2.
 Require Import VST.concurrency.openmp_sem.notations.
 Require Import Coq.Program.Equality.
 Import ssromega.
+(* Require Import stdpp.base. *)
 
 Set Bullet Behavior "None".
 Set Bullet Behavior "Strict Subproofs".
@@ -45,10 +46,11 @@ Module SpinLocks.
   Import Events.
 
   Section SpinLocks.
+
     Context {ge:Clight.genv}.
     Instance Sem : Semantics := HybridMachine.ClightSem ge.
     Context {SemAxioms: @SemAxioms Sem}
-            {initU: seq nat}
+            {initU: list nat}
             {SemD : SemDet}.
     Variable EM: ClassicalFacts.excluded_middle.
 
@@ -79,8 +81,10 @@ Module SpinLocks.
       | external _ (acquire _ _) => Some Acquire
       | external _ (mklock _) => Some Mklock
       | external _ (freelock _) => Some Freelock
-      | external _ (spawn _ _ _) => None
+      (* | external _ (spawn _ _ _) => None *)
       | external _ (failacq _) => Some Failacq
+      | external _ (omp_par _ _) => None
+      | external _ (omp_bar _) => None
       end.
 
     (** Two events compete if they access the same location, from a
@@ -108,12 +112,26 @@ Module SpinLocks.
       (is_internal ev1 ->
        is_internal ev2 ->
        (** if they are both internal, at least one of them is a Write*)
-       action ev1 = Write \/ action ev2 =  Write) /\
+       action ev1 = Write \/ action ev2 = Write) /\
       (is_external ev1 \/ is_external ev2 ->
        (** if one of them is external, then at least one of them is a Mklock or
        freelock*)
        action ev1 = Mklock \/ action ev1 = Freelock
        \/ action ev2 = Mklock \/ action ev2 = Freelock).
+
+    (* happens-before relation *)
+    Inductive hb (tr: trace) i j : Prop :=
+    | hb_prog_order a b (Hlt : i < j) (Ha : nth_error tr i = Some a) (Hb : nth_error tr j = Some b)
+      (Hthread : thread_id a = thread_id b)
+    | hb_locking a b (Hlt : i < j) (Ha : nth_error tr i = Some a) (Hb : nth_error tr j = Some b)
+      (Hlocks: action a = Release /\ action b = Acquire /\ location a = location b)
+    (* event of a spawned thread happens after the spawn event *)
+    | hb_par_begin a b tids (Hlt : i < j) (Ha : nth_error tr i = Some a) (Hb : nth_error tr j = Some b)
+      (Hpar_begin: a = external i (omp_par i tids)) (Hb_in_tids : In j tids)
+    (* one of a, b is an omp_bar event and both are in the same team *)
+    | hb_bar a b tids (Hlt : i < j) (Ha : nth_error tr i = Some a) (Hb : nth_error tr j = Some b)
+      (Hbar: exists c k, (c=a \/ c=b) /\ c = external k (omp_bar tids)) (In_i:  In i tids) (In_j: In j tids)
+    | hb_trans k (Hhb1 : hb tr i k) (Hhb2 : hb tr k j).
 
     (** Spinlock well synchronized*)
     Definition spinlock_synchronized (tr : event_trace) :=
@@ -121,18 +139,11 @@ Module SpinLocks.
         i < j ->
         List.nth_error tr i = Some ev1 ->
         List.nth_error tr j = Some ev2 ->
+        (* for any competing events ev1, ev2, there must be one of these between them: *)
         competes ev1 ev2 ->
-        (exists u v eu ev,
-          i <= u < v /\ v < j /\
-          List.nth_error tr u = Some eu /\
-          List.nth_error tr v = Some ev /\
-          action eu = Release /\ action ev = Acquire /\
-          location eu = location ev) \/
-        (** we also consider spawn operations to be synchronizing*)
-        (exists u eu,
-            i < u < j /\
-            List.nth_error tr u = Some eu /\
-            action eu = Spawn).
+        (** there is a release/acquire event at the same location (i.e. same lock) *)
+        hb tr i j
+    .      
 
     (** Spinlock clean*)
     Definition spinlock_clean (tr : event_trace) :=
@@ -190,7 +201,8 @@ Module SpinLocks.
       { (** Case of internal step *)
         (*NOTE: Should spinlock clean also mention free and alloc?*)
         inversion Htstep; subst.
-        apply app_inv_head in H6.
+(*
+        apply app_inv_head in H5.
         apply ev_step_elim in Hcorestep.
         (*destruct Hcorestep as [Helim _].*)rename Hcorestep into Helim.
         apply list_append_map_inv in H6.
@@ -217,7 +229,7 @@ Module SpinLocks.
         assert (Hperm:
                   Mem.perm_order'' (Some Nonempty)
                                    ((getThreadR Htid).1 !!!! bl ofs')).
-        (* { destruct HisLock as [[j [cntj Hperm]] | [laddr [rmap [Hres Hperm]]]].
+         { destruct HisLock as [[j [cntj Hperm]] | [laddr [rmap [Hres Hperm]]]].
           - pose proof ((thread_data_lock_coh _ Hinv _ cntj).1 _ Htid bl ofs') as Hcoh.
             clear - Hcoh Hperm.
             simpl in Hperm.
@@ -298,7 +310,7 @@ Module SpinLocks.
 
     Notation multi_cstep := (@multi_step ge FineDilMem _ HybridFineMachine.scheduler DryHybridMachine.DryHybridMachineSig).
     (** FineConc is spinlock clean*)
-    Theorem coarseConc_clean:
+    (* Theorem coarseConc_clean:
       forall U tr tp tre m tp' tre' m'
         (Hexec: multi_cstep (U, [::], tp, tre) m ([::], tr, tp', tre') m'),
         spinlock_clean tr.
@@ -396,7 +408,7 @@ Module SpinLocks.
       eapply fstep_clean; eauto.
       destruct evi; simpl in *; auto. destruct m0; discriminate.
     Qed. *)
-    Admitted.
+    Admitted. *)
 
     Lemma maximal_competing:
       forall i j tr evi evj
@@ -490,6 +502,9 @@ Module SpinLocks.
         try (destruct (Hext ltac:(auto 2)) as [? | [? | [? | ?]]]; discriminate).
     Qed.
 
+    (* if a step emits a waction, then the permission at the location must be writable;
+       furthermore, either the permission continues to be valid or the location is freed.
+       Similar to a caction. *)
     Lemma cstep_ev_perm:
       forall U tr tp tre m U' tr_pre tr_post tp' tre' m' ev
         (Hstep: cstep (U, tr, tp, tre) m (U', tr ++ tr_pre ++ [:: ev] ++ tr_post, tp', tre') m'),
@@ -916,7 +931,8 @@ Module SpinLocks.
           unfold permission_at, Mem.perm in *; now auto.
         + destruct l; simpl in H1;
             now inv H1.
-    Qed.
+      - (* pragma steps *)
+    Admitted.
 
     Lemma waction_caction:
       forall ev,
@@ -964,8 +980,33 @@ Module SpinLocks.
           do 3 eexists; reflexivity.
     Qed.
 
+    Lemma hb_app tr tr' i j :
+      hb tr i j ->
+      hb (tr ++ tr') i j.
+    Proof.
+      induction 1.
+      - econstructor 1; eauto;
+        apply nth_error_app_inv; eauto.
+      - econstructor 2; eauto;
+        apply nth_error_app_inv; eauto.
+      - econstructor 3; eauto;
+        apply nth_error_app_inv; eauto.
+      - econstructor 4; eauto;
+        apply nth_error_app_inv; eauto.
+      - econstructor 5; eauto.
+    Qed.
+
+    (* strong_synchronized:
+      if (Hstep: csteps st st')
+      and a thread in st' has perm p1 of (b,ofs)
+      and another thread in st' has perm p2 of (b,ofs)
+      and (Hconflict_p conflict p1 p2), ???
+
+      attempt 2:
+      2 steps that involve conflicting permissions of (b,ofs) has hb *)
 
     Opaque containsThread.
+
     (** [coarseConc.MachStep] preserves [spinlock_synchronized]*)
     Lemma coarseConc_step_synchronized:
       forall U0 U U' tr tp0 tre0 m0 tp tre m tp' tre' m' tr'
@@ -985,15 +1026,8 @@ Module SpinLocks.
         eapply nth_error_app1 with (l' := tr') in Hi_in_tr.
         rewrite Hi_in_tr in Hi.
         rewrite Hj_in_tr in Hj.
-        destruct (Hsynchronized i j evi evj Hneq Hi Hj Hcompetes) as
-            [[u [v [eu [ev [Horder [Hevu [Hevv [Hactu [Hactv Hloc]]]]]]]]] |
-             [u [eu [Horder [Hu Hactu]]]]].
-        + left.
-          exists u, v, eu, ev.
-          repeat (split; eauto using nth_error_app_inv).
-        + right.
-          exists u, eu.
-          repeat (split; eauto using nth_error_app_inv).
+        specialize (Hsynchronized i j evi evj Hneq Hi Hj Hcompetes).
+        by apply hb_app.
       - (** Hence [evj] is in [tr'] *)
         (** By [maximal_competing] there must exist some maximal event [ek] s.t.
         it competes with [evj]*)
@@ -1013,7 +1047,7 @@ Module SpinLocks.
           rewrite /MachStep /=.
           apply Hstep.
         }
-        erewrite nth_error_app1 in Hk by assumption.
+        erewrite nth_error_app1 in Hk by assumption. 
 
         (** To find the state that corresponds to [evk] we break the execution
           in [multi_fstep] chunks and the [FineConc.Machstep] that produces [evk]*)
@@ -1309,7 +1343,7 @@ Module SpinLocks.
             destruct (permission_decrease_execution(initU:=initU) _ b ofs cntk' cntk'_j Hexec' Hperm_k_drop)
               as (tr_pre_u & tru & ? & ? & tp_pre_u & tre_pre_u & m_pre_u &
                   tp_dec & tre_dec & m_dec & Hexec_pre_u & Hstepu & Hexec_post_u & evu & Hspec_u).
-            destruct Hspec_u as [Hfreed | [Hspawned | [Hfreelock | [Hmklock | Hrelease]]]].
+            destruct Hspec_u as [Hfreed | (*[Hspawned |*) [Hfreelock | [Hmklock | Hrelease]](*]*)].
               { (** Case permissions dropped by a [Free] event. This leads to a
                   contradiction because it would be a [deadLocation] *)
                 destruct Hfreed as (HIn & HFree & Hdead).
@@ -1320,7 +1354,7 @@ Module SpinLocks.
                   destruct Hperm_j;
                     by exfalso.
             }
-            { (** Case permissions were dropped by a spawn event - we are done*)
+            (* { (** Case permissions were dropped by a spawn event - we are done*)
               destruct Hspawned as (? & Hactionu).
               subst.
               right.
@@ -1352,7 +1386,7 @@ Module SpinLocks.
                 rewrite <- nth_error_app.
                 reflexivity.
                 assumption.
-            }
+            } *)
              { (** Case permissions were dropped by a [Freelock] event - this leads to
                   a contradiction by the fact that [evu] will compete with [evj], while
                   [evk] is the maximal competing event *)
@@ -1503,7 +1537,21 @@ Module SpinLocks.
                 destruct (lockRes_permission_decrease_execution(initU:=initU) _ _ _ _ Hresu Hres
                                                                 Hexec_post_u Hperm_res_drop)
                   as (v & evv & Hev & Hactionv & Hlocv).
-                left.
+
+                (* FIXME proof starts here *)
+                (* left. *)
+                (* sketch of hb:
+                  evi -> evk (by Hsyncrhonized)
+                  evk -> evv (evk=Release, evu=Acquire at same location)
+                  evv -> evj? *)
+
+                assert (thread_id evv = thread_id evj).
+                {
+                    
+                }
+                eapply (@hb_trans _ _ _ (length ((tr0 ++ pre_k ++ [:: evk] ++ post_k) ++ tr_pre_u))).
+                constructor.
+                
                 exists (length ((tr0 ++ pre_k ++ [:: evk] ++ post_k) ++ tr_pre_u)%list),
                 (length ((tr0 ++ pre_k ++ [:: evk] ++ post_k) ++ tr_pre_u ++ [:: evu])%list + v),
                 evu, evv.
@@ -1563,7 +1611,7 @@ Module SpinLocks.
                 destruct (lockRes_permission_decrease_execution(initU:=initU) _ _ _ _ Hresu Hres_fl
                                                                 Hexec_pre_fl Hperm_rmap_drop)
                   as (v & evv & Hv & Haction_v & Hloc_v).
-                left.
+                (* left. *)
                 pose proof (multi_step_trace_monotone Hexec_post_fl) as [tr_fl' Heq].
                 rewrite! app_assoc_reverse in Heq.
                 do 6 apply app_inv_head in Heq; subst.
@@ -1634,7 +1682,7 @@ Module SpinLocks.
                 destruct (lockRes_permission_decrease_execution(initU:=initU) _ _ _ _ Hresk' Hres
                                                                 Hexec' Hperm_res_drop)
                   as (v & evv & Hev & Hactionv & Hlocv).
-                left.
+                (* left. *)
                 simpl.
                 exists (length tr0),
                 (length ((tr0 ++ [:: evk]))%list + v),
@@ -1691,7 +1739,7 @@ Module SpinLocks.
                 destruct (lockRes_permission_decrease_execution(initU:=initU) _ _ _ _ Hresk' Hres_fl
                                                                 Hexec_pre_fl Hperm_rmap_drop)
                   as (v & evv & Hv & Haction_v & Hloc_v).
-                left.
+                (* left. *)
                 pose proof (multi_step_trace_monotone Hexec_post_fl) as [tr_fl' Heq].
                 rewrite! app_assoc_reverse in Heq.
                 simpl in Heq.
@@ -1779,10 +1827,10 @@ Module SpinLocks.
               erewrite! app_assoc_reverse in Heq_trace.
               do 4 apply app_inv_head in Heq_trace. subst.
               rewrite! app_assoc.
-              destruct Hspec_v as [Hactionv | [[Hactionv [Hthreadv Hloc_v]] |
+              destruct Hspec_v as (* [Hactionv | *) [[Hactionv [Hthreadv Hloc_v]] |
                                                [[Hactionv [Hthreadv Hloc_v]] |
-                                                [Hactionv [Hthreadv Hrmap]]]]].
-              - (** Case permissions were increased by a [Spawn] event*)
+                                                [Hactionv [Hthreadv Hrmap]]]](*]*).
+              (* - (** Case permissions were increased by a [Spawn] event*)
                 right.
                 exists (length (((((tr0 ++ pre_k) ++ [:: evk]) ++ post_k) ++ tr_pre_v)%list)), evv.
                 repeat split.
@@ -1800,7 +1848,7 @@ Module SpinLocks.
                   do 2 rewrite <- app_assoc.
                   rewrite <- nth_error_app.
                   now reflexivity.
-                + assumption.
+                + assumption. *)
               - (** Case permissions were increased by a [Freelock] event*)
                 (** In this case, [evv] competes with [evk] and by the premise
                 that [tr] is [spinlock_synchronized] there will be a [Spawn] or
@@ -1842,10 +1890,11 @@ Module SpinLocks.
                                                             rewrite <- addn0;
                                                             rewrite <- app_assoc;
                                                             rewrite <- nth_error_app; reflexivity) Hcompeteskj)
-                  as [[r [a [er [ea [Horderra [Horderra' [Hevr [Heva [Hactr [Hacta Hloc_ra]]]]]]]]]] |
-                      [s [es [Horders [Hs Hacts]]]]].
+                  as 
+                  (*[*)[r [a [er [ea [Horderra [Horderra' [Hevr [Heva [Hactr [Hacta Hloc_ra]]]]]]]]]] (*|
+                      [s [es [Horders [Hs Hacts]]]]]*).
                 + (** Case there is a [Release]-[Acquire] pair between k and v*)
-                  left.
+                  (* left. *)
                   exists r, a, er, ea.
                   repeat split; auto.
                   * clear - Horderra Horderra' Horder.
@@ -1861,7 +1910,7 @@ Module SpinLocks.
                       eassumption.
                   * eapply nth_error_app_inv;
                       eassumption.
-                + (** Case there is a [Spawn] event between k and v*)
+                (* + (** Case there is a [Spawn] event between k and v*)
                   right.
                   exists s, es.
                   repeat split; auto.
@@ -1870,7 +1919,7 @@ Module SpinLocks.
                     erewrite! app_length in *.
                     ssromega.
                   * eapply nth_error_app_inv;
-                    now eauto.
+                    now eauto. *)
               - (** Case permissions were increased by a [Mklock] event*)
                 (** In this case, [evv] competes with [evk] and by the premise
                 that [tr] is [spinlock_synchronized] there will be a [Spawn] or
@@ -1912,10 +1961,10 @@ Module SpinLocks.
                                                              rewrite <- addn0;
                                                              rewrite <- app_assoc;
                                                              rewrite <- nth_error_app; reflexivity) Hcompeteskj)
-                  as [[r [a [er [ea [Horderra [Horderra' [Hevr [Heva [Hactr [Hacta Hloc_ra]]]]]]]]]] |
-                      [s [es [Horders [Hs Hacts]]]]].
+                  as (*[*)[r [a [er [ea [Horderra [Horderra' [Hevr [Heva [Hactr [Hacta Hloc_ra]]]]]]]]]] (*|
+                      [s [es [Horders [Hs Hacts]]]]]*).
                 + (** Case there is a [Release]-[Acquire] pair between k and v*)
-                  left.
+                  (* left. *)
                   exists r, a, er, ea.
                   repeat split; auto.
                   * clear - Horderra Horderra' Horder.
@@ -1931,7 +1980,7 @@ Module SpinLocks.
                     eassumption.
                   * eapply nth_error_app_inv;
                     eassumption.
-                + (** Case there is a [Spawn] event between k and v*)
+                (*+ (** Case there is a [Spawn] event between k and v*)
                   right.
                   exists s, es.
                   repeat split; auto.
@@ -1940,7 +1989,7 @@ Module SpinLocks.
                     erewrite! app_length in *.
                     ssromega.
                   * eapply nth_error_app_inv;
-                    now eauto.
+                    now eauto. *)
               - (** Case permissions were increased by an [Acquire] event*)
                 destruct Hrmap as [rmap Hlocv].
                 destruct (location evv) as [[laddr sz]|] eqn: Hloc_v; try (by exfalso).
@@ -1977,7 +2026,7 @@ Module SpinLocks.
                   destruct (lockRes_permission_increase_execution(initU:=initU) _ _ _ _ Hres_k HlockRes_v
                                                                   Hexec_pre_v Hperm_incr')
                     as (u & evu & Hu & Hactionu & Hlocu).
-                  left.
+                  (* left. *)
                   exists ((length (((tr0 ++ pre_k) ++ [:: evk]) ++ post_k)%list) + u),
                   (length ((((tr0 ++ pre_k) ++ [:: evk]) ++ post_k) ++ tr_pre_v)%list), evu, evv.
                   repeat split.
@@ -2035,7 +2084,7 @@ Module SpinLocks.
                   destruct (lockRes_permission_increase_execution(initU:=initU) _ _ _ _ Hlock_mk HlockRes_v
                                                                   Hexec_postw Hperm_res_incr')
                     as (u & evu & Hu & Hactionu & Hlocu).
-                  left.
+                  (* left. *)
                   exists (length (((((tr0 ++ pre_k) ++ [:: evk]) ++ post_k) ++ tr_prew ++ [:: evw])%list) + u),
                   (length ((((tr0 ++ pre_k) ++ [:: evk]) ++ post_k) ++ tr_prew ++ [:: evw] ++
                                                                     tr_post_mk) %list), evu, evv.
