@@ -579,6 +579,23 @@ Section OpenMPThreads.
       Definition team_mates_tids tid (t:team_tree) : option $ list nat :=
         ref ← lookup_tid tid t;
         Some $ map (λ x, x.data.(t_tid)) (ref.before ++ ref.this :: ref.after).
+      
+      Lemma in_team_mates_tids tid ttree mates_tids :
+        Some mates_tids = team_mates_tids tid ttree ->
+        In tid mates_tids.
+      Proof.
+        intros. rewrite /team_mates_tids in H.
+        destruct (lookup_tid tid ttree) eqn:?; last done.
+        simpl in H. injection H; intros; subst.
+        apply stree_lookup_correct in Heqo as [? ?].
+        rewrite /is_leaf_tid /is_leaf_tid' in H0.
+        rewrite map_app map_cons.
+        apply in_or_app. right.
+        destruct (t .this) eqn:?; try done.
+        destruct l; try done.
+        simpl. left.
+        destruct (is_tid_dec tid o); done.
+      Qed.
 
       Definition mate_pop_thread_context (tree: team_tree) (tid: nat) : option (team_tree * thread_context) :=
         ref ← lookup_tid tid tree;

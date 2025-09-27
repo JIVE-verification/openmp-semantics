@@ -143,7 +143,9 @@ Module SpinLocks.
         competes ev1 ev2 ->
         (** there is a release/acquire event at the same location (i.e. same lock) *)
         hb tr i j
-    .      
+    .
+
+    (* sync events with competing permissions synchronizes *)
 
     (** Spinlock clean*)
     Definition spinlock_clean (tr : event_trace) :=

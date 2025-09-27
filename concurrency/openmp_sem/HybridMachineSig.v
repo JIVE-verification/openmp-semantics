@@ -181,6 +181,36 @@ footprints of permissions moved  when applicable*)
       end
     end.
 
+  Definition spawned_tids ev : option (list nat) :=
+    match ev with
+    | external _ sev =>
+      match sev with
+      | omp_par _ stids => Some stids
+      | _ => None
+      end
+    | _ => None
+    end.
+
+  Definition parent_tid ev : option nat :=
+    match ev with
+    | external _ sev =>
+      match sev with
+      | omp_par ptid _ => Some ptid
+      | _ => None
+      end
+    | _ => None
+    end.
+  
+  Definition bar_tids ev : option (list nat) :=
+    match ev with
+    | external _ sev =>
+      match sev with
+      | omp_bar tids => Some tids
+      | _ => None
+      end
+    | _ => None
+    end.
+
   Definition location ev : option (address*nat) :=
     match ev with
     | internal _ mev =>

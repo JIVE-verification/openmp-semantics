@@ -2496,11 +2496,22 @@ Module Executions.
                   eexists; repeat split; eauto.
     Qed.
 
-(*
+    #[export] Instance In_dec (t:nat) l: base.Decision (In t l).
+    Proof.
+      induction l; unfold base.Decision; simpl.
+      - right. done.
+      - destruct (Nat.eq_dec t a); subst.
+        + left. now left.
+        + destruct IHl as [Hind | Hind].
+          * left. now right.
+          * right. intros [Hc | Hc]; auto.
+   Qed.
+
     (** Permission increase: A thread can increase its data permissions on a valid block by:
 - If it is spawned
 - A freelock operation, turning a lock into data.
-- Acquiring a lock *)
+- Acquiring a lock
+- Barrier *)
     Lemma data_permission_increase_step:
       forall U tr tp tre m U' tp' tre' m' tr' tidn b ofs
         (cnt: containsThread tp tidn)
@@ -2510,7 +2521,6 @@ Module Executions.
         (Hperm: ~ Mem.perm_order'' ((getThreadR cnt).1 !!!! b ofs) (Some Readable))
         (Hvalid: Mem.valid_block m b),
       exists ev,
-        (tr' = [:: ev] /\ action ev = Spawn) \/
         (tr' = [:: ev] /\ action ev = Freelock /\ thread_id ev = tidn /\
          match location ev with
          | Some (addr, sz) =>
@@ -2521,22 +2531,28 @@ Module Executions.
          end) \/
         (tr' = [:: ev] /\ action ev = Acquire /\ thread_id ev = tidn /\
          exists rmap, match location ev with
-                 | Some (laddr, sz) =>
-                   sz = lksize.LKSIZE_nat /\
-                   lockRes tp laddr = Some rmap /\
-                   Mem.perm_order'' (rmap.1 !!!! b ofs) (Some Readable)
-                 | None => False
-                 end).
+            | Some (laddr, sz) =>
+              sz = lksize.LKSIZE_nat /\
+              lockRes tp laddr = Some rmap /\
+              Mem.perm_order'' (rmap.1 !!!! b ofs) (Some Readable)
+            | None => False
+            end) \/
+        (tr' = [:: ev] /\ action ev = OmpPar) \/
+        (In ev tr' /\ match ev with
+            | external _ (omp_bar tids) =>
+              In (thread_id ev) tids
+            | _ => False
+        end).
     Proof.
       intros.
       inv Hstep; simpl in *;
-        try apply app_eq_refl_nil in H4;
+        try apply app_eq_refl_nil in H5;
         try inv Htstep;
         destruct U; inversion HschedN; subst; pf_cleanup;
           try (inv Hhalted);
           try (rewrite gThreadCR in Hperm');
           try  (exfalso; by eauto);
-          try (apply app_inv_head in H5; subst).
+          try (apply app_inv_head in H6; subst).
        - (** initial core case *)
         exfalso.
         inv Hperm0.
@@ -2552,7 +2568,7 @@ Module Executions.
           unfold permission_at in Heq.
           erewrite <- Hsame in Hperm'.
           eapply Hperm.
-          rewrite <- Heq.
+          setoid_rewrite <- Heq.
           now auto.
           now auto.
         + erewrite gsoThreadRes with (cntj := cnt) in Hperm' by eauto.
@@ -2571,6 +2587,7 @@ Module Executions.
           now auto.
           rewrite restrPermMap_Cur.
           destruct ((getThreadR cnt).1 !!!! b ofs) as [p|] eqn: Heq;
+          rewrite Heq;
             try (destruct p); simpl in Hperm; simpl;
               eauto using perm_order.
               exfalso; now eauto using perm_order.
@@ -2583,7 +2600,7 @@ Module Executions.
         destruct (tid == tidn) eqn:Heq; move/eqP:Heq=>Heq; subst.
         + pf_cleanup.
           eexists.
-          do 2 right. repeat (split; eauto).
+          right; left. repeat (split; eauto).
           exists pmap; split.
           reflexivity.
           split.
@@ -2610,7 +2627,7 @@ Module Executions.
           now eauto.
         + rewrite gLockSetRes gsoThreadRes in Hperm';
             now auto.
-      - (** thread spawn*)
+      (* - (** thread spawn*)
         destruct (tid == tidn) eqn:Heq; move/eqP:Heq=>Heq; subst.
         + pf_cleanup.
           eexists.
@@ -2619,7 +2636,7 @@ Module Executions.
             now eauto.
         + exfalso.
           rewrite gsoAddRes gsoThreadRes in Hperm';
-            now eauto.
+            now eauto. *)
       - (** MkLock *)
         exfalso.
         destruct (tid == tidn) eqn:Heq; move/eqP:Heq=>Heq; subst.
@@ -2648,7 +2665,7 @@ Module Executions.
         destruct (tid == tidn) eqn:Heq; move/eqP:Heq=>Heq; subst.
         + pf_cleanup.
           eexists.
-          right; left.
+          left.
           do 3 split; simpl; eauto.
           rewrite gRemLockSetRes gssThreadRes in Hperm'.
           destruct (Pos.eq_dec b b0).
@@ -2666,9 +2683,39 @@ Module Executions.
             now auto.
         + exfalso.
           rewrite gRemLockSetRes gsoThreadRes in Hperm';
-            now eauto.
+            now eauto. 
+      - (* pragma step *)
+        destruct HpragmaStep.
+        (* par_begin, cnt is contradiciton because tid not in tp  *)
+        + eexists.
+          do 2 right; left.
+          split; first reflexivity; simpl. done.
+        (* par_end *)
+        + eexists.
+          do 3 right.
+          split.
+          ++ subst. rewrite /In. left. done.
+          ++ simpl. eapply team_dyn.in_team_mates_tids. eauto.
+        (* omp_for, permission does not change so Hperm' contradicts Hperm, similar to corestep *)
+        + exfalso. destruct (tid == tidn) eqn:Heq; move/eqP:Heq=>Heq; subst.
+          ++ pf_cleanup.
+            rewrite gssThreadRes // in Hperm'.
+          ++ (** case it was another thread that stepped *)
+            pf_cleanup.
+            rewrite gsoThreadRes // in Hperm'.
+        (* omp_for_end, similar to par_end *)
+        +  eexists.
+          do 3 right.
+          split.
+          ++ subst. rewrite /In. left. done.
+          ++ simpl. eapply team_dyn.in_team_mates_tids. eauto.
+        + eexists.
+          do 3 right.
+          split.
+          ++ subst. rewrite /In. left. done.
+          ++ simpl. eapply team_dyn.in_team_mates_tids. eauto.
     Qed.
-*)
+
     Lemma data_permission_increase_execution:
       forall U tr tpi trei mi U' tr' tpj trej mj
         b ofs tidn

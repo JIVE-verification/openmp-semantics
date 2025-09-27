@@ -282,6 +282,25 @@ Module DryHybridMachine.
       simpl. rewrite /fmap. destruct tis; simpl. Lia.lia. Defined.
     Next Obligation. apply measure_wf. apply lt_wf. Defined.
 
+    (* check that all threads in mates_tids are at pragma_label `pl` and pragma index idx,
+       and collect their local env *)
+    Definition all_at_pragma tp mates_tids (pl:pragma_label) idx : option $ list env :=
+      foldr (λ tid maybe_le_lst,
+            le_lst ← maybe_le_lst;
+            cnt_i ← maybeContainsThread tp tid;
+            (* every thread is blocked at pragma_label *)
+            c ← Kblocked_at $ getThreadC cnt_i;
+            match at_pragma semSem c with
+            | Some (idx', pl) =>
+              if decide (idx' = idx) then
+              (* appends the local environment *)
+              le ← get_le c;
+              Some $ le::le_lst
+              else None
+            | _ => None
+            end)
+            (Some []) mates_tids.
+
     Inductive pragma_step {tid0 tp m} {ttree: team_tree}
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
       thread_pool -> mem -> team_tree -> list machine_event -> Prop :=
@@ -350,21 +369,7 @@ Module DryHybridMachine.
           (Hpar_ctx: Some (tz', par_ctx) = team_pop_parallel_context (from_stree ttree) tid0)
           (Httree': Some ttree' = to_stree tz')
           (Hpar_ctx_check: par_ctx = (idx, team_ctx_parallel rvs))
-          (Hall_teammates_at_parallel_end: Some le_lst = foldr (λ tid maybe_le_lst,
-            le_lst ← maybe_le_lst;
-            cnt_i ← maybeContainsThread tp tid;
-            (* every thread is blocked at OMPParallelEnd *)
-            c ← Kblocked_at $ getThreadC cnt_i;
-            match at_pragma semSem c with
-            | Some (idx', OMPParallelEnd) =>
-              if decide (idx' = idx) then
-              (* appends the local environment *)
-              le ← get_le c;
-              Some $ le::le_lst
-              else None
-            | _ => None
-            end)
-            (Some []) mates_tids)
+          (Hall_teammates_at_parallel_end: Some le_lst = all_at_pragma tp mates_tids OMPParallelEnd idx)
           (Hreduce: Some m' = rvs_combine_reduction_contribs rvs le_lst ce m)
           (* 2. iterate through kids, pop thread context, end privatization *)
           (Hend_pr: Some (permSum, tp', m'', ttree'') = foldr (λ tid maybe_permSum_tp_m_tz,
@@ -440,22 +445,7 @@ Module DryHybridMachine.
       (Htm_exec_ctx: Some (tz', (idx, team_ctx_for work_split rvs)) = team_pop_team_exec_context (from_stree ttree) tid0)
       (Httree': Some ttree' = to_stree tz')
       (Hmates_tids: Some mates_tids = team_mates_tids tid0 ttree)
-      (Hall_teammates_at_for_end: Some le_lst = foldr (λ tid maybe_le_lst,
-        le_lst ← maybe_le_lst;
-        cnt_i ← maybeContainsThread tp tid;
-        (* every thread is blocked at OMPForEnd *)
-        c ← Kblocked_at $ getThreadC cnt_i;
-        match at_pragma semSem c with
-        | Some (idx', OMPForEnd) =>
-          (* collect their local environments *)
-          if decide (idx' = idx) then
-            (* appends the local environment *)
-            le ← get_le c;
-            Some $ le::le_lst
-          else None
-        | _ => None
-        end)
-        (Some []) mates_tids)
+      (Hall_teammates_at_for_end: Some le_lst = all_at_pragma tp mates_tids OMPForEnd idx)
       (*   load reduction variable name, initial value and reduction operation. *)
       (Hreduce: Some m' = rvs_combine_reduction_contribs rvs le_lst ce m)
       (* 2. pop thread ctx. End priv. *)
