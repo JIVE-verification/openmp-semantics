@@ -575,7 +575,15 @@ Section SpawnPass.
        2. init args for the main thread (line 58 in target c code)
        3. main thread runs routine (Scall)
        4. joins spawned threads *)
-
+  Fixpoint set_up_idents (idents: list ident) : (statementT) :=
+  match idents with 
+   | [] => SskipT
+   | ident::rest_of_list => (SsequenceT (SsetT (gen_ident idents)
+      (Efield
+        (Ederef
+          (Etempvar (gen_ident idents) (tptr (Tstruct __par_routine1_data_ty noattr)))
+          (Tstruct __par_routine1_data_ty noattr)) (gen_ident idents) (tptr tint))) (set_up_idents rest_of_list))
+   end.
   Definition gen_par_func (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction :=
     let arg_id := gen_ident idents in
     let params := ((arg_id, (tptr tvoid)) :: nil) in
@@ -595,9 +603,9 @@ Section SpawnPass.
 
         How to 
       *)
-      (SsequenceT (SsetT (gen_ident idents)
+    (SsequenceT (SsequenceT (SsetT (gen_ident idents)
     (Ecast (Etempvar (gen_ident idents) (tptr tvoid))
-      (tptr (Tstruct __par_routine1_data_ty noattr)))) f_body).
+      (tptr (Tstruct __par_routine1_data_ty noattr)))) f_body)(set_up_idents idents)).
   (* Definition parallel_region : (statementT * (list ident) * (list annotatedFunction)) :=
      let '(new_body, idents', routine_arg_ty) := spawn_thread (nt - 1) idents in
               (SsequenceT new_body post_spawn_thread_code,
