@@ -304,16 +304,17 @@ Definition f_main_omp :=
 Record pragma_info : Type := mk_pragma_info {
   shared_vars : list (ident * type);
   private_vars : list (ident * type);
-  reduction_vars : list (ident * type)
+  reduction_vars : list (ident * type);
+  local_vars: list (ident * type )
 }.
 
 Definition empty_pragma_info : pragma_info :=
-  mk_pragma_info [] [] [].
+  mk_pragma_info [] [] [] [].
 
 (* private variables are those specified in the private clause plus those in the reduction  *)
 Definition parallel_info_spec (par_info: pragma_info) vars: Prop :=
   match par_info with
-  | mk_pragma_info ss ps rs => 
+  | mk_pragma_info ss ps rs _ => 
       ss ⊆ vars ∧ ps ⊆ vars ∧ rs ⊆ vars ∧
       list_disjoint ss ps ∧ list_disjoint ss rs ∧ list_disjoint ps rs
   end.
@@ -423,7 +424,7 @@ Definition parallel_body_T : statementT :=
           (SassignT (Evar _k tint)
             (Econst_int (Int.repr 1) tint))))).
 
-Definition full_pragma_info : pragma_info := mk_pragma_info [(_i, tint)] [(_j, tint)] [(_k, tint)].
+Definition full_pragma_info : pragma_info := mk_pragma_info [(_i, tint)] [(_j, tint)] [(_k, tint)] [].
 Definition f_main_omp_annot :=
   {|
     fn_return_annot := tint;
@@ -584,22 +585,24 @@ Section SpawnPass.
           (Etempvar (gen_ident idents) (tptr (Tstruct __par_routine1_data_ty noattr)))
           (Tstruct __par_routine1_data_ty noattr)) (gen_ident idents) (tptr tint))) (set_up_idents rest_of_list))
    end.
-  Definition gen_par_func (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction :=
+  Definition gen_par_func (p: pragma_info) (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction :=
     let arg_id := gen_ident idents in
     let params := ((arg_id, (tptr tvoid)) :: nil) in
     let f_body := s_body in
     makeAnnotatedFunction
       (tptr tvoid)
       cc_default
-      params
-      nil
+      (params)
+      (private_vars p) 
       ([(arg_id, (tptr (Tstruct arg_ty noattr)))] ++ temp_vars)
       (* TO generate f_body of parallel routine f:
         1. cast argument to correct type (Ecast)
         2. setup shared variable: a variable `i` to be shared becomes its reference version `_i`,
             initialized at beginning of f, and all `i`'s become `*_i`
+            (*we'll need to track the connection between i and _i; maybe a map? or a list of pairs?*)
         3. declare private vars
         4. declare & init shared vars
+        (*use pragma info to determine type of variable*)
 
         How to 
       *)
@@ -635,7 +638,7 @@ Section SpawnPass.
               let '(new_body, idents') := spawn_threads_pass (nt - 1) idents in
               (SsequenceT new_body post_spawn_thread_code,
                 idents',
-                [(gen_par_func idents' s_body (gen_ident idents') temp_vars)])
+                [(gen_par_func a idents' s_body (gen_ident idents') temp_vars)])
             | OMPFor i j => (s, [], [])
             (* | OMPBarrier =>SskipT *) (*may deal with later*)
             | _ => (SskipT, [], [])
