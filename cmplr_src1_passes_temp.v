@@ -585,6 +585,14 @@ Section SpawnPass.
           (Etempvar (gen_ident idents) (tptr (Tstruct __par_routine1_data_ty noattr)))
           (Tstruct __par_routine1_data_ty noattr)) (gen_ident idents) (tptr tint))) (set_up_idents rest_of_list))
    end.
+
+  Fixpoint init_shared_variables (shared_vars: list (ident * type)) (idents: list ident) : statementT :=
+  match shared_vars with
+  | [] => SskipT
+  | (identifier, identType)::rest_of_list => SsequenceT (SassignT (Ederef (Etempvar (gen_ident idents) (tptr tint)) tint)
+            (Ebinop Oadd (Ederef (Etempvar (gen_ident idents) (tptr tint)) tint)
+              (Econst_int (Int.repr 1) tint) tint)) (init_shared_variables rest_of_list idents)
+  end.
   Definition gen_par_func (p: pragma_info) (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction :=
     let arg_id := gen_ident idents in
     let params := ((arg_id, (tptr tvoid)) :: nil) in
@@ -606,9 +614,9 @@ Section SpawnPass.
 
         How to 
       *)
-    (SsequenceT (SsequenceT (SsetT (gen_ident idents)
+   (SsequenceT (SsequenceT (SsequenceT (SsetT (gen_ident idents)
     (Ecast (Etempvar (gen_ident idents) (tptr tvoid))
-      (tptr (Tstruct __par_routine1_data_ty noattr)))) f_body)(set_up_idents idents)).
+      (tptr (Tstruct __par_routine1_data_ty noattr)))) f_body) (set_up_idents idents)) (init_shared_variables (shared_vars p) idents)).
   (* Definition parallel_region : (statementT * (list ident) * (list annotatedFunction)) :=
      let '(new_body, idents', routine_arg_ty) := spawn_thread (nt - 1) idents in
               (SsequenceT new_body post_spawn_thread_code,
