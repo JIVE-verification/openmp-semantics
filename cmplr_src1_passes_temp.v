@@ -424,7 +424,7 @@ Definition parallel_body_T : statementT :=
           (SassignT (Evar _k tint)
             (Econst_int (Int.repr 1) tint))))).
 
-Definition full_pragma_info : pragma_info := mk_pragma_info [(_i, tint)] [(_j, tint)] [(_k, tint)] [].
+Definition full_pragma_info : pragma_info := mk_pragma_info [(_i, tint)] [(_j, tint)] [(_k, tint)] [(_l, tint)].
 Definition f_main_omp_annot :=
   {|
     fn_return_annot := tint;
