@@ -583,7 +583,7 @@ Section SpawnPass.
       (Efield
         (Ederef
           (Etempvar (gen_ident idents) (tptr (Tstruct __par_routine1_data_ty noattr)))
-          (Tstruct __par_routine1_data_ty noattr)) (gen_ident idents) (tptr tint))) (set_up_idents rest_of_list))
+          (Tstruct __par_routine1_data_ty noattr)) ident (tptr tint))) (set_up_idents rest_of_list))
    end.
 
   Fixpoint init_shared_variables (shared_vars: list (ident * type)) (idents: list ident) : statementT :=
