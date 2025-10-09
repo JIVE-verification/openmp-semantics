@@ -576,26 +576,22 @@ Section SpawnPass.
        2. init args for the main thread (line 58 in target c code)
        3. main thread runs routine (Scall)
        4. joins spawned threads *)
-  Fixpoint set_up_idents (idents: list ident) : (statementT) :=
+
+  
+  (* set up shared vars *)
+  Fixpoint set_up_shared_vars (idents: list (ident * type)) (var_ident: ident): (statementT) :=
   match idents with 
    | [] => SskipT
-   | ident::rest_of_list => (SsequenceT (SsetT (gen_ident idents)
+   | item::rest_of_list => (SsequenceT (SsetT (gen_ident (fst (split rest_of_list)))
       (Efield
         (Ederef
-          (Etempvar (gen_ident idents) (tptr (Tstruct __par_routine1_data_ty noattr)))
-          (Tstruct __par_routine1_data_ty noattr)) ident (tptr tint))) (set_up_idents rest_of_list))
+          (Etempvar var_ident (tptr (Tstruct __par_routine1_data_ty noattr))) (*revise to remove second gen_ident and use arg_id*)
+          (Tstruct __par_routine1_data_ty noattr)) (fst item) (tptr tint))) (set_up_shared_vars rest_of_list var_ident))
    end.
-
-  Fixpoint init_shared_variables (shared_vars: list (ident * type)) (idents: list ident) : statementT :=
-  match shared_vars with
-  | [] => SskipT
-  | (identifier, identType)::rest_of_list => 
-  SsequenceT ((SsetT (gen_ident idents)
-      (Efield
-        (Ederef
-          (Etempvar (gen_ident idents) (tptr (Tstruct __par_routine1_data_ty noattr)))
-          (Tstruct __par_routine1_data_ty noattr)) identifier (tptr tint)))) (init_shared_variables rest_of_list idents)
-  end.
+  
+    (* idents = [r]
+    real_r :=  ( *arg_id).r; // equiv to arg_id->r *)
+    
   Definition gen_par_func (p: pragma_info) (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction :=
     let arg_id := gen_ident idents in
     let params := ((arg_id, (tptr tvoid)) :: nil) in
@@ -605,21 +601,21 @@ Section SpawnPass.
       cc_default
       (params)
       (private_vars p) 
-      ([(arg_id, (tptr (Tstruct arg_ty noattr)))] ++ temp_vars)
+      ([(arg_id, (tptr (Tstruct arg_ty noattr)))] ++ temp_vars ++ local_vars p)
       (* TO generate f_body of parallel routine f:
-        1. cast argument to correct type (Ecast)
+        1. cast argument to correct type (Ecast) (line 22 in tgt1.c)
         2. setup shared variable: a variable `i` to be shared becomes its reference version `_i`,
-            initialized at beginning of f, and all `i`'s become `*_i`
+            initialized at beginning of f, and all `i`'s become `*_i` (line 24 )
             (*we'll need to track the connection between i and _i; maybe a map? or a list of pairs?*)
         3. declare private vars
-        4. declare & init shared vars
+        4. declare & init local vars // init is already done in s_body
         (*use pragma info to determine type of variable*)
 
         How to 
       *)
    (SsequenceT (SsequenceT (SsequenceT (SsetT (gen_ident idents)
     (Ecast (Etempvar (gen_ident idents) (tptr tvoid))
-      (tptr (Tstruct __par_routine1_data_ty noattr)))) f_body) (set_up_idents idents)) (init_shared_variables (shared_vars p) idents)).
+      (tptr (Tstruct __par_routine1_data_ty noattr)))) f_body) (set_up_shared_vars (shared_vars p) arg_id)) SskipT).
   (* Definition parallel_region : (statementT * (list ident) * (list annotatedFunction)) :=
      let '(new_body, idents', routine_arg_ty) := spawn_thread (nt - 1) idents in
               (SsequenceT new_body post_spawn_thread_code,
