@@ -579,16 +579,17 @@ Section SpawnPass.
 
   
   (* set up shared vars *)
-  Fixpoint set_up_shared_vars (shared_vars: list (ident * type)) (idents: list ident) (var_ident: ident): (statementT) :=
+  Fixpoint set_up_shared_vars (shared_vars: list (ident * type)) (idents: list ident) (var_ident: ident) (ident_matches: list (ident * ident)): (statementT * list (ident * ident)) :=
   match shared_vars with 
-   | [] => SskipT
+   | [] => (SskipT, ident_matches)
    | item::rest_of_list =>
    let new_ident := (gen_ident idents) in
-    (SsequenceT (SsetT new_ident
+   let recursive_call := (set_up_shared_vars rest_of_list ([new_ident]++idents) var_ident ([(new_ident, (fst item))]++ident_matches)) in
+    (((SsequenceT (SsetT new_ident
       (Efield
         (Ederef
-          (Etempvar var_ident (tptr (Tstruct __par_routine1_data_ty noattr))) (*revise to remove second gen_ident and use arg_id*)
-          (Tstruct __par_routine1_data_ty noattr)) (fst item) (tptr tint))) (set_up_shared_vars rest_of_list ([new_ident]++idents) var_ident))
+          (Etempvar var_ident (tptr (Tstruct __par_routine1_data_ty noattr)))
+          (Tstruct __par_routine1_data_ty noattr)) (fst item) (tptr tint))) (fst recursive_call))), (snd recursive_call))
    end.
   
     (* idents = [r]
@@ -617,7 +618,7 @@ Section SpawnPass.
       *)
    (SsequenceT (SsequenceT (SsequenceT (SsetT (gen_ident idents)
     (Ecast (Etempvar (gen_ident idents) (tptr tvoid))
-      (tptr (Tstruct __par_routine1_data_ty noattr)))) f_body) (set_up_shared_vars (shared_vars p) idents arg_id)) SskipT).
+      (tptr (Tstruct __par_routine1_data_ty noattr)))) f_body) (fst (set_up_shared_vars (shared_vars p) idents arg_id []))) SskipT).
   (* Definition parallel_region : (statementT * (list ident) * (list annotatedFunction)) :=
      let '(new_body, idents', routine_arg_ty) := spawn_thread (nt - 1) idents in
               (SsequenceT new_body post_spawn_thread_code,
