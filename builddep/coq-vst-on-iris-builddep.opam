@@ -24,6 +24,10 @@ dev-repo: "git+https://github.com/PrincetonUniversity/VST.git"
 bug-reports: "https://github.com/PrincetonUniversity/VST/issues"
 license: "https://raw.githubusercontent.com/PrincetonUniversity/VST/master/LICENSE"
 
+pin-depends: [
+  [ "coq-iris-ora" "git+https://github.com/mansky1/ora.git" ]
+]
+
 depends: [
   "coq" {= "8.19.0" }
   "coq-iris" {= "dev.2024-03-12.0.c1e15cdc" }
