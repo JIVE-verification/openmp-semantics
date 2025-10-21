@@ -25,6 +25,15 @@ Ltac unfold_mbind :=
     | |- context[@mbind _ ?instance _ _ _] => unfold mbind; unfold instance
     end.
 
+(* TODO rename these;
+   destruct the first pattern matching in goal *)
+Ltac destruct_match_in_goal :=
+    lazymatch goal with
+    | |- context[if (decide (?x = ?y)) then _ else _] => destruct (decide (x = y)) as [->|]; try done
+    | |- context[match (match ?x with _ => _ end) with _ => _ end] => destruct x eqn:?; try done
+    | |- context[match ?x with _ => _ end] => destruct x eqn:?; try done
+    end.
+
 (* destruct the first pattern matching in hyp *)
 Ltac destruct_match :=
     lazymatch goal with
@@ -57,6 +66,7 @@ Ltac destruct_match_no_eqn_in H :=
 Tactic Notation "destruct_match!" := destruct_match_no_eqn.
 Tactic Notation "destruct_match" "in" ident(H) := destruct_match_in H.
 Tactic Notation "destruct_match!" "in" ident(H) := destruct_match_no_eqn_in H.
+Tactic Notation "destruct_match" "in" "|-*" := destruct_match_in_goal.
 
 (* mbind but allows filling in the MBind typeclass instance explicitly *)
 Notation "m '≫=@{' M '}' f" := (@mbind _ M _ _ f m) (at level 60, right associativity) : stdpp_scope.
