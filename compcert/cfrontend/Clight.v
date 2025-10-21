@@ -161,7 +161,7 @@ Inductive statement : Type :=
   | Sswitch : expr -> labeled_statements -> statement  (**r [switch] statement *)
   | Slabel : label -> statement -> statement
   | Sgoto : label -> statement
-  (* each Spragma in the program is indexed by a uniquely natural number *)
+  (* each Spragma in the program is indexed by a unique natural number *)
   | Spragma : nat -> pragma_label -> statement -> statement
 
 with labeled_statements : Type :=            (**r cases of a [switch] *)
