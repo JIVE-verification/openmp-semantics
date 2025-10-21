@@ -3,7 +3,7 @@
 
 ## Building
 
-Install opam:
+[Install opam](https://opam.ocaml.org/doc/Install.html), then create an opam switch:
 
 ```(bash)
 opam switch create vst_on_iris ocaml-variants.4.14.1+options ocaml-option-flambda
@@ -14,7 +14,6 @@ Install dependencies:
 ```(bash)
 opam repo add coq-released https://coq.inria.fr/opam/released
 opam repo add iris-dev https://gitlab.mpi-sws.org/iris/opam.git
-opam pin add https://github.com/mansky1/ora.git
 opam pin add builddep/
 ```
 
