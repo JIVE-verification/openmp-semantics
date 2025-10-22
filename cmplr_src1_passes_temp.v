@@ -599,6 +599,8 @@ Section SpawnPass.
     let arg_id := gen_ident idents in
     let params := ((arg_id, (tptr tvoid)) :: nil) in
     let f_body := s_body in
+    let first_ident := gen_ident ([arg_id]++idents) in
+    let sec_ident := gen_ident ([first_ident]++[arg_id]++idents) in
     makeAnnotatedFunction
       (tptr tvoid)
       cc_default
@@ -610,15 +612,17 @@ Section SpawnPass.
         2. setup shared variable: a variable `i` to be shared becomes its reference version `_i`,
             initialized at beginning of f, and all `i`'s become `*_i` (line 24 )
             (*we'll need to track the connection between i and _i; maybe a map? or a list of pairs?*)
+            (*when *)
         3. declare private vars
         4. declare & init local vars // init is already done in s_body
         (*use pragma info to determine type of variable*)
+        5. generate definition of par_routine_1_data_ty
 
         How to 
       *)
-   (SsequenceT (SsequenceT (SsequenceT (SsetT (gen_ident idents)
-    (Ecast (Etempvar (gen_ident idents) (tptr tvoid))
-      (tptr (Tstruct __par_routine1_data_ty noattr)))) f_body) (fst (set_up_shared_vars (shared_vars p) idents arg_id []))) SskipT).
+   (SsequenceT (SsequenceT (SsequenceT (SsetT first_ident
+    (Ecast (Etempvar sec_ident (tptr tvoid))
+      (tptr (Tstruct __par_routine1_data_ty noattr)))) f_body) (fst (set_up_shared_vars (shared_vars p) ([sec_ident]++[first_ident]++[arg_id]++idents) arg_id []))) SskipT).
   (* Definition parallel_region : (statementT * (list ident) * (list annotatedFunction)) :=
      let '(new_body, idents', routine_arg_ty) := spawn_thread (nt - 1) idents in
               (SsequenceT new_body post_spawn_thread_code,
