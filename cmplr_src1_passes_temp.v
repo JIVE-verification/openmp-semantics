@@ -628,6 +628,11 @@ Section SpawnPass.
               (SsequenceT new_body post_spawn_thread_code,
                 idents',
                 [(gen_par_func idents' s_body routine_arg_ty temp_vars)]). *)
+Fixpoint ssetT_to_sassignT (input: statementT) (idents: list ident) : statementT :=
+match input with 
+  | SsetT a b => SassignT (Ederef (Etempvar (gen_ident idents) (tptr tint)) tint) b
+  | _ => SskipT
+end.
 
   (* Definition get_statement (s: statementT) *)
   Fixpoint first_pass (s: statementT) (idents: list ident) temp_vars : (statementT * (list ident) * (list annotatedFunction)) :=
