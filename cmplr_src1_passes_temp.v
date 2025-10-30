@@ -594,13 +594,29 @@ Section SpawnPass.
   
     (* idents = [r]
     real_r :=  ( *arg_id).r; // equiv to arg_id->r *)
-    
+Fixpoint ssetT_to_sassignT (input: statementT) (ident_pair: ident * ident) : statementT :=
+let new_ident := fst ident_pair in 
+let old_ident := snd ident_pair in
+match input with 
+  | SsetT a b => match a with 
+    | old_ident => SassignT (Ederef (Etempvar new_ident (tptr tint)) tint) b 
+    end
+  | SsequenceT a b => SsequenceT (ssetT_to_sassignT a ident_pair) (ssetT_to_sassignT b ident_pair)
+  | _ => input
+end.
+
+Fixpoint replace_all_idents (input: statementT) (ident_matches: list (ident * ident)):statementT :=
+match ident_matches with
+| item::rest_of_list => replace_all_idents (ssetT_to_sassignT input item) rest_of_list
+|_=>input
+end.
   Definition gen_par_func (p: pragma_info) (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction :=
     let arg_id := gen_ident idents in
     let params := ((arg_id, (tptr tvoid)) :: nil) in
     let f_body := s_body in
     let first_ident := gen_ident ([arg_id]++idents) in
     let sec_ident := gen_ident ([first_ident]++[arg_id]++idents) in
+    let shared_vars_setup := (set_up_shared_vars (shared_vars p) ([sec_ident]++[first_ident]++[arg_id]++idents) arg_id []) in
     makeAnnotatedFunction
       (tptr tvoid)
       cc_default
@@ -622,17 +638,12 @@ Section SpawnPass.
       *)
    (SsequenceT (SsequenceT (SsequenceT (SsetT first_ident
     (Ecast (Etempvar sec_ident (tptr tvoid))
-      (tptr (Tstruct __par_routine1_data_ty noattr)))) f_body) (fst (set_up_shared_vars (shared_vars p) ([sec_ident]++[first_ident]++[arg_id]++idents) arg_id []))) SskipT).
+      (tptr (Tstruct __par_routine1_data_ty noattr)))) f_body) (fst shared_vars_setup)) SskipT).
   (* Definition parallel_region : (statementT * (list ident) * (list annotatedFunction)) :=
      let '(new_body, idents', routine_arg_ty) := spawn_thread (nt - 1) idents in
               (SsequenceT new_body post_spawn_thread_code,
                 idents',
                 [(gen_par_func idents' s_body routine_arg_ty temp_vars)]). *)
-Fixpoint ssetT_to_sassignT (input: statementT) (idents: list ident) : statementT :=
-match input with 
-  | SsetT a b => SassignT (Ederef (Etempvar (gen_ident idents) (tptr tint)) tint) b
-  | _ => SskipT
-end.
 
   (* Definition get_statement (s: statementT) *)
   Fixpoint first_pass (s: statementT) (idents: list ident) temp_vars : (statementT * (list ident) * (list annotatedFunction)) :=
