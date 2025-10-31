@@ -617,6 +617,7 @@ end.
     let first_ident := gen_ident ([arg_id]++idents) in
     let sec_ident := gen_ident ([first_ident]++[arg_id]++idents) in
     let shared_vars_setup := (set_up_shared_vars (shared_vars p) ([sec_ident]++[first_ident]++[arg_id]++idents) arg_id []) in
+    let f_body_post_idents_replacement := replace_all_idents f_body (snd shared_vars_setup) in
     makeAnnotatedFunction
       (tptr tvoid)
       cc_default
@@ -638,7 +639,7 @@ end.
       *)
    (SsequenceT (SsequenceT (SsequenceT (SsetT first_ident
     (Ecast (Etempvar sec_ident (tptr tvoid))
-      (tptr (Tstruct __par_routine1_data_ty noattr)))) f_body) (fst shared_vars_setup)) SskipT).
+      (tptr (Tstruct __par_routine1_data_ty noattr)))) f_body_post_idents_replacement) (fst shared_vars_setup)) SskipT).
   (* Definition parallel_region : (statementT * (list ident) * (list annotatedFunction)) :=
      let '(new_body, idents', routine_arg_ty) := spawn_thread (nt - 1) idents in
               (SsequenceT new_body post_spawn_thread_code,
