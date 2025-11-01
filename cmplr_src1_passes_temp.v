@@ -594,6 +594,16 @@ Section SpawnPass.
   
     (* idents = [r]
     real_r :=  ( *arg_id).r; // equiv to arg_id->r *)
+Fixpoint expr_ident_replacement (input: expr) (ident_pair: ident * ident) : expr :=
+let new_ident := fst ident_pair in 
+let old_ident := snd ident_pair in
+match input with
+| Ebinop a b c d => Ebinop a (expr_ident_replacement b ident_pair) (expr_ident_replacement c ident_pair) d
+| Efield a b c => match b with 
+  | old_ident => (Ederef (Etempvar new_ident (tptr tint)) tint)
+  end
+|_ => input
+end. 
 Fixpoint ssetT_to_sassignT (input: statementT) (ident_pair: ident * ident) : statementT :=
 let new_ident := fst ident_pair in 
 let old_ident := snd ident_pair in
