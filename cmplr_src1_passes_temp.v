@@ -602,6 +602,12 @@ match input with
 | Efield a b c => match b with 
   | old_ident => (Ederef (Etempvar new_ident (tptr tint)) tint)
   end
+| Evar a b => match a with 
+  | old_ident => Evar new_ident b
+  end
+| Etempvar a b => match a with 
+  | old_ident => Evar new_ident b
+  end
 |_ => input
 end. 
 Fixpoint list_expr_ident_replacement (input_list: list expr) (ident_pair: ident * ident): list expr:=
@@ -624,6 +630,21 @@ match input with
                 end
             | None =>ScallT a (expr_ident_replacement b ident_pair) (list_expr_ident_replacement c ident_pair) 
             end
+  | SbuiltinT a b c d => match a with
+            | Some item => match item with 
+                | old_ident => SbuiltinT (Some new_ident) b c (list_expr_ident_replacement d ident_pair) 
+                end
+            | None => SbuiltinT a b c (list_expr_ident_replacement d ident_pair)
+            end
+  | SifthenelseT a b c => SifthenelseT (expr_ident_replacement a ident_pair) (ssetT_to_sassignT b ident_pair) (ssetT_to_sassignT c ident_pair)
+  | SloopT a b => SloopT (ssetT_to_sassignT a ident_pair) (ssetT_to_sassignT b ident_pair)
+  | SreturnT a => match a with 
+    | Some item => SreturnT (Some (expr_ident_replacement item ident_pair))
+    | None => SreturnT a
+    end
+  | SswitchT a b => SswitchT (expr_ident_replacement a ident_pair) b
+  | SlabelT a b => SlabelT a (ssetT_to_sassignT b ident_pair)
+  | SpragmaT a b c d => SpragmaT a b c (ssetT_to_sassignT d ident_pair)
   | _ => input
 end.
 
