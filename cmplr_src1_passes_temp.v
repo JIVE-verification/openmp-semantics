@@ -604,14 +604,26 @@ match input with
   end
 |_ => input
 end. 
+Fixpoint list_expr_ident_replacement (input_list: list expr) (ident_pair: ident * ident): list expr:=
+match input_list with 
+| item::rest_of_list => (expr_ident_replacement item ident_pair)::(list_expr_ident_replacement rest_of_list ident_pair)
+| _ => nil
+end.
 Fixpoint ssetT_to_sassignT (input: statementT) (ident_pair: ident * ident) : statementT :=
 let new_ident := fst ident_pair in 
 let old_ident := snd ident_pair in
 match input with 
   | SsetT a b => match a with 
-    | old_ident => SassignT (Ederef (Etempvar new_ident (tptr tint)) tint) b 
+    | old_ident => SassignT (Ederef (Etempvar new_ident (tptr tint)) tint) (expr_ident_replacement b ident_pair) 
     end
   | SsequenceT a b => SsequenceT (ssetT_to_sassignT a ident_pair) (ssetT_to_sassignT b ident_pair)
+  | SassignT a b => SassignT (expr_ident_replacement a ident_pair) (expr_ident_replacement b ident_pair) 
+  | ScallT a b c => match a with
+            | Some item => match item with 
+                | old_ident => ScallT (Some new_ident) (expr_ident_replacement b ident_pair) (list_expr_ident_replacement c ident_pair) 
+                end
+            | None =>ScallT a (expr_ident_replacement b ident_pair) (list_expr_ident_replacement c ident_pair) 
+            end
   | _ => input
 end.
 
