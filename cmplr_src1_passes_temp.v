@@ -513,7 +513,7 @@ Definition __opaque_pthread_attr_t : ident := $"_opaque_pthread_attr_t".
 
 Section SpawnPass.
 
-  Parameter gen_ident : list ident -> ident.
+  Parameter gen_ident : list ident -> (ident * list ident).
 
   Fixpoint spawn_thread (n: nat) (idents: list ident) (rou_id rou_arg_type_id: ident):
     (statementT *
@@ -523,8 +523,8 @@ Section SpawnPass.
   | O => (SskipT, []) 
   | S k =>
     let '(tl_stmt, idents') := spawn_thread k idents rou_id rou_arg_type_id in
-    let rou_arg_id := gen_ident idents' in
-    let spawn_ret_id := gen_ident (rou_arg_id::idents') in
+    let (rou_arg_id, idents'') := gen_ident idents' in
+    let (spawn_ret_id, idents''') := gen_ident idents'' in
     let init_rou_arg_code := SskipT (* TODO *) in
     let spawn_thread_code :=
       ScallT (Some spawn_ret_id)
@@ -544,15 +544,16 @@ Section SpawnPass.
                     (tptr (Tstruct rou_arg_type_id noattr)))
                   (tptr tvoid)) :: nil) in
       let code := SsequenceT tl_stmt spawn_thread_code in
-    (code, spawn_ret_id::rou_arg_id::idents')
+    (code, idents''')
   end.
+
   Definition post_spawn_thread_code: statementT := (ScallT None
     (Evar _join_thread (Tfunction (Tcons tint Tnil)
                         tvoid cc_default))
     ((Etempvar _t2 tint) :: nil)).
 
   Definition spawn_threads_pass n idents :=
-    match spawn_thread n idents (gen_ident idents) (gen_ident idents) with 
+    match spawn_thread n idents (gen_ident idents) (gen_ident idents) with (*need to fix th gen_ident calls*)
       | (a,b) => (SsequenceT (SsequenceT (
                     SsequenceT 
                       a (SsequenceT (SassignT
@@ -591,75 +592,88 @@ Section SpawnPass.
           (Etempvar var_ident (tptr (Tstruct __par_routine1_data_ty noattr)))
           (Tstruct __par_routine1_data_ty noattr)) (fst item) (tptr tint))) (fst recursive_call))), (snd recursive_call))
    end.
-  
-    (* idents = [r]
-    real_r :=  ( *arg_id).r; // equiv to arg_id->r *)
-Fixpoint expr_ident_replacement (input: expr) (ident_pair: ident * ident) : expr :=
-let new_ident := fst ident_pair in 
-let old_ident := snd ident_pair in
-match input with
-| Ebinop a b c d => Ebinop a (expr_ident_replacement b ident_pair) (expr_ident_replacement c ident_pair) d
-| Efield a b c => match b with 
-  | old_ident => (Ederef (Etempvar new_ident (tptr tint)) tint)
-  end
-| Evar a b => match a with 
-  | old_ident => Evar new_ident b
-  end
-| Etempvar a b => match a with 
-  | old_ident => Evar new_ident b
-  end
-|_ => input
-end. 
-Fixpoint list_expr_ident_replacement (input_list: list expr) (ident_pair: ident * ident): list expr:=
-match input_list with 
-| item::rest_of_list => (expr_ident_replacement item ident_pair)::(list_expr_ident_replacement rest_of_list ident_pair)
-| _ => nil
-end.
-Fixpoint ssetT_to_sassignT (input: statementT) (ident_pair: ident * ident) : statementT :=
-let new_ident := fst ident_pair in 
-let old_ident := snd ident_pair in
-match input with 
-  | SsetT a b => match a with 
-    | old_ident => SassignT (Ederef (Etempvar new_ident (tptr tint)) tint) (expr_ident_replacement b ident_pair) 
-    end
-  | SsequenceT a b => SsequenceT (ssetT_to_sassignT a ident_pair) (ssetT_to_sassignT b ident_pair)
-  | SassignT a b => SassignT (expr_ident_replacement a ident_pair) (expr_ident_replacement b ident_pair) 
-  | ScallT a b c => match a with
-            | Some item => match item with 
-                | old_ident => ScallT (Some new_ident) (expr_ident_replacement b ident_pair) (list_expr_ident_replacement c ident_pair) 
-                end
-            | None =>ScallT a (expr_ident_replacement b ident_pair) (list_expr_ident_replacement c ident_pair) 
-            end
-  | SbuiltinT a b c d => match a with
-            | Some item => match item with 
-                | old_ident => SbuiltinT (Some new_ident) b c (list_expr_ident_replacement d ident_pair) 
-                end
-            | None => SbuiltinT a b c (list_expr_ident_replacement d ident_pair)
-            end
-  | SifthenelseT a b c => SifthenelseT (expr_ident_replacement a ident_pair) (ssetT_to_sassignT b ident_pair) (ssetT_to_sassignT c ident_pair)
-  | SloopT a b => SloopT (ssetT_to_sassignT a ident_pair) (ssetT_to_sassignT b ident_pair)
-  | SreturnT a => match a with 
-    | Some item => SreturnT (Some (expr_ident_replacement item ident_pair))
-    | None => SreturnT a
-    end
-  | SswitchT a b => SswitchT (expr_ident_replacement a ident_pair) b
-  | SlabelT a b => SlabelT a (ssetT_to_sassignT b ident_pair)
-  | SpragmaT a b c d => SpragmaT a b c (ssetT_to_sassignT d ident_pair)
-  | _ => input
-end.
 
-Fixpoint replace_all_idents (input: statementT) (ident_matches: list (ident * ident)):statementT :=
-match ident_matches with
-| item::rest_of_list => replace_all_idents (ssetT_to_sassignT input item) rest_of_list
-|_=>input
-end.
+  (* replace `Evar _i ty` with `Ederef (Etempvar __i (tptr ty)) ty` *)
+  Fixpoint mk_ref_expr i i' (e: expr)  : expr :=
+    match e with
+    | Evar j ty => 
+      if ident_eq i j
+      then Ederef (Evar i' (tptr ty)) ty
+      else e
+    | Etempvar j ty =>
+      if ident_eq i j
+      then Ederef (Etempvar i' (tptr ty)) ty
+      else e
+    (* simple cases *)
+    | Ederef e1 ty => Ederef (mk_ref_expr i i' e1) ty
+    | Eaddrof e1 ty => Eaddrof (mk_ref_expr i i' e1) ty
+    | Eunop op e1 ty => Eunop op (mk_ref_expr i i' e1) ty
+    | Ebinop op e1 e2 ty => Ebinop op (mk_ref_expr i i' e1) (mk_ref_expr i i' e2) ty
+    | Ecast e1 ty => Ecast (mk_ref_expr i i' e1) ty
+    | Efield e1 field_id ty => Efield (mk_ref_expr i i' e1) field_id ty
+    |_ => e
+    end.
+
+  Definition mk_ref_exprs i i' (es: list expr) : list expr:=
+    map (mk_ref_expr i i') es.
+
+  (* `i` is name of a variable of type `ty`.
+     replace usage of `i` to `i'`, where `i'` holds the address of `i`. *)
+  Fixpoint mk_ref_stmt i i' ty (s: statementT) : statementT :=
+    match s with
+    | SassignT e1 e2 => SassignT (mk_ref_expr i i' e1) (mk_ref_expr i i' e2) 
+    | SsetT j e =>
+      if ident_eq i j
+      then SassignT (Ederef (Etempvar i' (tptr ty)) ty) (mk_ref_expr i i' e) 
+      else SsetT j (mk_ref_expr i i' e)
+    (* simple cases *)
+    | ScallT j e_f e_args =>
+      (* it seems that we can assume i!=j because Clight uses an ident
+        different from the user specified ones for return value. *)
+      ScallT j (mk_ref_expr i i' e_f) (mk_ref_exprs i i' e_args)
+    | SbuiltinT j ef tys e_args =>
+      (* it seems that we can assume i!=j because Clight uses an ident
+        different from the user specified ones for return value. *)
+      SbuiltinT j ef tys (mk_ref_exprs i i' e_args)
+    | SsequenceT s1 s2 => SsequenceT (mk_ref_stmt i i' ty s1) (mk_ref_stmt i i' ty s2)
+    | SifthenelseT e s1 s2 =>
+      SifthenelseT (mk_ref_expr i i' e) (mk_ref_stmt i i' ty s1) (mk_ref_stmt i i' ty s2)
+    | SloopT s1 s2 =>
+      SloopT (mk_ref_stmt i i' ty s1) (mk_ref_stmt i i' ty s2)
+    | SreturnT maybe_e => 
+      match maybe_e with 
+      | Some e => SreturnT (Some (mk_ref_expr i i' e))
+      | None => SreturnT None
+      end
+    | SswitchT e ls => SswitchT (mk_ref_expr i i' e) ls
+    | SlabelT l s => SlabelT l (mk_ref_stmt i i' ty s)
+    | SpragmaT pi n pl s => SpragmaT pi n pl (mk_ref_stmt i i' ty s)
+    | _ => s
+    end
+  with
+  mk_ref_lb_stmt i i' ty (ls: labeled_statementsT) : labeled_statementsT :=
+    match ls with
+    | LSnilT => LSnilT
+    | LSconsT l s ls' => LSconsT l (mk_ref_stmt i i' ty s) (mk_ref_lb_stmt i i' ty ls')
+    end
+  .
+
+  (* ids contain the list of varibles that will be turned into references. *)
+  (* s_1 := mk_ref_stmt s ids[0];
+     s_2 := mk_ref_stmt s_1 ids[1];
+     ... *)
+  Definition mk_refs (s: statementT) (ids: list (ident * ident * type)) :statementT :=
+    foldr (fun i_i'_ty s =>
+      let '(i, i', ty) := i_i'_ty in
+      mk_ref_stmt i i' ty s) s ids.
+
   Definition gen_par_func (p: pragma_info) (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction :=
     let arg_id := gen_ident idents in
     let params := ((arg_id, (tptr tvoid)) :: nil) in
     let f_body := s_body in
     let first_ident := gen_ident ([arg_id]++idents) in
-    let sec_ident := gen_ident ([first_ident]++[arg_id]++idents) in
-    let shared_vars_setup := (set_up_shared_vars (shared_vars p) ([sec_ident]++[first_ident]++[arg_id]++idents) arg_id []) in
+    let sec_ident := gen_ident ([first_ident;arg_id]++idents) in
+    let shared_vars_setup := (set_up_shared_vars (shared_vars p) ([sec_ident;first_ident;arg_id]++idents) arg_id []) in
     let f_body_post_idents_replacement := replace_all_idents f_body (snd shared_vars_setup) in
     makeAnnotatedFunction
       (tptr tvoid)
@@ -693,20 +707,20 @@ end.
   Fixpoint first_pass (s: statementT) (idents: list ident) temp_vars : (statementT * (list ident) * (list annotatedFunction)) :=
   match s with
     | SsequenceT a b => 
-            let '(stmt1, idents', pr1) := (first_pass a idents temp_vars) in 
-            let '(stmt2, idents'', pr2) := (first_pass b idents' temp_vars) in
-            ((SsequenceT stmt1 stmt2), idents'', pr1++pr2)
+            let '(s1, idents', pr1) := (first_pass a idents temp_vars) in 
+            let '(s2, idents'', pr2) := (first_pass b idents' temp_vars) in
+            ((SsequenceT s1 s2), idents'', pr1++pr2)
     | SifthenelseT a b c =>   
         (* FIXME fix statements below in SsequenceT style *)
-        let '(stmt1, idents', pr1) := (first_pass b idents temp_vars) in 
-        let '(stmt2, idents'', pr2) := (first_pass c idents' temp_vars) in
-                ((SifthenelseT a stmt1 stmt2), idents'', pr1++pr2)
+        let '(s1, idents', pr1) := (first_pass b idents temp_vars) in 
+        let '(s2, idents'', pr2) := (first_pass c idents' temp_vars) in
+                ((SifthenelseT a s1 s2), idents'', pr1++pr2)
     | SloopT a b =>        
-        let '(stmt1, idents', pr1) := (first_pass a idents temp_vars) in 
-        let '(stmt2, idents'', pr2) := (first_pass b idents temp_vars) in
-                ((SloopT stmt1 stmt2), idents'', pr1++pr2)
-    | SlabelT a b => let '(stmt1, idents', pr1) := (first_pass b idents temp_vars) in 
-                    ((SlabelT a stmt1), idents', pr1)
+        let '(s1, idents', pr1) := (first_pass a idents temp_vars) in 
+        let '(s2, idents'', pr2) := (first_pass b idents temp_vars) in
+                ((SloopT s1 s2), idents'', pr1++pr2)
+    | SlabelT a b => let '(s1, idents', pr1) := (first_pass b idents temp_vars) in 
+                    ((SlabelT a s1), idents', pr1)
     | SpragmaT a b c s_body => match c with 
             | OMPParallel nt pc rc =>
               let '(new_body, idents') := spawn_threads_pass (nt - 1) idents in
