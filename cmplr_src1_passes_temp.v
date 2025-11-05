@@ -512,7 +512,7 @@ Definition __opaque_pthread_attr_t : ident := $"_opaque_pthread_attr_t".
 (*assume existence of function to create new identifiers*)
 
 Section SpawnPass.
-
+Check foldr.
   Parameter gen_ident : list ident -> (ident * list ident).
 
   Fixpoint spawn_thread (n: nat) (idents: list ident) (rou_id rou_arg_type_id: ident):
@@ -553,7 +553,9 @@ Section SpawnPass.
     ((Etempvar _t2 tint) :: nil)).
 
   Definition spawn_threads_pass n idents :=
-    match spawn_thread n idents (gen_ident idents) (gen_ident idents) with (*need to fix th gen_ident calls*)
+  let (ni1, idents'):= (gen_ident idents) in
+    let (ni2, idents''):= (gen_ident idents') in
+    match spawn_thread n idents ni1 ni2 with
       | (a,b) => (SsequenceT (SsequenceT (
                     SsequenceT 
                       a (SsequenceT (SassignT
@@ -580,12 +582,12 @@ Section SpawnPass.
 
   
   (* set up shared vars *)
-  Fixpoint set_up_shared_vars (shared_vars: list (ident * type)) (idents: list ident) (var_ident: ident) (ident_matches: list (ident * ident)): (statementT * list (ident * ident)) :=
+  Fixpoint set_up_shared_vars (shared_vars: list (ident * type)) (idents: list ident) (var_ident: ident) (ident_matches: list (ident * ident * type)): (statementT * list (ident * ident * type)) :=
   match shared_vars with 
    | [] => (SskipT, ident_matches)
    | item::rest_of_list =>
-   let new_ident := (gen_ident idents) in
-   let recursive_call := (set_up_shared_vars rest_of_list ([new_ident]++idents) var_ident ([(new_ident, (fst item))]++ident_matches)) in
+   let (new_ident, idents') := (gen_ident idents) in
+   let recursive_call := (set_up_shared_vars rest_of_list (idents') var_ident ([(new_ident, (fst item), (snd item))]++ident_matches)) in
     (((SsequenceT (SsetT new_ident
       (Efield
         (Ederef
@@ -668,13 +670,13 @@ Section SpawnPass.
       mk_ref_stmt i i' ty s) s ids.
 
   Definition gen_par_func (p: pragma_info) (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction :=
-    let arg_id := gen_ident idents in
+    let (arg_id, idents') := gen_ident idents in
     let params := ((arg_id, (tptr tvoid)) :: nil) in
     let f_body := s_body in
-    let first_ident := gen_ident ([arg_id]++idents) in
-    let sec_ident := gen_ident ([first_ident;arg_id]++idents) in
-    let shared_vars_setup := (set_up_shared_vars (shared_vars p) ([sec_ident;first_ident;arg_id]++idents) arg_id []) in
-    let f_body_post_idents_replacement := replace_all_idents f_body (snd shared_vars_setup) in
+    let (first_ident, idents'') := gen_ident (idents') in
+    let (sec_ident, idents''') := gen_ident (idents'') in
+    let shared_vars_setup := (set_up_shared_vars (shared_vars p) (idents''') arg_id []) in
+    let f_body_post_idents_replacement := mk_refs f_body (snd shared_vars_setup) in
     makeAnnotatedFunction
       (tptr tvoid)
       cc_default
@@ -724,9 +726,10 @@ Section SpawnPass.
     | SpragmaT a b c s_body => match c with 
             | OMPParallel nt pc rc =>
               let '(new_body, idents') := spawn_threads_pass (nt - 1) idents in
+              let (new_ident, idents'') := (gen_ident idents') in 
               (SsequenceT new_body post_spawn_thread_code,
                 idents',
-                [(gen_par_func a idents' s_body (gen_ident idents') temp_vars)])
+                [(gen_par_func a idents' s_body (new_ident) temp_vars)])
             | OMPFor i j => (s, [], [])
             (* | OMPBarrier =>SskipT *) (*may deal with later*)
             | _ => (SskipT, [], [])
