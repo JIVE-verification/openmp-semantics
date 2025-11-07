@@ -12,7 +12,7 @@ Section SiblingTree.
 
   Context {B:Type}.
   (* a tree that can have multiple children *)
-  Inductive stree :=
+  Inductive stree : Type :=
   | SNode : B -> list stree -> stree.
 
   Definition data (st: stree) : B :=
@@ -22,12 +22,6 @@ Section SiblingTree.
     match st with | SNode _ kids => kids end.
 
   #[export] Instance stree_settable : Settable stree := settable! SNode < data; kids >.
-
-  Definition update_data (st: stree) (b: B) : stree :=
-    match st with | SNode _ kids => SNode b kids end.
-
-  Definition update_kids (st: stree) (kids: list stree) : stree :=
-    match st with | SNode b _ => SNode b kids end.
 
   (* stree eliminator, with the ability of knowing a node's parent
      f (parent: option B) (current_node_info: B) (previously accumulated results: A) *)
@@ -53,6 +47,19 @@ End SiblingTree.
 Notation " x '.data' " := (data x) (at level 3).
 Notation " x '.kids' " := (kids x) (at level 3).
 
+(*
+Example of a list zipper (not shown here):
+  l:=[a;b;c;d]
+look l c
+  [] a [b;c;d]
+  [a] b [c;d]
+  [a;b] c [d]
+
+We can define operations such as:
+  go_left
+  go_right
+*)
+
 Section SiblingTreeZipper.
   Context {B:Type}.
 
@@ -74,7 +81,10 @@ Section SiblingTreeZipper.
                 /      |          \
     parents[0].1   parents[0].2    parents[0].3
                   /    |    \
-            Before   ThIS    After
+  [b_k;...;b_1;b_0]   b_(k+1)    [b_((k+2);b_(k+3)...]
+
+            GO LEFT->
+    [...;b_1;b_0]   b_k;    [b_((k+1);b_(k+2)...]
     *)
   | TreeZip (tis: stree) (b a: sforest) (p: list (sforest * B * sforest))
   .
@@ -261,6 +271,7 @@ Section SiblingTreeZipper.
     _tz_lookup f tz = Some tz'.
   Proof. Admitted.
 
+  (* This is the one we actually use! *)
   Equations tz_lookup (f: stree -> bool) tz : option tree_zipper by wf tz tree_zipper_iter_rel :=
     tz_lookup f (TreeZip this b (h::a) p) :=
       let tz := (TreeZip this b (h::a) p) in
@@ -341,9 +352,10 @@ Section SiblingTreeZipper.
       rewrite app_assoc //.
   Qed.
 
-  Lemma tz_lookup_correct (is_target: stree -> bool) s tz:
+  Lemma tz_lookup_correct (is_target: stree -> bool) (s:stree) tz:
     tz_lookup is_target (from_stree s) = Some tz →
     is_target (this tz) = true ∧ to_stree tz = Some s.
+  Proof.
   Admitted.
 
   Definition stree_lookup (is_target: stree -> bool) s := 
