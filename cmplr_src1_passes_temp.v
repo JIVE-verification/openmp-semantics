@@ -668,7 +668,12 @@ Check foldr.
     foldr (fun i_i'_ty s =>
       let '(i, i', ty) := i_i'_ty in
       mk_ref_stmt i i' ty s) s ids.
-
+  Check Member_plain.
+  Check map.
+  Definition ident_ty_to_member_plain (ident_ty: ident * type): member :=
+  let(ident, ty) := ident_ty in Member_plain ident ty.
+  Definition gen_par_routine_data_ty_composite (p: pragma_info) (idents: list ident) :=
+  Composite (fst (gen_ident idents)) Struct ((map (ident_ty_to_member_plain) (shared_vars p))++(map (ident_ty_to_member_plain) (reduction_vars p))).
   Definition gen_par_func (p: pragma_info) (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction :=
     let (arg_id, idents') := gen_ident idents in
     let params := ((arg_id, (tptr tvoid)) :: nil) in
