@@ -512,9 +512,14 @@ Definition __opaque_pthread_attr_t : ident := $"_opaque_pthread_attr_t".
 (*assume existence of function to create new identifiers*)
 
 Section SpawnPass.
-Check foldr.
-  Parameter gen_ident : list ident -> (ident * list ident).
+  Definition pos_max (l : list positive) :=
+   foldr Pos.max 1%positive l.
 
+  (*find largest int and increment by one, use list_max*)
+  Definition gen_ident (idents: list ident) : (ident * list ident) :=
+    let i' := ((pos_max idents) + 1)%positive in
+    (i', i'::idents).
+(*consider using python to make gen_ident output more readable*)
   Fixpoint spawn_thread (n: nat) (idents: list ident) (rou_id rou_arg_type_id: ident):
     (statementT *
       list ident (* all identifiers in the program, including the type name for par routine argument *)
@@ -550,7 +555,7 @@ Check foldr.
   Definition post_spawn_thread_code: statementT := (ScallT None
     (Evar _join_thread (Tfunction (Tcons tint Tnil)
                         tvoid cc_default))
-    ((Etempvar _t2 tint) :: nil)).
+    ((Etempvar _t2 tint) :: nil)). (*remove this hardcoded variable*)
 
   Definition spawn_threads_pass n idents :=
   let (ni1, idents'):= (gen_ident idents) in
@@ -668,19 +673,25 @@ Check foldr.
     foldr (fun i_i'_ty s =>
       let '(i, i', ty) := i_i'_ty in
       mk_ref_stmt i i' ty s) s ids.
-  Check Member_plain.
-  Check map.
+
   Definition ident_ty_to_member_plain (ident_ty: ident * type): member :=
-  let(ident, ty) := ident_ty in Member_plain ident ty.
-  Definition gen_par_routine_data_ty_composite (p: pragma_info) (idents: list ident) :=
-  Composite (fst (gen_ident idents)) Struct ((map (ident_ty_to_member_plain) (shared_vars p))++(map (ident_ty_to_member_plain) (reduction_vars p))).
-  Definition gen_par_func (p: pragma_info) (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction :=
-    let (arg_id, idents') := gen_ident idents in
+  let(ident, ty) := ident_ty in Member_plain ident (tptr ty).
+  
+  Definition gen_par_routine_input_ty (p: pragma_info) (idents: list ident): (composite_definition * ident * list ident) :=
+  let '(ty_id, idents) := gen_ident idents in
+  let cd := Composite ty_id Struct 
+              ((map (ident_ty_to_member_plain) (shared_vars p)) ++ 
+              (map (ident_ty_to_member_plain) (reduction_vars p))) 
+              noattr in
+  (cd, ty_id, idents).
+
+  Definition gen_par_routine (p: pragma_info) (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction :=
+    let (arg_id, idents) := gen_ident idents in
     let params := ((arg_id, (tptr tvoid)) :: nil) in
     let f_body := s_body in
-    let (first_ident, idents'') := gen_ident (idents') in
-    let (sec_ident, idents''') := gen_ident (idents'') in
-    let shared_vars_setup := (set_up_shared_vars (shared_vars p) (idents''') arg_id []) in
+    let (first_ident, idents) := gen_ident (idents) in
+    let (sec_ident, idents) := gen_ident (idents) in
+    let shared_vars_setup := (set_up_shared_vars (shared_vars p) (idents) arg_id []) in
     let f_body_post_idents_replacement := mk_refs f_body (snd shared_vars_setup) in
     makeAnnotatedFunction
       (tptr tvoid)
@@ -708,43 +719,59 @@ Check foldr.
      let '(new_body, idents', routine_arg_ty) := spawn_thread (nt - 1) idents in
               (SsequenceT new_body post_spawn_thread_code,
                 idents',
-                [(gen_par_func idents' s_body routine_arg_ty temp_vars)]). *)
+                [(gen_par_routine idents' s_body routine_arg_ty temp_vars)]). *)
 
   (* Definition get_statement (s: statementT) *)
-  Fixpoint first_pass (s: statementT) (idents: list ident) temp_vars : (statementT * (list ident) * (list annotatedFunction)) :=
+  (*first_pass should recurse on s_body*)
+  Fixpoint first_pass (s: statementT) (idents: list ident) temp_vars : (statementT * (list ident) * (list annotatedFunction) * (list composite_definition)) :=
   match s with
     | SsequenceT a b => 
-            let '(s1, idents', pr1) := (first_pass a idents temp_vars) in 
-            let '(s2, idents'', pr2) := (first_pass b idents' temp_vars) in
-            ((SsequenceT s1 s2), idents'', pr1++pr2)
+            let '(s1, idents', pr1, cd1) := (first_pass a idents temp_vars) in 
+            let '(s2, idents'', pr2, cd2) := (first_pass b idents' temp_vars) in
+            ((SsequenceT s1 s2), idents'', pr1++pr2, cd1++cd2)
     | SifthenelseT a b c =>   
         (* FIXME fix statements below in SsequenceT style *)
-        let '(s1, idents', pr1) := (first_pass b idents temp_vars) in 
-        let '(s2, idents'', pr2) := (first_pass c idents' temp_vars) in
-                ((SifthenelseT a s1 s2), idents'', pr1++pr2)
+        let '(s1, idents', pr1, cd1) := (first_pass b idents temp_vars) in 
+        let '(s2, idents'', pr2, cd2) := (first_pass c idents' temp_vars) in
+                ((SifthenelseT a s1 s2), idents'', pr1++pr2, cd1++cd2)
     | SloopT a b =>        
-        let '(s1, idents', pr1) := (first_pass a idents temp_vars) in 
-        let '(s2, idents'', pr2) := (first_pass b idents temp_vars) in
-                ((SloopT s1 s2), idents'', pr1++pr2)
-    | SlabelT a b => let '(s1, idents', pr1) := (first_pass b idents temp_vars) in 
-                    ((SlabelT a s1), idents', pr1)
+        let '(s1, idents', pr1, cd1) := (first_pass a idents temp_vars) in 
+        let '(s2, idents'', pr2, cd2) := (first_pass b idents temp_vars) in
+                ((SloopT s1 s2), idents'', pr1++pr2, cd1++cd2)
+    | SlabelT a b => let '(s1, idents', pr1, cd1) := (first_pass b idents temp_vars) in 
+                    ((SlabelT a s1), idents', pr1, cd1)
     | SpragmaT a b c s_body => match c with 
             | OMPParallel nt pc rc =>
-              let '(new_body, idents') := spawn_threads_pass (nt - 1) idents in
-              let (new_ident, idents'') := (gen_ident idents') in 
+              let '(s_body', idents, af, cds) := first_pass s_body idents temp_vars in
+              let (new_body, idents) := spawn_threads_pass (nt - 1) idents in
+              let '(cd, ty_id, idents) := gen_par_routine_input_ty a idents in
+              
               (SsequenceT new_body post_spawn_thread_code,
-                idents',
-                [(gen_par_func a idents' s_body (new_ident) temp_vars)])
-            | OMPFor i j => (s, [], [])
+                idents,
+                (gen_par_routine a idents s_body' ty_id temp_vars)::af,
+                cd::cds)
+            | OMPFor i j => (s, [], [], [])
             (* | OMPBarrier =>SskipT *) (*may deal with later*)
-            | _ => (SskipT, [], [])
+            | _ => (SskipT, [], [], [])
             end
-    |_ => (s, [], [])
+    |_ => (s, [], [], [])
     end.
+
+Definition first_pass_eg :=
+  first_pass (fn_body_annot f_main_omp_annot) [] (fn_temps_annot f_main_omp_annot).
+
+Example foo: False.
+Proof.
+  let term := eval compute in first_pass_eg in
+  idtac "The term is:" term.
+Abort.
+
+(* Eval compute in first_pass (fn_body_annot f_main_omp_annot) [] (fn_temps_annot f_main_omp_annot). *)
+  
   (* Definition test: (statementT * (option pragma_info) * (option statementT)). 
   let x := eval cbn in ((first_pass (fn_body_annot f_main_omp_annot)[])) in refine x. Defined. *)
   (* Print test. *)
-
+(*instead of compute try simpl or cbn (call by name)*)
 End SpawnPass.
 
     (*Need to generate: 
