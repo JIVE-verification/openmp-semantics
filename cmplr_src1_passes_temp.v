@@ -522,17 +522,19 @@ Section SpawnPass.
 (*consider using python to make gen_ident output more readable*)
   Fixpoint spawn_thread (n: nat) (idents: list ident) (rou_id rou_arg_type_id: ident):
     (statementT *
-      list ident (* all identifiers in the program, including the type name for par routine argument *)
+      list ident * (* all identifiers in the program, including the type name for par routine argument *)
+      list ident (*list of thread ids*)
     ) :=
   match n with 
-  | O => (SskipT, []) 
+  | O => (SskipT, [], []) 
   | S k =>
-    let '(tl_stmt, idents') := spawn_thread k idents rou_id rou_arg_type_id in
+    let '(tl_stmt, idents', thread_ids) := spawn_thread k idents rou_id rou_arg_type_id in
     let (rou_arg_id, idents'') := gen_ident idents' in
     let (spawn_ret_id, idents''') := gen_ident idents'' in
-    let init_rou_arg_code := SskipT (* TODO *) in
+    let (thread_id, idents'''') := gen_ident idents''' in
+    (* let init_rou_arg_code := SskipT (* TODO *) in *)
     let spawn_thread_code :=
-      ScallT (Some spawn_ret_id)
+      SsequenceT (ScallT (Some spawn_ret_id)
               (Evar _spawn (Tfunction
                               (Tcons
                                 (tptr (Tfunction
@@ -547,23 +549,29 @@ Section SpawnPass.
                   (Eaddrof
                     (Evar rou_arg_id (Tstruct rou_arg_type_id noattr))
                     (tptr (Tstruct rou_arg_type_id noattr)))
-                  (tptr tvoid)) :: nil) in
+                  (tptr tvoid)) :: nil)) (SsetT thread_id (Etempvar spawn_ret_id tint)) in
       let code := SsequenceT tl_stmt spawn_thread_code in
-    (code, idents''')
+    (code, idents''', thread_id::thread_ids)
   end.
 
-  Definition post_spawn_thread_code: statementT := (ScallT None
+  Fixpoint post_spawn_thread_code (thread_ids: list ident): statementT := 
+  match thread_ids with 
+  | [] => SskipT
+  | thread_id::rest_of_ids =>
+  SsequenceT
+  (ScallT None
     (Evar _join_thread (Tfunction (Tcons tint Tnil)
                         tvoid cc_default))
-    ((Etempvar _t2 tint) :: nil)). (*remove this hardcoded variable*)
+    ((Etempvar thread_id tint) :: nil)) (post_spawn_thread_code rest_of_ids)
+    end. (*remove this hardcoded variable*)
 
   Definition spawn_threads_pass n idents :=
   let (ni1, idents'):= (gen_ident idents) in
     let (ni2, idents''):= (gen_ident idents') in
     match spawn_thread n idents ni1 ni2 with
-      | (a,b) => (SsequenceT (SsequenceT (
+      | (spawn_thread_code, all_idents, thread_ids) => (SsequenceT (SsequenceT (
                     SsequenceT 
-                      a (SsequenceT (SassignT
+                      spawn_thread_code (SsequenceT (SassignT
                 (Efield
                   (Evar ___par_routine1_data_1 (Tstruct __par_routine1_data_ty noattr))
                   _i (tptr tint)) (Eaddrof (Evar _i tint) (tptr tint))) (SassignT
@@ -577,7 +585,9 @@ Section SpawnPass.
                              (Eaddrof
                                (Evar ___par_routine1_data_1 (Tstruct __par_routine1_data_ty noattr))
                                (tptr (Tstruct __par_routine1_data_ty noattr)))
-                             (tptr tvoid)) :: nil))) post_spawn_thread_code, b)
+                             (tptr tvoid)) :: nil))) (post_spawn_thread_code thread_ids),
+                             all_idents,
+                             thread_ids)
       end.
   Type spawn_threads_pass.
     (* 1. call spawn_thread to generate n threads
@@ -743,10 +753,10 @@ Section SpawnPass.
     | SpragmaT a b c s_body => match c with 
             | OMPParallel nt pc rc =>
               let '(s_body', idents, af, cds) := first_pass s_body idents temp_vars in
-              let (new_body, idents) := spawn_threads_pass (nt - 1) idents in
+              let '(new_body, idents, thread_ids) := spawn_threads_pass (nt - 1) idents in
               let '(cd, ty_id, idents) := gen_par_routine_input_ty a idents in
               
-              (SsequenceT new_body post_spawn_thread_code,
+              (SsequenceT new_body (post_spawn_thread_code thread_ids),
                 idents,
                 (gen_par_routine a idents s_body' ty_id temp_vars)::af,
                 cd::cds)
