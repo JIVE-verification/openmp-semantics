@@ -122,12 +122,6 @@ Local Open Scope Z_scope.
 still on heap *)
 Definition prog_clight' :=
   transl_program prog.
-(* print clight ast *)
-Example print_f_main_clight : True.
-  let p := eval cbn in prog_clight' in
-  match p with
-  | Errors.OK ?p => idtac p end.
-  Abort.
   
 Definition f_main_clight :=
   {|
@@ -609,6 +603,12 @@ Section SpawnPass.
           (Tstruct par_data_ty noattr)) (fst item) (tptr tint))) (fst recursive_call))), (snd recursive_call))
    end.
 
+  (* Definition ident_eq' p1 p2 : bool := ..
+
+    Search BinPos.Pos.eq_dec.
+  Lemma ident_eq'_ident_eq p1 p2 :
+    ident_eq' p1 p2 = true <->  (ident_eq p1 p2) *)
+
   (* replace `Evar _i ty` with `Ederef (Etempvar __i (tptr ty)) ty` *)
   Fixpoint mk_ref_expr i i' (e: expr)  : expr :=
     match e with
@@ -769,10 +769,36 @@ Section SpawnPass.
 Definition first_pass_eg :=
   first_pass (fn_body_annot f_main_omp_annot) [] (fn_temps_annot f_main_omp_annot).
 
-Example foo: False.
-Proof.
-  let term := eval compute in first_pass_eg in
+#[local] Transparent peq.
+
+(* simplify Clight, but keep the sugars *)
+Declare Reduction simpl_clight := cbv -[
+    (* C type shorthand *)
+    tvoid tschar tuchar tshort tushort tint tuint tbool
+    tlong tulong tfloat tdouble tptr tarray
+    (* other shorthand *)
+    noattr cc_default
+  ].
+
+(* fold Clight sugars back *)
+Declare Reduction fold_names := fold
+  _i ___stringlit_1 _i _j _k _l _main _printf _lock_1
+  _lock_2 _atom_int ___par_routine1_data_1 __par_routine1_data_ty ___par_routine1_data_2
+  _t2 _makelock _spawn __par_routine1 _join_thread _freelock.
+
+(* give generated idents names *)
+Definition data_ty : ident := 5%positive.
+Declare Reduction name_idents := fold data_ty.
+
+Ltac pp_program prog :=
+  let term := eval simpl_clight in prog in
+  let term := eval fold_names in term in
+  let term := eval name_idents in term in
   idtac "The term is:" term.
+
+Example pp_program_eg: False.
+Proof.
+  pp_program first_pass_eg.
 Abort.
 
 (* Eval compute in first_pass (fn_body_annot f_main_omp_annot) [] (fn_temps_annot f_main_omp_annot). *)
