@@ -21,7 +21,7 @@ COQLIB=$(shell $(COQC) -where | tr -d '\r' | tr '\\' '/')
 
 # Check Coq version
 
-COQVERSION= 8.17.0 or-else 8.17.1 or-else 8.18.0 or-else 8.19.0 or-else or-else 8.19.1
+COQVERSION= 8.17.0 or-else 8.17.1 or-else 8.18.0 or-else 8.19.0 or-else or-else 8.20.0
 
 COQV=$(shell $(COQC) -v)
 ifneq ($(IGNORECOQVERSION),true)
@@ -881,7 +881,7 @@ ifeq ($(COMPCERT_NEW),true)
 	@echo "" >>.depend
 else
 	# DEPENDENCIES DEFAULT
-	$(COQDEP) $(DEPFLAGS) 2>&1 >.depend `find $(filter $(wildcard *), $(DIRS) refinedVST) -name "*.v"` | grep -v 'Warning:.*found in the loadpath' || true
+	$(COQDEP) $(DEPFLAGS) 2>&1 >.depend `find $(filter $(wildcard *), $(DIRS) refinedVST cmplr_src1_passes_temp.v) -name "*.v"` | grep -v 'Warning:.*found in the loadpath' || true
 endif
 ifeq ($(COMPCERT_BUILD_FROM_SRC),true)
 	# DEPENDENCIES TO BUILD COMPCERT FROM SOURCE
