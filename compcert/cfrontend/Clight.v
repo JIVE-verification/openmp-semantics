@@ -85,6 +85,8 @@ Definition typeof (e: expr) : type :=
   | Ealignof _ ty => ty
   end.
 
+Definition env := PTree.t (block * type). (* map variable -> location & type *)
+
 (** ** Statements *)
 
 (** Clight statements are similar to those of Compcert C, with the addition
@@ -135,15 +137,58 @@ Variant reduction_clause_type :=
               (* assume that the parser figures out the scope *)
               (red_vars: list ident).
 
+Variant construct_kind : Type :=
+  | ParallelConstruct
+  | ForConstruct
+  | SingleConstruct
+  | BarrierConstruct
+.
+
 Variant pragma_label : Type :=
   | OMPParallel (num_threads: nat)
-                (privatization_clause: privatization_clause_type)
-                (reduction_clauses: list reduction_clause_type)
-  | OMPParallelEnd
-  | OMPFor (privatization_clause: privatization_clause_type)
-           (reduction_clauses: list reduction_clause_type)
-  | OMPForEnd
-  | OMPBarrier
+                (pc pc_first: privatization_clause_type)
+                (rcs: list reduction_clause_type)
+  | OMPFor (pc pc_first: privatization_clause_type)
+           (rcs: list reduction_clause_type)
+  | OMPSingle (pc pc_first: privatization_clause_type)
+  | OMPBarrier (b: bool) (* true if ending a region *)
+               (s_tag: construct_kind)
+                (* the pragma that it is elaborated from;
+                  if it is BarrierConstruct, it corresponds to a
+                  barrier pragma and is not elaborated. *)
+  (* we assume the frontend does not put variables in pc or rcs in
+     fn_temps so they are all addressable in the memory, instead of being
+     allocated on stack.
+     TODO remove the relative pass in CompCert;
+     for now a conforming Clight AST can be obtained by adding a dummy dereference
+     statement for those idents in the source program to force CompCert to allocate
+     them on heap. *)
+  (* we also assume that identifiers listed in OMPPriv are all declared in the
+     enclosing function, and they do not repeat within a single OMPPriv label. *)
+  | OMPPriv (pc: privatization_clause_type)
+            (* variables in the first private clause are privaized and also
+               initialized to values of their original copies *)
+            (pc_first: privatization_clause_type)
+            (* variables in rcs are also privatized AND initialized according to 
+              their types and the reduction operator, following specific rules in
+              the OpenMP spec. *)
+            (rcs: list reduction_clause_type)
+  | OMPPrivEnd (*  le_x is an env contrived to variables that are in env at the time
+                  of the corresponding privatization;
+                  ge_x are idents that are in the global env at the time of privatization.
+                  After freeing the privatized copies, env:=env \Union ge_x, i.e.
+                  entries in le_x overwrites env to restore the mapping for privatized vars
+                  to the original copies, and removes entries in ge_x so lookup for them
+                  will fallback to the global env. *)
+               (ge_x: list ident)
+               (le_x: env)
+  | OMPRed (rcs: list reduction_clause_type)
+           (* ge_0 and le_0 are envs when the thread starts executing the construct,
+              and they are for looking up the address of the original copy of a
+              reduction variable.
+              ge_0 is the genv_symb field of a Genv.t. *)
+           (ge_0: PTree.t block)
+           (le_0: env)
 .
 
 Inductive statement : Type :=
@@ -161,7 +206,10 @@ Inductive statement : Type :=
   | Sswitch : expr -> labeled_statements -> statement  (**r [switch] statement *)
   | Slabel : label -> statement -> statement
   | Sgoto : label -> statement
-  (* each Spragma in the program is indexed by a unique natural number *)
+  (* each Spragma in the program is indexed by a unique natural number;
+     pragma_label stores information about the pragma;
+     the scope of an Spragma is the associated statement;
+     some Spragma (e.g. OMPBarrier) ignores this associated statement. *)
   | Spragma : nat -> pragma_label -> statement -> statement
 
 with labeled_statements : Type :=            (**r cases of a [switch] *)
@@ -243,8 +291,6 @@ Definition globalenv (p: program) :=
 (** The local environment maps local variables to block references and
   types.  The current value of the variable is stored in the
   associated memory block. *)
-
-Definition env := PTree.t (block * type). (* map variable -> location & type *)
 
 Definition empty_env: env := (PTree.empty (block * type)).
 
