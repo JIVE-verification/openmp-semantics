@@ -420,11 +420,7 @@ Notation " x '.after' " := (after x) (at level 3).
 Notation " x '.parents' " := (parents x) (at level 3).
 Notation " x '.forest' " := (forest x) (at level 3).
 
-(* contexts regarding a team are the parallel_construct_context and the team_executing_context. *)
-Variant parallel_construct_context' :=
-| team_ctx_parallel : red_vars -> (* used for the reduction at the end of the for construct *)
-                  parallel_construct_context'.
-Definition parallel_construct_context : Type := (nat * parallel_construct_context').
+Definition parallel_construct_context : Type := nat.
             
 
 (* the context for the current team executing region.
@@ -435,8 +431,7 @@ Variant team_executing_context' :=
 | team_ctx_for :
             (* The team workload split. Is A partition of iterations.
                A thread works on a chunk of iterations. *)
-           (list $ list chunk) -> 
-           red_vars -> (* used for the reduction at the end of the for construct *)
+           (list $ list chunk) ->
            team_executing_context'
 | team_ctx_single : team_executing_context'
 | team_ctx_barrier : team_executing_context'
@@ -446,28 +441,12 @@ Definition team_executing_context : Type := (nat * team_executing_context').
 (* we assume each pragma in the program have distinct index, and two teamcontexts
   come from the same pragma if they have the same index. *)
 Definition matching_par_ctx (c1 c2: parallel_construct_context) : bool :=
-  c1.1 =? c2.1.
+  c1 =? c2.
 
 (* two team executing contexts are the same if they have the same index and
    their corresponding team_executing_context' are the same. *)
 Definition matching_tm_exec_ctx (c1 c2: team_executing_context) : bool :=
   c1.1 =? c2.1.
- 
-
-(* a thread context is the *)
-Variant thread_context :=
-| thread_ctx_parallel : pv_map -> thread_context
-| thread_ctx_for : pv_map -> thread_context
-| thread_ctx_single : pv_map -> thread_context
-| thread_ctx_barrier : thread_context.
-
-Definition pv_of_thread_ctx (td_ctx: thread_context) : pv_map :=
-  match td_ctx with
-  | thread_ctx_parallel pvm => pvm
-  | thread_ctx_for pvm => pvm
-  | thread_ctx_single pvm => pvm
-  | thread_ctx_barrier => pvm_init (* an empty pv map *)
-  end.
 
 (* TODO fix variable convention: tz should always be the first or last argument *)
 Section OpenMPThreads.
@@ -522,7 +501,7 @@ Section OpenMPThreads.
       Implicit Types (pvm : pv_map) (ot: o_ctx) (tree: team_tree) (tz ptz:team_zipper)
         (i: ident) (ge orig_ge: genv) (le orig_le: env)
         (ce:composite_env) (m: mem) (b:Values.block) (ty:type)
-        (td_ctx: thread_context) (tm_exec_ctx: team_executing_context) (par_ctx: parallel_construct_context)
+        (tm_exec_ctx: team_executing_context) (par_ctx: parallel_construct_context)
         (tid:nat).
 
       (* the first thread in the program *)
@@ -594,9 +573,9 @@ Section OpenMPThreads.
 
       (* the parallel pragma spawns a team of threads, each gets initialized thread contexts;
          sets team_ctxs.1. *)
-      Definition spawn_team (tid: nat) (team_mates: list nat) rvs (spar_index:nat) t : option team_tree :=
+      Definition spawn_team (tid: nat) (team_mates: list nat) (spar_index:nat) t : option team_tree :=
         update_tid tid t (λ leaf, leaf <| kids := map team_tree_init (tid::team_mates) |>
-                                               <| data; o_team_ctxs := Some ((spar_index, team_ctx_parallel rvs), None) |>).
+                                       <| data; o_team_ctxs := Some (spar_index, None) |>).
 
       (* Maintenance of the team context when tid enters a team executing construct.
           if it is the first thread in the team that enters this construct <-> data.o_team_ctxs.2 is None,
@@ -691,6 +670,37 @@ Section OpenMPThreads.
         match parent_tree_of tid tz with
         | None => true
         | Some pref => pref.this.data.(t_tid) =? tid
+        end.
+
+      Definition has_ectx_iff_team_executed tz tid (s_tag: construct_kind) : Prop :=
+        ∃ tz_p: team_zipper, Some tz_p = parent_tree_of tid tz ∧
+        ∃ pctx maybe_ectx, Some (pctx, maybe_ectx) = tz.this.data.(o_team_ctxs) ∧
+        ((s_tag = ForConstruct ∨ s_tag = SingleConstruct) <-> isSome maybe_ectx).
+      
+      Definition tz_end_ctx tz tid (s_tag: construct_kind) idx : option team_zipper :=
+        (* pref ← parent_tree_of tid tz;
+        tm_ctxs ← ref.this.data.(o_team_ctxs); *)
+        match s_tag with
+        | ForConstruct =>
+          tz_ectx ← team_pop_team_exec_context tz tid;
+          let (tz, ectx) := (tz_ectx: (team_zipper * team_executing_context)) in
+          match ectx with
+          | (idx', team_ctx_for _) => if idx' =? idx then Some tz else None
+          | _ => None
+          end
+        | SingleConstruct =>
+          tz_ectx ← team_pop_team_exec_context tz tid;
+          let (tz, ectx) := (tz_ectx: (team_zipper * team_executing_context)) in
+          match ectx with
+          | (idx', team_ctx_single) => if idx' =? idx then Some tz else None
+          | _ => None
+          end
+        | ParallelConstruct =>
+          tz_pctx ← team_pop_parallel_context tz tid;
+          let (tz, pctx) := (tz_pctx: (team_zipper * parallel_construct_context)) in
+          if pctx =? idx then team_fire tid tz else None
+        (* if executing an explicit barrier construct, the team cannot have an ectx *)
+        | BarrierConstruct => None
         end.
 
     End OpenMPTeam.

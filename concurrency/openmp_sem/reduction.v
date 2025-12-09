@@ -147,29 +147,30 @@ From stdpp Require Import base list.
 
         Definition rv_empty : red_vars := @PTree.empty red_var.
 
-        (* the initial value for reduction operation `red_id_type` and ctype `ty` is `v` *)
+        (* the initial value for the implicitly privatized reduction variable,
+           of some reduction operation `red_id_type` and ctype `ty` is `v` *)
         Definition init_val ge le te m red_id_type ty : option val :=   
             exp ← initializer_expr red_id_type ty;
             @eval_expr_fun ge le te m exp.
 
-        Definition init_rvs_for_one_rc (rvs: red_vars) (rc : reduction_clause_type) ge le m  : option red_vars :=
+        (* find the block and type of the original copy, from the original environments ge_0 and le_0 *)
+        Definition init_rvs_for_one_rc (rvs: red_vars) (rc : reduction_clause_type) ge_0 le_0 m : option red_vars :=
             match rc with
             | RedClause red_op red_var_names =>
                 foldr (λ i maybe_rvs,
                         rvs ← maybe_rvs;
-                        b_ty ← get_b_ty ge le i;
+                        b_ty ← get_b_ty ge_0 le_0 i;
                         let rv := Build_red_var red_op b_ty in
                         Some $ PTree.set i rv rvs)
                         (Some rvs) red_var_names
             end.
         
         (* initialize all var contribs *)
-        Definition init_rvs (rcs : list reduction_clause_type) ge le m : option red_vars :=
+        Definition init_rvs (rcs : list reduction_clause_type) ge le_0 m : option red_vars :=
             let rvs := @PTree.empty red_var in
             foldr (λ rc maybe_rvs, 
                      rvs ← maybe_rvs;
-                     init_rvs_for_one_rc rvs rc ge le m) (Some rvs) rcs.
-
+                     init_rvs_for_one_rc rvs rc ge le_0 m) (Some rvs) rcs.
 
         (* go through the local envs of kids, combine reduction contributions for i.*)
         Definition combine_one_var (i:ident) red_op (orig_val: val) ty ce m le_lst : option val :=
