@@ -390,8 +390,8 @@ Module DryHybridMachine.
             (Htree': Some ttree' = spawn_team tid0 new_tids idx ttree),
             pragma_step cnt0 Hcompat tp'' m' ttree' []
     | step_for :
-      forall c c' le te rvs_env stmt cln lb incr 
-       (team_workloads : list $ list chunk) my_workload
+      forall c c' le te rvs_env stmt cln lb incr iter_num mates_tids team_size
+       chunks (team_workloads : list $ list chunk) (my_workload: list chunk)
        (ttree' : team_tree)
        tp' tnum pc pc_first rcs m' idx tm_exec_ctx
       (Hcode: getThreadC cnt0 = Kblocked c)
@@ -403,8 +403,11 @@ Module DryHybridMachine.
       (* exists a chunk split of the iterations *)
       (His_cln: make_canonical_loop_nest stmt = Some cln)
       (Hlb_of_loop: lb_of_loop cln ge le te m = Some lb)
-      (Hincr_of_loop: incr_of_loop cln ge le te m = Some incr),
-      (* TODO angelically decides a chunk_split with parameters lb, incr, iter_num *)
+      (Hincr_of_loop: incr_of_loop cln ge le te m = Some incr)
+      (Hiter_num_of_loop: iter_num_of_loop cln ge le te m = Some iter_num)
+      (Hmates_tids: Some mates_tids = team_mates_tids tid0 ttree)
+      (Hteam_size: team_size = length mates_tids)
+      (chunkSplit: ChunkSplit lb incr iter_num team_size chunks team_workloads),
       forall
       (* 1. first thread encountering the for-construct adds the team_exec_ctx
             for the for-construct, including reduction info and a partition of
