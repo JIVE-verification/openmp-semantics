@@ -185,48 +185,46 @@ Module DryHybridMachine.
       end.
   
     (* Notation "'SBarrier' idx b ck" := *)
-    Definition SBarrier idx b ck :=
+    Definition Sbarrier idx b ck :=
       Spragma idx (OMPBarrier b ck) Sskip.
 
     (* ge, le stores reduction vars' original copies' addresses *)
-    Definition SRed idx rcs ge_0 le_0 :=
-      Spragma idx (OMPRed rcs ge_0 le_0) Sskip.
+    Definition Sred idx rcs rcs_env :=
+      Spragma idx (OMPRed rcs rcs_env) Sskip.
 
-    Definition SPriv idx pc pc_first rcs s :=
+    Definition Spriv idx pc pc_first rcs s :=
       Spragma idx (OMPPriv pc pc_first rcs) s.
 
-    Definition SBRB idx ck rcs ge_0 le_0 : statement :=
+    Definition SBRB idx ck rcs rcs_env : statement :=
       let SBR :=
         match rcs with
         | [] => Sskip
-        | _ => Ssequence (SBarrier idx false ck) (SRed idx rcs ge_0 le_0)
+        | _ => Ssequence (Sbarrier idx false ck) (Sred idx rcs rcs_env)
         end in
-      Ssequence SBR (SBarrier idx true ck).
+      Ssequence SBR (Sbarrier idx true ck).
 
-    Definition SprivEnd idx le_x ge_x :=
-      Spragma idx (OMPPrivEnd le_x ge_x) Sskip.
+    Definition SprivEnd idx pvs le_0 :=
+      Spragma idx (OMPPrivEnd pvs le_0) Sskip.
 
     (* ge is genv_symb *)
-    Definition transform_state_parallel (ge: genv) (c: Clight_core.state)  (is_leader:bool) : option Clight_core.state :=
-      let ge_0 := Genv.genv_symb ge in
+    Definition transform_state_parallel (c: state) (rcs_env: env) (is_leader:bool) : option state :=
       match c with
       | Clight_core.Pragmastate idx (OMPParallel tn pc pc_first rcs) (f,s,k,le,te) =>
         (* need to bring threads in a `Pragmastate ParallelEnd` state to implement blocking/barrier for the parent *)
-        let s' := Ssequence s (SBRB idx ParallelConstruct rcs ge_0 le) in
-        let s'' := SPriv idx pc pc_first rcs s' in
+        let s' := Ssequence s (SBRB idx ParallelConstruct rcs rcs_env) in
+        let s'' := Spriv idx pc pc_first rcs s' in
         let k' := if is_leader then k else Kstop in
         Some (Clight_core.State f s'' k' le te)
       | _ => None
       end.
 
-    Definition transform_state_for (ge: genv) (c: Clight_core.state) (my_workload: list chunk) (cln: CanonicalLoopNest) : option Clight_core.state :=
-      let ge_0 := Genv.genv_symb ge in
+    Definition transform_state_for (c: state) (rcs_env: env) (my_workload: list chunk) (cln: CanonicalLoopNest) : option state :=
       match c with
       | Clight_core.Pragmastate idx (OMPFor pc pc_first rcs) (f,s,k,le,te) =>
         (* need to bring threads in a `Pragmastate ParallelEnd` state to implement blocking/barrier for the parent *)
-         let s' := Ssequence (transform_chunks my_workload cln)           
-                             (SBRB idx ForConstruct rcs ge_0 le) in
-         let s'' := SPriv idx pc pc_first rcs s' in
+         let s' := Ssequence (transform_chunks my_workload cln)
+                             (SBRB idx ForConstruct rcs rcs_env) in
+         let s'' := Spriv idx pc pc_first rcs s' in
         Some (Clight_core.State f s'' k le te)
       | _ => None
       end.
@@ -282,8 +280,6 @@ Module DryHybridMachine.
 
     Definition ce := ge.(genv_cenv).
 
-    Parameter permJoinFun : res -> res -> option res.
-
     Definition Kblocked_at (ct:ctl) : option C :=
        match ct with
       | Kblocked c => Some c
@@ -296,6 +292,13 @@ Module DryHybridMachine.
       | _ => None
       end.
 
+    Definition get_state (ct:ctl) :option C :=
+      match ct with
+      | Kblocked c => Some c
+      | Krun c => Some c
+      | _ => None
+      end.
+  
     Definition permMapJoinPair (pmap1 pmap2 pmap3: res) : Prop :=
       permMapJoin pmap1.1 pmap2.1 pmap3.1 ∧
       permMapJoin pmap1.2 pmap2.2 pmap3.2.
@@ -347,11 +350,20 @@ Module DryHybridMachine.
             | None => emptyPerm
             end) tids.
 
+    Definition make_rvs_env_i (i: ident) ge le rvs_env : option env :=
+      b_ty ← clight_fun.get_b_ty ge le i;
+      Some (PTree.set i b_ty rvs_env).
+    
+    Definition make_rvs_env (rcs: list reduction_clause_type) ge le : option env :=
+      foldr (λ i maybe_rvs_env,
+          rvs_env ← maybe_rvs_env;
+          make_rvs_env_i i ge le rvs_env) (Some empty_env) (rcs_priv_idents rcs).
+
     Inductive pragma_step {tid0 tp m} {ttree: team_tree}
               (cnt0:containsThread tp tid0)(Hcompat:mem_compatible tp m):
       thread_pool -> mem -> team_tree -> list machine_event -> Prop :=
     | step_parallel :
-        forall (tp' tp'' tp''':thread_pool) c c'_l c'_nl ge m' f
+        forall (tp' tp'' tp''':thread_pool) c c'_l c'_nl le rvs_env m'
           ttree' (num_threads:nat) pc pc_first rcs (new_tids: list nat) idx
           perm (perms:list res),
           forall
@@ -367,91 +379,21 @@ Module DryHybridMachine.
             (* perms is an angelic split of the original permission perm *)
             (HangleSplit: permMapJoin_list perms perm)
             (Hperms_length: length perms = num_threads)
-            (Hf: Some f = get_f c)
-            (Hc': Some c'_l = transform_state_parallel ge c true)
-            (Hc': Some c'_nl = transform_state_parallel ge c false)
+            (* rvs_env stores the mapping from idents to (block, type) of the original copies of a reduction var. *)
+            (Hle: Some le = get_le c)
+            (Hrvs_env: Some rvs_env = make_rvs_env rcs ge le)
+            (Hc': Some c'_l = transform_state_parallel c rvs_env true)
+            (Hc': Some c'_nl = transform_state_parallel c rvs_env false)
             (Htp': tp' = updThread cnt0 (Krun c'_l) (nth 0 perms emptyPerm))
             (Htp'': (new_tids, tp'') = addThreads tp' c'_nl (tl perms))
             (* 2. add new team to team_tree, sets info about parallel construct as a team context *)
             (Htree': Some ttree' = spawn_team tid0 new_tids idx ttree),
-            (* 3. after spawning new threads, all the threads are Krun.
-               for each thread in team, do privatization, and add pv_map as thread context. *)
-            (* let team_tids := tid0::new_tids in
-            forall
-            (Htree'': Some (tp''', m'', ttree'') = foldr (
-                (* NOTE it would be more natural to iterate through the siblings and
-                  update team_zipper along the way, but to implmenet it as a terminating
-                  recursion (needs to update the team_zipper being recursed on while ensuring
-                  well-foundedness) may not be simpler than simply iterating through the tids. *)
-                λ tid maybe_tp_m_ttree,
-                tp_m_ttree ← maybe_tp_m_ttree;
-                let '(tp, m, ttree) := tp_m_ttree in
-                cnt_i ← maybeContainsThread tp tid;
-                c ← Kblocked_at $ getThreadC cnt_i;
-                le ← get_le c;
-                maybe_pvm_le'_m' ← pvm_priv_start pc m ge le;
-                let '(pvm, le', m') := maybe_pvm_le'_m' in
-                (* add pv_map as thread context *)
-                let td_ctx := thread_ctx_parallel pvm in
-                ttree' ← mate_add_td_ctx tid td_ctx ttree;
-                c' ← update_stmt_le c Sskip le';
-                let tp' := updThreadC cnt_i (Krun c') in
-                Some (tp', m', ttree')
-              ) (Some (tp'', m', ttree')) team_tids),
-              pragma_step cnt0 Hcompat tp''' m'' ttree'' [external tid0 $ omp_par tid0 new_tids] *)
-            pragma_step cnt0 Hcompat tp'' m' ttree' [external tid0 $ omp_par tid0 new_tids]
-    (* End of a parallel region. 
-       End a privatization and reduction scope, combine results to memory.
-       Collect permission for threads at the end of its parallel region and transfer to parent.
-       non-parent teammates are halted. *)
-    (* | step_parallel_end :
-        forall tp' tp'' tp''' m' m'' ttree' tz' ttree'' ttree''' mates_tids le_lst rvs
-        permSum cnt_parent (par_ctx:parallel_construct_context) idx evs
-          (Hinv : invariant tp)
-          (* 1. pop the team's parallel context, verify that
-            every thread is stuck at the same OMPParallelEnd as recorded in the context, 
-            and collect their le, combine reduction contribution to memory. *)
-          (Hmates_tids: Some mates_tids = team_mates_tids tid0 ttree)
-          (Hpar_ctx: Some (tz', par_ctx) = team_pop_parallel_context (from_stree ttree) tid0)
-          (Httree': Some ttree' = to_stree tz')
-          (Hpar_ctx_check: par_ctx = (idx, team_ctx_parallel rvs))
-          (Hall_teammates_at_parallel_end: Some le_lst = all_at_pragma tp mates_tids OMPParallelEnd idx)
-          (Hreduce: Some m' = rvs_combine_reduction_contribs rvs le_lst ce m)
-          (* 2. iterate through kids, pop thread context, end privatization *)
-          (Hend_pr: Some (permSum, tp', m'', ttree'') = foldr (λ tid maybe_permSum_tp_m_tz,
-              permSum_tp_m_tz ← maybe_permSum_tp_m_tz;
-              let '(permSum, tp, m, tz) := permSum_tp_m_tz in
-              cnt_i ← maybeContainsThread tp tid;
-              permSum' ← permJoinFun permSum (getThreadR cnt_i);
-              c ← Kblocked_at $ getThreadC cnt_i;
-              le ← get_le c;
-              ttree'_th_ctx ← mate_pop_thread_context ttree tid ;
-              let '(ttree', th_ctx) := ttree'_th_ctx in
-              match th_ctx with
-              | thread_ctx_parallel pvm =>
-                m' ← pvm_free_private pvm ce m le;
-                le' ← pvm_restore_le pvm le;
-                c' ← update_stmt_le c Sskip le';
-                let tp' := updThread cnt_i (Krun c') emptyPerm in
-                Some (permSum', tp', m', ttree')
-              | _ => None
-              end)
-            (Some (emptyPerm, tp, m', ttree')) mates_tids)
-          (* 3. fire teammates. this checks that there is no team contexts and no thread contexts
-            in the team. *)
-          (Hfireteam: Some ttree''' = tz ← team_fire tid0 (from_stree ttree''); to_stree tz)
-          (* 4. give collected permission back to parent. *)
-          (Hcnt_parent: Some cnt_parent = maybeContainsThread tp'' tid0)
-          (Htp''': tp''' = updThreadR cnt_parent permSum)
-          (Hevs : evs = [external tid0 $ omp_bar mates_tids;
-                         (* FIXME add reduction related internal events; can we just quantify over these events? *)
-                         external tid0 $ omp_bar mates_tids]),
-          pragma_step cnt0 Hcompat tp''' m'' ttree''' evs *)
+            pragma_step cnt0 Hcompat tp'' m' ttree' []
     | step_for :
-      forall c c' c'' ge le le' te stmt cln lb incr 
+      forall c c' le te rvs_env stmt cln lb incr 
        (team_workloads : list $ list chunk) my_workload
-       (ttree' ttree'' ttree''': team_tree)
-       tp' tnum pc pc_first rcs pvm m' idx tm_exec_ctx rvs
+       (ttree' : team_tree)
+       tp' tnum pc pc_first rcs m' idx tm_exec_ctx
       (Hcode: getThreadC cnt0 = Kblocked c)
       (Hat_pragma: at_pragma semSem c = Some (idx, OMPFor pc pc_first rcs))
       (* next statement is a canonical loop nest *)
@@ -463,59 +405,21 @@ Module DryHybridMachine.
       (Hlb_of_loop: lb_of_loop cln ge le te m = Some lb)
       (Hincr_of_loop: incr_of_loop cln ge le te m = Some incr),
       (* TODO angelically decides a chunk_split with parameters lb, incr, iter_num *)
-      let threadPerm := getThreadR cnt0 in
       forall
       (* 1. first thread encountering the for-construct adds the team_exec_ctx
             for the for-construct, including reduction info and a partition of
             iterations. *)
-      (Hrvs: Some rvs = init_rvs rcs ge le m)
       (Htm_exec_ctx: tm_exec_ctx = (idx, team_ctx_for team_workloads) )
       (Httree': Some ttree' = tz' ← mate_maybe_add_team_exec_ctx (from_stree ttree) tid0 tm_exec_ctx;
                               to_stree tz')
-      (* 2. start privatization *)
-      (Hpriv_start: Some (pvm, le', m') = pvm_priv_start pc m ge le)
-      (Hc': Some c' = update_le c le')
-      (* 3. update current statement to be my workload *)
-      (Htnum: Some tnum = get_thread_num tid0 (from_stree ttree''))
+      (* 2. update current statement to be my workload *)
+      (Htnum: Some tnum = get_thread_num tid0 (from_stree ttree'))
       (Hchunks: Some my_workload = nth_error team_workloads tnum)
-      (Hc'': Some c'' = transform_state_for ge c' my_workload cln)
-      (* 4. update tp with the new c'' *)
-      (Htp': tp' = updThread cnt0 (Krun c'') threadPerm),
-      pragma_step cnt0 Hcompat tp' m' ttree'' []
-   (* | step_for_end:
-    forall tp' m' m'' tz' ttree' ttree'' mates_tids le_lst work_split rvs idx evs
-      (Hinv : invariant tp)
-      (* 1. every thread must be stuck at OMPForEnd. Collect their le,
-        combine reduction contribution to memory. *)
-      (Htm_exec_ctx: Some (tz', (idx, team_ctx_for work_split rvs)) = team_pop_team_exec_context (from_stree ttree) tid0)
-      (Httree': Some ttree' = to_stree tz')
-      (Hmates_tids: Some mates_tids = team_mates_tids tid0 ttree)
-      (Hall_teammates_at_for_end: Some le_lst = all_at_pragma tp mates_tids OMPForEnd idx)
-      (*   load reduction variable name, initial value and reduction operation. *)
-      (Hreduce: Some m' = rvs_combine_reduction_contribs rvs le_lst ce m)
-      (* 2. pop thread ctx. End priv. *)
-      (Hend_pr: Some (tp', m'', ttree'') = foldr (λ tid maybe_tp_m_ttree,
-          tp_m_ttree ← maybe_tp_m_ttree;
-          let '(tp, m, ttree) := tp_m_ttree in
-          cnt_i ← maybeContainsThread tp tid;
-          c ← Kblocked_at $ getThreadC cnt_i;
-          le ← get_le c;
-          ttree'_th_ctx ← mate_pop_thread_context ttree tid ;
-          let '(ttree', th_ctx) := ttree'_th_ctx in
-          match th_ctx with
-          | thread_ctx_parallel pvm =>
-            m' ← pvm_free_private pvm ce m le;
-            le' ← pvm_restore_le pvm le;
-            c' ← update_stmt_le c Sskip le';
-            let tp' := updThread cnt_i (Krun c') emptyPerm in
-            Some (tp', m', ttree')
-          | _ => None
-          end)
-        (Some (tp, m', ttree')) mates_tids)
-        (Hevs : evs = [external tid0 $ omp_bar mates_tids;
-                         (* FIXME add reduction related internal events; can we just quantify over these events? *)
-                         external tid0 $ omp_bar mates_tids]),
-        pragma_step cnt0 Hcompat tp' m'' ttree'' evs *)
+      (Hrvs_env: Some rvs_env = make_rvs_env rcs ge le)
+      (Hc'': Some c' = transform_state_for c rvs_env my_workload cln)
+      (* 4. update tp with the new c' *)
+      (Htp': tp' = updThreadC cnt0 (Krun c')),
+      pragma_step cnt0 Hcompat tp' m' ttree' []
     | step_barrier :
       (* if all teammates are at barrier, move them across the barrier. *)
       forall m idx (is_ending_region:bool) (s_tag: construct_kind) mates_tids 
@@ -546,7 +450,81 @@ Module DryHybridMachine.
       (Hperms2: perms2 = getThreadRs tp'' mates_tids)
       (Hperms1_eq: permMapJoin_list perms1 perm_sum)
       (Hperms2_eq: permMapJoin_list perms2 perm_sum),
-      pragma_step cnt0 Hcompat tp'' m ttree' [external tid0 $ omp_bar mates_tids]
+      pragma_step cnt0 Hcompat tp'' m ttree' []
+    | step_priv :
+      forall c c' c'' le le' te s pc pc_first rcs pvs m' idx tp'
+      (Hinv : invariant tp)
+      (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m')
+      (Hcode: getThreadC cnt0 = Kblocked c)
+      (Hat_pragma: at_pragma semSem c = Some (idx, OMPPriv pc pc_first rcs))
+      (Hs: Some s = get_stmt c)
+      (Hle: Some le = get_le c)
+      (Hte: Some te = get_te c)
+      (* do privatization *)
+      (Hpriv: Some (le', m') = privatization pc pc_first rcs m ge le te)
+      (Hc': Some c' = update_le c le')
+      (* update current statement *)
+      (Hpvs: pvs = priv_idents pc pc_first rcs)
+      (Hc'': Some c'' = update_stmt c' (Ssequence s (SprivEnd idx pvs le)))
+      (* update tp with the new state and permissions from m', similar to dry_step (i.e. a Clight step) *)
+      (Htp': tp' = updThread cnt0 (Krun c'') (getCurPerm m', (getThreadR cnt0).2)),
+      pragma_step cnt0 Hcompat tp' m' ttree []
+    | step_priv_end :
+      forall c c' c'' le le' le_0 pvs m' idx tp'
+        (Hinv : invariant tp)
+        (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m')
+        (Hcode: getThreadC cnt0 = Kblocked c)
+        (Hat_pragma: at_pragma semSem c = Some (idx, OMPPrivEnd pvs le_0))
+        (Hle: Some le = get_le c)
+        (* end privatization *)
+        (Hpriv_end: Some (le', m') = end_privatization pvs ge le le_0 m)
+        (Hc': Some c' = update_le c le')
+        (* forward statement *)
+        (Hc': Some c'' = update_stmt c' Sskip)
+        (* update tp with the new state and permissions from m', similar to dry_step (i.e. a Clight step) *)
+        (Htp': tp' = updThread cnt0 (Krun c'') (getCurPerm m', (getThreadR cnt0).2)),
+        pragma_step cnt0 Hcompat tp' m' ttree []
+    (* semantics for Sred: the leader does the redution, other threads treat it as no-op. *)
+    | step_red_leader :
+      forall c c' rcs rvs_env m' idx tp' (le_lst : list env)
+      mates_tids
+      (Hinv : invariant tp)
+      (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m')
+      (Hcode: getThreadC cnt0 = Kblocked c)
+      (Hat_pragma: at_pragma semSem c = Some (idx, OMPRed rcs rvs_env))
+      (* 1. the leader does reduction *)
+      (His_leader: is_leader tid0 (from_stree ttree) = true)
+      (* 2. find teammmates' local envs (including tid0's), do reduction.
+         it is safe to lookup other thread's le and compile them into le_lst,
+         but reading values in memorywith le_lst during reduction requires permissions of these reduction locations.
+         This should be ensured by the previous barrier. *)
+      (Hmates_tids: Some mates_tids = team_mates_tids tid0 ttree)
+      (Hle_lst: Some le_lst = foldr (λ i maybe_le_lst,
+            le_lst ← maybe_le_lst;
+            cnt_i ← maybeContainsThread tp i;
+            c_i ← get_state (getThreadC cnt_i);
+            le_i ← get_le c_i;
+            Some $ le_i::le_lst)
+            (Some []) mates_tids)
+      (Hreduce: Some m' = reduction rcs ge le_lst rvs_env m)
+      (* forward statement *)
+      (Hc': Some c' = update_stmt c Sskip)
+      (* update tp with the new state and permissions from m', similar to dry_step (i.e. a Clight step) *)
+      (Htp': tp' = updThread cnt0 (Krun c') (getCurPerm m', (getThreadR cnt0).2)),
+      pragma_step cnt0 Hcompat tp' m' ttree []
+    | step_red_not_leader :
+      forall c c' rcs rvs_env m' idx tp'
+      (Hinv : invariant tp)
+      (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m')
+      (Hcode: getThreadC cnt0 = Kblocked c)
+      (Hat_pragma: at_pragma semSem c = Some (idx, OMPRed rcs rvs_env))
+      (* 1. the leader does reduction *)
+      (His_leader: is_leader tid0 (from_stree ttree) = false)
+      (* forward statement *)
+      (Hc': Some c' = update_stmt c Sskip)
+      (* update tp with the new state and permissions from m', similar to dry_step (i.e. a Clight step) *)
+      (Htp': tp' = updThreadC cnt0 (Krun c')),
+      pragma_step cnt0 Hcompat tp' m ttree []
     .
 
     Definition threadStep: forall {tid0 ms m},

@@ -87,6 +87,10 @@ Definition typeof (e: expr) : type :=
 
 Definition env := PTree.t (block * type). (* map variable -> location & type *)
 
+(** The temporary environment maps local temporaries to values. *)
+
+Definition temp_env := PTree.t val.
+
 (** ** Statements *)
 
 (** Clight statements are similar to those of Compcert C, with the addition
@@ -180,15 +184,15 @@ Variant pragma_label : Type :=
                   entries in le_x overwrites env to restore the mapping for privatized vars
                   to the original copies, and removes entries in ge_x so lookup for them
                   will fallback to the global env. *)
-               (ge_x: list ident)
+               (pvs: list ident)
                (le_x: env)
   | OMPRed (rcs: list reduction_clause_type)
-           (* ge_0 and le_0 are envs when the thread starts executing the construct,
-              and they are for looking up the address of the original copy of a
-              reduction variable.
-              ge_0 is the genv_symb field of a Genv.t. *)
-           (ge_0: PTree.t block)
-           (le_0: env)
+           (* rcs_env stores the block and type of the original copy of a reduction variable.
+              Ideally it can just be the global env of type `genv` and the local env of type `env`
+              before reduction variables are privatized, but genv is defined later and
+              depends on statements, which depends on pragma_label, so to avoid circularity
+              we only store relevant information as an env instead. *)
+           (rcs_env: env)
 .
 
 Inductive statement : Type :=
@@ -293,10 +297,6 @@ Definition globalenv (p: program) :=
   associated memory block. *)
 
 Definition empty_env: env := (PTree.empty (block * type)).
-
-(** The temporary environment maps local temporaries to values. *)
-
-Definition temp_env := PTree.t val.
 
 (** [deref_loc ty m b ofs bf v] computes the value of a datum
   of type [ty] residing in memory [m] at block [b], offset [ofs],
