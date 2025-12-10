@@ -393,7 +393,7 @@ Module HybridMachineSig.
                      (Hcmpt: mem_compatible ms m)
                      (Hcode: getThreadC ctn = Krun c)
                      (Hperm: install_perm Hcmpt ctn m')
-                     (Hat_external: at_pragma semSem c = Some X)
+                     (Hat_pragma: at_pragma semSem c = Some X)
                      (Hinv: invariant ms)
                      (Hms': updThreadC ctn (Kblocked c) = ms'),
       suspend_thread_pragma' m ctn ms'.

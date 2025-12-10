@@ -433,7 +433,11 @@ Variant team_executing_context' :=
                A thread works on a chunk of iterations. *)
            (list $ list chunk) ->
            team_executing_context'
-| team_ctx_single : team_executing_context'
+| team_ctx_single :
+  (* the OpenMP thread number that identifies the thread that
+     executes the single construct *)
+  nat -> 
+  team_executing_context'
 | team_ctx_barrier : team_executing_context'
 .
 Definition team_executing_context : Type := (nat * team_executing_context').
@@ -692,7 +696,7 @@ Section OpenMPThreads.
           tz_ectx ← team_pop_team_exec_context tz tid;
           let (tz, ectx) := (tz_ectx: (team_zipper * team_executing_context)) in
           match ectx with
-          | (idx', team_ctx_single) => if idx' =? idx then Some tz else None
+          | (idx', team_ctx_single _) => if idx' =? idx then Some tz else None
           | _ => None
           end
         | ParallelConstruct =>

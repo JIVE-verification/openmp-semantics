@@ -36,12 +36,20 @@ Import RecordSetNotations.
 Require Import Coq.Relations.Relation_Operators.
 
 Lemma at_external_SEM_eq:
-   forall ge c m, memory_semantics.at_external (csem (msem (CLC_evsem ge))) c m =
-   match c with
-   | Callstate (Ctypes.External ef _ _ _) args _ => 
-       if ef_inline ef then None else Some (ef, args)
-   | _ => None
- end.
+  forall ge c m, memory_semantics.at_external (csem (msem (CLC_evsem ge))) c m =
+  match c with
+  | Callstate (Ctypes.External ef _ _ _) args _ => 
+      if ef_inline ef then None else Some (ef, args)
+  | _ => None
+  end.
+Proof. auto. Qed.
+
+Lemma at_pragma_SEM_eq:
+   forall ge c, memory_semantics.at_pragma (csem (msem (CLC_evsem ge))) c =
+  match c with
+  | Pragmastate n pl _ => Some (n, pl)
+  | _ => None
+  end.
 Proof. auto. Qed.
 
 #[export] Instance ClightSem ge : Semantics :=
@@ -145,6 +153,7 @@ Module DryHybridMachine.
         lockRes_valid: lr_valid (lockRes tp) (*well-formed locks*)
       }.
 
+
     (** Steps*)
     Inductive dry_step {tid0 tp m} (cnt: containsThread tp tid0)
               (Hcompatible: mem_compatible tp m) :
@@ -210,7 +219,6 @@ Module DryHybridMachine.
     Definition transform_state_parallel (c: state) (rcs_env: env) (is_leader:bool) : option state :=
       match c with
       | Clight_core.Pragmastate idx (OMPParallel tn pc pc_first rcs) (f,s,k,le,te) =>
-        (* need to bring threads in a `Pragmastate ParallelEnd` state to implement blocking/barrier for the parent *)
         let s' := Ssequence s (SBRB idx ParallelConstruct rcs rcs_env) in
         let s'' := Spriv idx pc pc_first rcs s' in
         let k' := if is_leader then k else Kstop in
@@ -221,11 +229,20 @@ Module DryHybridMachine.
     Definition transform_state_for (c: state) (rcs_env: env) (my_workload: list chunk) (cln: CanonicalLoopNest) : option state :=
       match c with
       | Clight_core.Pragmastate idx (OMPFor pc pc_first rcs) (f,s,k,le,te) =>
-        (* need to bring threads in a `Pragmastate ParallelEnd` state to implement blocking/barrier for the parent *)
          let s' := Ssequence (transform_chunks my_workload cln)
                              (SBRB idx ForConstruct rcs rcs_env) in
          let s'' := Spriv idx pc pc_first rcs s' in
         Some (Clight_core.State f s'' k le te)
+      | _ => None
+      end.
+
+    Definition transform_state_single (c: state) (is_chosen:bool) : option state :=
+      match c with
+      | Clight_core.Pragmastate idx (OMPSingle pc pc_first) (f,s,k,le,te) =>
+        let s' := if is_chosen then s else Sskip in
+        let s'' := Ssequence s' (Sbarrier idx true SingleConstruct) in
+        let s''' := Spriv idx pc pc_first [] s'' in
+        Some (Clight_core.State f s''' k le te)
       | _ => None
       end.
 
@@ -395,6 +412,7 @@ Module DryHybridMachine.
        (ttree' : team_tree)
        tp' tnum pc pc_first rcs m' idx tm_exec_ctx
       (Hcode: getThreadC cnt0 = Kblocked c)
+      (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m')
       (Hat_pragma: at_pragma semSem c = Some (idx, OMPFor pc pc_first rcs))
       (* next statement is a canonical loop nest *)
       (Hstmt: Some stmt = get_stmt c)
@@ -423,10 +441,26 @@ Module DryHybridMachine.
       (* 4. update tp with the new c' *)
       (Htp': tp' = updThreadC cnt0 (Krun c')),
       pragma_step cnt0 Hcompat tp' m' ttree' []
+    | step_single :
+      forall c c' pc pc_first m' idx tm_exec_ctx tnum chosen_tnum tp' ttree' 
+      (Hcode: getThreadC cnt0 = Kblocked c)
+      (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m')
+      (Hat_pragma: at_pragma semSem c = Some (idx, OMPSingle pc pc_first))
+      (* check ectx, see if I am the chosen team mate *)
+      (Htm_exec_ctx: tm_exec_ctx = (idx, team_ctx_single chosen_tnum) )
+      (Htnum: Some tnum = get_thread_num tid0 (from_stree ttree))
+      (Httree': Some ttree' = tz' ← mate_maybe_add_team_exec_ctx (from_stree ttree) tid0 tm_exec_ctx;
+                              to_stree tz')
+      (* update state *)
+      (Hc': Some c' = transform_state_single c (chosen_tnum =? tnum))
+      (Htp': tp' = updThreadC cnt0 (Krun c')),
+      pragma_step cnt0 Hcompat tp' m' ttree' []
     | step_barrier :
       (* if all teammates are at barrier, move them across the barrier. *)
-      forall m idx (is_ending_region:bool) (s_tag: construct_kind) mates_tids 
+      forall m' idx (is_ending_region:bool) (s_tag: construct_kind) mates_tids 
       ttree' tp' tp'' perms1 perms2 perm_sum
+      (Hinv : invariant tp)
+      (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m')
       (* 1. check all threads are at the same barrier, and then move them accross barrier *)
       (Hmates_tids: Some mates_tids = team_mates_tids tid0 ttree)
       (Hstep_barrier: Some tp' = foldr (λ tid maybe_tp,
