@@ -429,29 +429,29 @@ Definition f_main_omp_annot :=
   fn_body_annot :=
 (SsequenceT
   (SsequenceT
-    (SsetT _i (Econst_int (Int.repr 0) tint))
+    (SassignT (Evar _i tint) (Econst_int (Int.repr 0) tint)) (*TODO: write pass to replace Sset with Sassign and also to move fn_temps to fn_vars*)
     (SsequenceT
-      (SsetT _j (Econst_int (Int.repr 0) tint))
+      (SassignT (Evar _j tint) (Econst_int (Int.repr 0) tint))
       (SsequenceT
-        (SsetT _k (Econst_int (Int.repr 0) tint))
+        (SassignT (Evar _k tint) (Econst_int (Int.repr 0) tint))
         (SsequenceT
           (SsequenceT
-            (SsetT _i
-              (Ebinop Oadd (Etempvar _i tint) (Econst_int (Int.repr 1) tint)
-                tint))
+            (SassignT (Evar _i tint)
+              (Ebinop Oadd (Evar _i tint) (Econst_int (Int.repr 1) tint)
+                tint)) (* add this section (SsequenceT) to parallel_body_T*)
             (SsequenceT
               (SsetT _j (Econst_int (Int.repr 1) tint))
               (SsequenceT
-                (SsetT _k (Econst_int (Int.repr 1) tint))
-                (SsetT _l (Econst_int (Int.repr 0) tint)))))
+                (SassignT (Evar _j tint) (Econst_int (Int.repr 1) tint))
+                (SassignT (Evar _l tint)  (Econst_int (Int.repr 0) tint)))))
           (SsequenceT (SpragmaT full_pragma_info 0 (OMPParallel 2 (PrivClause (_j::nil)) ((RedClause RedIdPlus (_k::nil))::nil))
                   parallel_body_T)     
           (ScallT None
             (Evar _printf (Tfunction (Tcons (tptr tschar) Tnil) tint
                             {|cc_vararg:=(Some 1); cc_unproto:=false; cc_structret:=false|}))
             ((Evar ___stringlit_1 (tarray tschar 24)) ::
-             (Etempvar _i tint) :: (Etempvar _j tint) ::
-             (Etempvar _k tint) :: nil)))))))
+             (Evar _i tint) :: (Evar _j tint) ::
+             (Evar _k tint) :: nil)))))))
   (SreturnT (Some (Econst_int (Int.repr 0) tint))))
   |}.
 
@@ -560,24 +560,25 @@ Section SpawnPass.
     end. (*remove this hardcoded variable*)
 
   Definition spawn_threads_pass n idents arg_ty :=
-  let (ni1, idents'):= (gen_ident idents) in
-    let (ni2, idents''):= (gen_ident idents') in
+  let (ni1, idents):= (gen_ident idents) in
+    let (ni2, idents):= (gen_ident idents) in
+    let (par_data_name, idents):= (gen_ident idents) in
     match spawn_thread n idents ni1 ni2 with
       | (spawn_thread_code, all_idents, thread_ids) => (SsequenceT (SsequenceT (
                     SsequenceT 
                       spawn_thread_code (SsequenceT (SassignT
                 (Efield
-                  (Evar ___par_routine1_data_1 (Tstruct arg_ty noattr))
+                  (Evar par_data_name (Tstruct arg_ty noattr))
                   _i (tptr tint)) (Eaddrof (Evar _i tint) (tptr tint))) (SassignT
                   (Efield
-                    (Evar ___par_routine1_data_1 (Tstruct arg_ty noattr)) (*fix these hardcodings*)
+                    (Evar par_data_name (Tstruct arg_ty noattr)) (*fix these hardcodings*)
                     _k (tptr tint)) (Eaddrof (Evar _k tint) (tptr tint))))) (ScallT None
                           (Evar __par_routine1 (Tfunction
                                                  (Tcons (tptr tvoid) Tnil)
                                                  (tptr tvoid) cc_default))
                           ((Ecast
                              (Eaddrof
-                               (Evar ___par_routine1_data_1 (Tstruct arg_ty noattr))
+                               (Evar par_data_name (Tstruct arg_ty noattr))
                                (tptr (Tstruct arg_ty noattr)))
                              (tptr tvoid)) :: nil))) (post_spawn_thread_code thread_ids),
                              all_idents,
@@ -788,7 +789,9 @@ Declare Reduction fold_names := fold
 
 (* give generated idents names *)
 Definition data_ty : ident := 5%positive.
-Declare Reduction name_idents := fold data_ty.
+Definition unknown_ty : ident := 3%positive.
+Definition par_routine_data_type : ident := 2%positive.
+Declare Reduction name_idents := fold data_ty unknown_ty par_routine_data_type.
 
 Ltac pp_program prog :=
   let term := eval simpl_clight in prog in
