@@ -788,10 +788,11 @@ Declare Reduction fold_names := fold
   _t2 _makelock _spawn __par_routine1 _join_thread _freelock.
 
 (* give generated idents names *)
-Definition data_ty : ident := 5%positive.
-Definition unknown_ty : ident := 3%positive.
 Definition par_routine_data_type : ident := 2%positive.
-Declare Reduction name_idents := fold data_ty unknown_ty par_routine_data_type.
+Definition unknown_ty : ident := 3%positive.
+Definition par_routine_data_1 : ident := 4%positive.
+Definition data_ty : ident := 5%positive.
+Declare Reduction name_idents := fold par_routine_data_1 data_ty unknown_ty par_routine_data_type.
 
 Ltac pp_program prog :=
   let term := eval simpl_clight in prog in
