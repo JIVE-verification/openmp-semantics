@@ -559,20 +559,36 @@ Section SpawnPass.
     ((Etempvar thread_id tint) :: nil)) (post_spawn_thread_code rest_of_ids)
     end. (*remove this hardcoded variable*)
 
-  Definition spawn_threads_pass n idents arg_ty :=
+Fixpoint shared_vars_setup_in_spawn_thread (shared_vars : list (ident * type)) (par_data_name arg_ty: ident): statementT :=
+match shared_vars with 
+| shared_var::rest_of_list => (SsequenceT ((SassignT
+                (Efield
+                  (Evar par_data_name (Tstruct arg_ty noattr))
+                  (fst shared_var) (tptr (snd shared_var))) (Eaddrof (Evar (fst shared_var) (snd shared_var)) (tptr (snd shared_var)))))
+                  (shared_vars_setup_in_spawn_thread rest_of_list par_data_name arg_ty))
+| [] => SskipT
+end.
+
+Fixpoint reduction_vars_setup_in_spawn_thread (shared_vars : list (ident * type)) (par_data_name arg_ty: ident): statementT :=
+match shared_vars with 
+| shared_var::rest_of_list => (SsequenceT (SassignT
+                  (Efield
+                    (Evar par_data_name (Tstruct arg_ty noattr))
+                    (fst shared_var) (tptr (snd shared_var))) (Eaddrof (Evar (fst shared_var) (snd shared_var)) (tptr (snd shared_var))))
+                    (reduction_vars_setup_in_spawn_thread rest_of_list par_data_name arg_ty))
+| [] => SskipT
+end.
+
+  Definition spawn_threads_pass (p: pragma_info) n idents arg_ty :=
   let (ni1, idents):= (gen_ident idents) in
     let (ni2, idents):= (gen_ident idents) in
     let (par_data_name, idents):= (gen_ident idents) in
     match spawn_thread n idents ni1 ni2 with
       | (spawn_thread_code, all_idents, thread_ids) => (SsequenceT (SsequenceT (
                     SsequenceT 
-                      spawn_thread_code (SsequenceT (SassignT
-                (Efield
-                  (Evar par_data_name (Tstruct arg_ty noattr))
-                  _i (tptr tint)) (Eaddrof (Evar _i tint) (tptr tint))) (SassignT
-                  (Efield
-                    (Evar par_data_name (Tstruct arg_ty noattr)) (*fix these hardcodings*)
-                    _k (tptr tint)) (Eaddrof (Evar _k tint) (tptr tint))))) (ScallT None
+                      spawn_thread_code (SsequenceT 
+                      (shared_vars_setup_in_spawn_thread (shared_vars p) par_data_name arg_ty)
+                  (reduction_vars_setup_in_spawn_thread (reduction_vars p) par_data_name arg_ty))) (ScallT None
                           (Evar __par_routine1 (Tfunction
                                                  (Tcons (tptr tvoid) Tnil)
                                                  (tptr tvoid) cc_default))
@@ -754,7 +770,7 @@ Section SpawnPass.
             | OMPParallel nt pc rc =>
               let '(cd, ty_id, idents) := gen_par_routine_input_ty a idents in
               let '(s_body', idents, af, cds) := first_pass s_body idents temp_vars in
-              let '(new_body, idents, thread_ids) := spawn_threads_pass (nt - 1) idents ty_id in
+              let '(new_body, idents, thread_ids) := spawn_threads_pass a (nt - 1) idents ty_id in
               
               (SsequenceT new_body (post_spawn_thread_code thread_ids),
                 idents,
@@ -792,7 +808,7 @@ Definition par_routine_data_type : ident := 2%positive.
 Definition unknown_ty : ident := 3%positive.
 Definition par_routine_data_1 : ident := 4%positive.
 Definition data_ty : ident := 5%positive.
-Declare Reduction name_idents := fold par_routine_data_1 data_ty unknown_ty par_routine_data_type.
+Declare Reduction name_idents := fold data_ty par_routine_data_1 unknown_ty par_routine_data_type.
 
 Ltac pp_program prog :=
   let term := eval simpl_clight in prog in
