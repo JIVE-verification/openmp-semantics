@@ -520,7 +520,7 @@ Section SpawnPass.
       list ident (*list of thread ids*)
     ) :=
   match n with 
-  | O => (SskipT, [], []) 
+  | O => (SskipT, idents, []) 
   | S k =>
     let '(tl_stmt, idents, thread_ids) := spawn_thread k idents rou_id rou_arg_type_id in
     let (rou_arg_id, idents) := gen_ident idents in
@@ -579,17 +579,18 @@ match shared_vars with
 | [] => SskipT
 end.
 
-  Definition spawn_threads_pass (p: pragma_info) n idents arg_ty :=
+  Definition spawn_threads_pass (p: pragma_info) (n: nat) (idents: list ident) (arg_ty: ident): (statementT * list ident * list ident) :=
   let (ni1, idents):= (gen_ident idents) in
     let (ni2, idents):= (gen_ident idents) in
     let (par_data_name, idents):= (gen_ident idents) in
+    let (par_routine_name, idents) := (gen_ident idents) in
     match spawn_thread n idents ni1 ni2 with
       | (spawn_thread_code, all_idents, thread_ids) => (SsequenceT (SsequenceT (
                     SsequenceT 
                       spawn_thread_code (SsequenceT 
                       (shared_vars_setup_in_spawn_thread (shared_vars p) par_data_name arg_ty)
                   (reduction_vars_setup_in_spawn_thread (reduction_vars p) par_data_name arg_ty))) (ScallT None
-                          (Evar __par_routine1 (Tfunction
+                          (Evar par_routine_name (Tfunction
                                                  (Tcons (tptr tvoid) Tnil)
                                                  (tptr tvoid) cc_default))
                           ((Ecast
@@ -607,17 +608,17 @@ end.
 
   
   (* set up shared vars *)
-  Fixpoint set_up_shared_vars (shared_vars: list (ident * type)) (idents: list ident) (var_ident: ident) (par_data_ty: ident) (ident_matches: list (ident * ident * type)): (statementT * list (ident * ident * type)) :=
+  Fixpoint set_up_shared_vars (shared_vars: list (ident * type)) (idents: list ident) (var_ident: ident) (par_data_ty: ident) (ident_matches: list (ident * ident * type)): (statementT * list (ident * ident * type) * list ident) :=
   match shared_vars with 
-   | [] => (SskipT, ident_matches)
+   | [] => (SskipT, ident_matches, idents)
    | item::rest_of_list =>
-   let (new_ident, idents') := (gen_ident idents) in
-   let recursive_call := (set_up_shared_vars rest_of_list (idents') var_ident par_data_ty ([(new_ident, (fst item), (snd item))]++ident_matches)) in
+   let (new_ident, idents) := (gen_ident idents) in
+   let '(stmt, trpl, idents) := (set_up_shared_vars rest_of_list (idents) var_ident par_data_ty ([(new_ident, (fst item), (snd item))]++ident_matches)) in
     (((SsequenceT (SsetT new_ident
       (Efield
         (Ederef
           (Etempvar var_ident (tptr (Tstruct par_data_ty noattr)))
-          (Tstruct par_data_ty noattr)) (fst item) (tptr tint))) (fst recursive_call))), (snd recursive_call))
+          (Tstruct par_data_ty noattr)) (fst item) (tptr tint))) (stmt))), (trpl), idents)
    end.
 
   (* Definition ident_eq' p1 p2 : bool := ..
@@ -711,15 +712,15 @@ end.
               noattr in
   (cd, ty_id, idents).
 
-  Definition gen_par_routine (p: pragma_info) (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction :=
-    let (arg_id, idents) := gen_ident idents in
+  Definition gen_par_routine (p: pragma_info) (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction * list ident :=
+  let (arg_id, idents) := gen_ident idents in
     let params := ((arg_id, (tptr tvoid)) :: nil) in
     let f_body := s_body in
     let (arg_id', idents) := gen_ident (idents) in
     (* let (sec_ident, idents) := gen_ident (idents) in we need to generate the equiv of a in tgt1.c *)
-    let shared_vars_setup := (set_up_shared_vars (shared_vars p) (idents) arg_id arg_ty []) in
+    let (shared_vars_setup, idents) := (set_up_shared_vars (shared_vars p) (idents) arg_id arg_ty []) in
     let f_body_post_idents_replacement := mk_refs f_body (snd shared_vars_setup) in
-    makeAnnotatedFunction
+    (makeAnnotatedFunction
       (tptr tvoid)
       cc_default
       (params)
@@ -740,7 +741,7 @@ end.
       *)
    (SsequenceT (SsequenceT (SsequenceT (SsetT arg_id'
     (Ecast (Etempvar arg_id (tptr tvoid))
-      (tptr (Tstruct arg_ty noattr)))) f_body_post_idents_replacement) (fst shared_vars_setup)) SskipT).
+      (tptr (Tstruct arg_ty noattr)))) f_body_post_idents_replacement) (fst shared_vars_setup)) SskipT), idents).
   (* Definition parallel_region : (statementT * (list ident) * (list annotatedFunction)) :=
      let '(new_body, idents', routine_arg_ty) := spawn_thread (nt - 1) idents in
               (SsequenceT new_body post_spawn_thread_code,
@@ -762,25 +763,25 @@ end.
                 ((SifthenelseT a s1 s2), idents'', pr1++pr2, cd1++cd2)
     | SloopT a b =>        
         let '(s1, idents', pr1, cd1) := (first_pass a idents temp_vars) in 
-        let '(s2, idents'', pr2, cd2) := (first_pass b idents temp_vars) in
+        let '(s2, idents'', pr2, cd2) := (first_pass b idents' temp_vars) in
                 ((SloopT s1 s2), idents'', pr1++pr2, cd1++cd2)
     | SlabelT a b => let '(s1, idents', pr1, cd1) := (first_pass b idents temp_vars) in 
                     ((SlabelT a s1), idents', pr1, cd1)
     | SpragmaT a b c s_body => match c with 
             | OMPParallel nt pc rc =>
-              let '(cd, ty_id, idents) := gen_par_routine_input_ty a idents in
-              let '(s_body', idents, af, cds) := first_pass s_body idents temp_vars in
-              let '(new_body, idents, thread_ids) := spawn_threads_pass a (nt - 1) idents ty_id in
-              
-              (SsequenceT new_body (post_spawn_thread_code thread_ids),
-                idents,
-                (gen_par_routine a idents s_body' ty_id temp_vars)::af,
+              let '(s_body', idents', af, cds) := first_pass s_body idents temp_vars in
+              let '(cd, ty_id, idents'') := gen_par_routine_input_ty a idents' in
+              let (annotatedParRoutineFunc, idents'''):= (gen_par_routine a idents'' s_body' ty_id temp_vars) in
+              let '(new_body, idents'''', thread_ids) := spawn_threads_pass a (nt - 1) idents''' ty_id in
+              (new_body,
+                idents'''',
+                annotatedParRoutineFunc::af,
                 cd::cds)
-            | OMPFor i j => (s, [], [], [])
+            | OMPFor i j => (s, idents, [], [])
             (* | OMPBarrier =>SskipT *) (*may deal with later*)
-            | _ => (SskipT, [], [], [])
+            | _ => (SskipT, idents, [], [])
             end
-    |_ => (s, [], [], [])
+    |_ => (s, idents, [], [])
     end.
 
 Definition first_pass_eg :=
@@ -800,8 +801,8 @@ Declare Reduction simpl_clight := cbv -[
 (* fold Clight sugars back *)
 Declare Reduction fold_names := fold
   _i ___stringlit_1 _i _j _k _l _main _printf _lock_1
-  _lock_2 _atom_int ___par_routine1_data_1 __par_routine1_data_ty ___par_routine1_data_2
-  _t2 _makelock _spawn __par_routine1 _join_thread _freelock.
+  _lock_2 _atom_int
+  _t2 _makelock _spawn _join_thread _freelock.
 
 (* give generated idents names *)
 Definition par_routine_data_type : ident := 2%positive.
@@ -813,7 +814,7 @@ Declare Reduction name_idents := fold data_ty par_routine_data_1 unknown_ty par_
 Ltac pp_program prog :=
   let term := eval simpl_clight in prog in
   let term := eval fold_names in term in
-  let term := eval name_idents in term in
+  (* let term := eval name_idents in term in *)
   idtac "The term is:" term.
 
 Example pp_program_eg: False.
