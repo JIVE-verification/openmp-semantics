@@ -548,6 +548,10 @@ Section SpawnPass.
     (code, idents, thread_id::thread_ids)
   end.
 
+Lemma spawn_thread_idents_increasing:
+forall (idents: list ident)n a b , let '(stmt, idents', idents2) := spawn_thread n idents a b in
+~(Nat.ltb (length idents') (length idents)).
+Proof. Abort.
   Fixpoint post_spawn_thread_code (thread_ids: list ident): statementT := 
   match thread_ids with 
   | [] => SskipT
@@ -559,8 +563,8 @@ Section SpawnPass.
     ((Etempvar thread_id tint) :: nil)) (post_spawn_thread_code rest_of_ids)
     end. (*remove this hardcoded variable*)
 
-Fixpoint shared_vars_setup_in_spawn_thread (shared_vars : list (ident * type)) (par_data_name arg_ty: ident): statementT :=
-match shared_vars with 
+Fixpoint shared_vars_setup_in_spawn_thread (list_of_shared_vars : list (ident * type)) (par_data_name arg_ty: ident): statementT :=
+match list_of_shared_vars with 
 | shared_var::rest_of_list => (SsequenceT ((SassignT
                 (Efield
                   (Evar par_data_name (Tstruct arg_ty noattr))
@@ -569,8 +573,8 @@ match shared_vars with
 | [] => SskipT
 end.
 
-Fixpoint reduction_vars_setup_in_spawn_thread (shared_vars : list (ident * type)) (par_data_name arg_ty: ident): statementT :=
-match shared_vars with 
+Fixpoint reduction_vars_setup_in_spawn_thread (list_of_reduction_vars : list (ident * type)) (par_data_name arg_ty: ident): statementT :=
+match list_of_reduction_vars with 
 | shared_var::rest_of_list => (SsequenceT (SassignT
                   (Efield
                     (Evar par_data_name (Tstruct arg_ty noattr))
@@ -579,17 +583,27 @@ match shared_vars with
 | [] => SskipT
 end.
 
+Fixpoint shared_and_reduction_vars_setup_in_spawn_thread (p: pragma_info) (n: nat) (arg_ty: ident) (idents: list ident): (statementT * list ident) :=
+let (par_data_name, idents) := gen_ident idents in
+match n with 
+| O => ((SsequenceT 
+      (shared_vars_setup_in_spawn_thread (shared_vars p) par_data_name arg_ty)
+  (reduction_vars_setup_in_spawn_thread (reduction_vars p) par_data_name arg_ty)), idents)
+| S k => let (return_stmt, return_idents) := (shared_and_reduction_vars_setup_in_spawn_thread p k arg_ty idents) in ((SsequenceT (SsequenceT 
+      (shared_vars_setup_in_spawn_thread (shared_vars p) par_data_name arg_ty)
+  (reduction_vars_setup_in_spawn_thread (reduction_vars p) par_data_name arg_ty)) return_stmt), return_idents)
+end.
+
   Definition spawn_threads_pass (p: pragma_info) (n: nat) (idents: list ident) (arg_ty: ident): (statementT * list ident * list ident) :=
   let (ni1, idents):= (gen_ident idents) in
     let (ni2, idents):= (gen_ident idents) in
     let (par_data_name, idents):= (gen_ident idents) in
     let (par_routine_name, idents) := (gen_ident idents) in
+    let (shared_and_reduction_vars_setup_code, idents) := (shared_and_reduction_vars_setup_in_spawn_thread p n arg_ty idents) in
     match spawn_thread n idents ni1 ni2 with
       | (spawn_thread_code, all_idents, thread_ids) => (SsequenceT (SsequenceT (
                     SsequenceT 
-                      spawn_thread_code (SsequenceT 
-                      (shared_vars_setup_in_spawn_thread (shared_vars p) par_data_name arg_ty)
-                  (reduction_vars_setup_in_spawn_thread (reduction_vars p) par_data_name arg_ty))) (ScallT None
+                      spawn_thread_code shared_and_reduction_vars_setup_code) (ScallT None
                           (Evar par_routine_name (Tfunction
                                                  (Tcons (tptr tvoid) Tnil)
                                                  (tptr tvoid) cc_default))
