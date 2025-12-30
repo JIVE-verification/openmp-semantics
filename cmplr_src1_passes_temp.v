@@ -510,10 +510,14 @@ Section SpawnPass.
    foldr Pos.max 1%positive l.
 
   (*find largest int and increment by one, use list_max*)
-  Definition gen_ident (idents: list ident) : (ident * list ident) :=
+  Definition gen_ident' (idents: list ident) : ident :=
+     ((pos_max idents) + 1)%positive.
+
+  Definition gen_ident (idents: list ident) : ident * list ident :=
     let i' := ((pos_max idents) + 1)%positive in
     (i', i'::idents).
-(*consider using python to make gen_ident output more readable*)
+
+  (*consider using python to make gen_ident output more readable*)
   Fixpoint spawn_thread (n: nat) (idents: list ident) (rou_id rou_arg_type_id: ident):
     (statementT *
       list ident * (* all identifiers in the program, including the type name for par routine argument *)
@@ -548,10 +552,11 @@ Section SpawnPass.
     (code, idents, thread_id::thread_ids)
   end.
 
-Lemma spawn_thread_idents_increasing:
-forall (idents: list ident)n a b , let '(stmt, idents', idents2) := spawn_thread n idents a b in
-~(Nat.ltb (length idents') (length idents)).
-Proof. Abort.
+  Lemma spawn_thread_idents_increasing:
+  forall (idents: list ident)n a b , let '(stmt, idents', idents2) := spawn_thread n idents a b in
+  ~(Nat.ltb (length idents') (length idents)).
+  Proof. Abort.
+
   Fixpoint post_spawn_thread_code (thread_ids: list ident): statementT := 
   match thread_ids with 
   | [] => SskipT
@@ -621,18 +626,20 @@ end.
        4. joins spawned threads *)
 
   
-  (* set up shared vars *)
-  Fixpoint set_up_shared_vars (shared_vars: list (ident * type)) (idents: list ident) (var_ident: ident) (par_data_ty: ident) (ident_matches: list (ident * ident * type)): (statementT * list (ident * ident * type) * list ident) :=
+  (* set up shared vars
+     corresponds to C code: int *_i = b->i;
+     where b is the input to par_routine *)
+  Fixpoint set_up_shared_vars (shared_vars: list (ident * type)) (o_ids : list ident) (g_id_tys: list (ident * type)) (arg_id: ident) (arg_ty: ident) (sv_id_map: list (ident * ident * type)): (statementT * list (ident * ident * type) * list (ident * type)) :=
   match shared_vars with 
-   | [] => (SskipT, ident_matches, idents)
-   | item::rest_of_list =>
-   let (new_ident, idents) := (gen_ident idents) in
-   let '(stmt, trpl, idents) := (set_up_shared_vars rest_of_list (idents) var_ident par_data_ty ([(new_ident, (fst item), (snd item))]++ident_matches)) in
-    (((SsequenceT (SsetT new_ident
+   | [] => (SskipT, sv_id_map, [])
+   | (sv_id, sv_ty)::svs =>
+   let '(stmt, sv_id_map, g_ids) := (set_up_shared_vars svs o_ids g_id_tys arg_id arg_ty sv_id_map) in
+   let sv_id' := gen_ident' (o_ids ++ map fst g_ids) in
+    (((SsequenceT (SsetT sv_id'
       (Efield
         (Ederef
-          (Etempvar var_ident (tptr (Tstruct par_data_ty noattr)))
-          (Tstruct par_data_ty noattr)) (fst item) (tptr tint))) (stmt))), (trpl), idents)
+          (Etempvar arg_id (tptr (Tstruct arg_ty noattr)))
+          (Tstruct arg_ty noattr)) sv_id (tptr sv_ty))) stmt)), (sv_id', sv_id, sv_ty)::sv_id_map, (sv_id', tptr sv_ty)::g_ids)
    end.
 
   (* Definition ident_eq' p1 p2 : bool := ..
@@ -730,16 +737,15 @@ end.
   let (arg_id, idents) := gen_ident idents in
     let params := ((arg_id, (tptr tvoid)) :: nil) in
     let f_body := s_body in
-    let (arg_id', idents) := gen_ident (idents) in
-    (* let (sec_ident, idents) := gen_ident (idents) in we need to generate the equiv of a in tgt1.c *)
-    let (shared_vars_setup, idents) := (set_up_shared_vars (shared_vars p) (idents) arg_id arg_ty []) in
-    let f_body_post_idents_replacement := mk_refs f_body (snd shared_vars_setup) in
+    let (arg_id', idents) := gen_ident idents in
+    let '(init_shared_vars_stmt, sv_id_map, g_ids) := (set_up_shared_vars (shared_vars p) idents [] arg_id arg_ty []) in
+    let f_body_post_idents_replacement := mk_refs f_body sv_id_map in
     (makeAnnotatedFunction
       (tptr tvoid)
       cc_default
       (params)
-      (private_vars p) 
-      ([(arg_id, (tptr (Tstruct arg_ty noattr)))] ++ temp_vars ++ local_vars p)
+      (private_vars p++local_vars p)
+      (temp_vars++[(arg_id', tptr tvoid)]++g_ids)
       (* TO generate f_body of parallel routine f:
         1. cast argument to correct type (Ecast) (line 22 in tgt1.c)
         2. setup shared variable: a variable `i` to be shared becomes its reference version `_i`,
@@ -750,12 +756,11 @@ end.
         4. declare & init local vars // init is already done in s_body
         (*use pragma info to determine type of variable*)
         5. generate definition of par_routine_1_data_ty
-
-        How to 
       *)
    (SsequenceT (SsequenceT (SsequenceT (SsetT arg_id'
     (Ecast (Etempvar arg_id (tptr tvoid))
-      (tptr (Tstruct arg_ty noattr)))) f_body_post_idents_replacement) (fst shared_vars_setup)) SskipT), idents).
+      (tptr (Tstruct arg_ty noattr)))) f_body_post_idents_replacement) init_shared_vars_stmt) SskipT), idents++map fst g_ids).
+
   (* Definition parallel_region : (statementT * (list ident) * (list annotatedFunction)) :=
      let '(new_body, idents', routine_arg_ty) := spawn_thread (nt - 1) idents in
               (SsequenceT new_body post_spawn_thread_code,
