@@ -31,10 +31,10 @@ Definition _atom_int : ident := $"atom_int".
 Definition ___par_routine1_data_1 : ident := $"__par_routine1_data_1".
 Definition __par_routine1_data_ty : ident := $"_par_routine1_data_ty".
 Definition ___par_routine1_data_2 : ident := $"__par_routine1_data_2".
-Definition _t2 : ident := $"t2".
-Definition _makelock : ident := $"makelock".
+(* Definition _t2 : ident := $"t2". *)
+(* Definition _makelock : ident := $"makelock". *)
 Definition _spawn : ident := $"spawn".
-Definition __par_routine1 : ident := $"_par_routine1".
+(* Definition __par_routine1 : ident := $"_par_routine1". *)
 Definition _join_thread : ident := $"join_thread".
 Definition _freelock : ident := $"freelock".
 
@@ -821,19 +821,30 @@ Declare Reduction simpl_clight := cbv -[
 Declare Reduction fold_names := fold
   _i ___stringlit_1 _i _j _k _l _main _printf _lock_1
   _lock_2 _atom_int
-  _t2 _makelock _spawn _join_thread _freelock.
+_spawn _join_thread _freelock.
 
 (* give generated idents names *)
 Definition par_routine_data_type : ident := 2%positive.
-Definition unknown_ty : ident := 3%positive.
-Definition par_routine_data_1 : ident := 4%positive.
+Definition _a : ident := 3%positive.
+Definition _b: ident := 4%positive.
 Definition data_ty : ident := 5%positive.
-Declare Reduction name_idents := fold data_ty par_routine_data_1 unknown_ty par_routine_data_type.
+Definition __par_routine1 : ident := 6%positive.
+Definition __par_routine1_data_ty_again : ident := 7%positive.
+Definition __par_routine1_data_again : ident := 8%positive.
+Definition __par_routine1_again : ident := 9%positive.
+Definition par_routine_data_1 : ident := 10%positive.
+Definition par_routine_data_2 : ident := 11%positive.
+Definition par_routine_data_again : ident := 12%positive.
+Definition _t'3 : ident := 13%positive.
+Definition _t2 : ident := 14%positive.
+Declare Reduction name_idents := fold _t2 _t'3 par_routine_data_again par_routine_data_2 par_routine_data_1
+__par_routine1_again __par_routine1_data_again __par_routine1_data_ty_again
+__par_routine1 data_ty _b _a par_routine_data_type.
 
 Ltac pp_program prog :=
   let term := eval simpl_clight in prog in
   let term := eval fold_names in term in
-  (* let term := eval name_idents in term in *)
+  let term := eval name_idents in term in
   idtac "The term is:" term.
 
 Example pp_program_eg: False.
