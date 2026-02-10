@@ -599,13 +599,11 @@ match n with
   (reduction_vars_setup_in_spawn_thread (reduction_vars p) par_data_name arg_ty)) return_stmt), return_idents)
 end.
 
-  Definition spawn_threads_pass (p: pragma_info) (n: nat) (idents: list ident) (arg_ty: ident): (statementT * list ident * list ident) :=
-  let (ni1, idents):= (gen_ident idents) in
-    let (ni2, idents):= (gen_ident idents) in
+  Definition spawn_threads_pass (p: pragma_info) (n: nat) (idents: list ident) (arg_ty par_routine_data_name par_routine_data_type_name: ident): (statementT * list ident * list ident) :=
     let (par_data_name, idents):= (gen_ident idents) in
     let (par_routine_name, idents) := (gen_ident idents) in
     let (shared_and_reduction_vars_setup_code, idents) := (shared_and_reduction_vars_setup_in_spawn_thread p n arg_ty idents) in
-    match spawn_thread n idents ni1 ni2 with
+    match spawn_thread n idents par_routine_data_name par_routine_data_type_name with (*spawn thread needs to use generated data name and maybe generated type name*)
       | (spawn_thread_code, all_idents, thread_ids) => (SsequenceT (SsequenceT (
                     SsequenceT 
                       spawn_thread_code shared_and_reduction_vars_setup_code) (ScallT None
@@ -733,7 +731,7 @@ end.
               noattr in
   (cd, ty_id, idents).
 
-  Definition gen_par_routine (p: pragma_info) (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction * list ident :=
+  Definition gen_par_routine (p: pragma_info) (idents: list ident) (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) : annotatedFunction * list ident * ident * ident :=
   let (arg_id, idents) := gen_ident idents in
     let params := ((arg_id, (tptr tvoid)) :: nil) in
     let f_body := s_body in
@@ -759,7 +757,7 @@ end.
       *)
    (SsequenceT (SsequenceT (SsequenceT (SsetT arg_id'
     (Ecast (Etempvar arg_id (tptr tvoid))
-      (tptr (Tstruct arg_ty noattr)))) f_body_post_idents_replacement) init_shared_vars_stmt) SskipT), idents++map fst g_ids).
+      (tptr (Tstruct arg_ty noattr)))) f_body_post_idents_replacement) init_shared_vars_stmt) SskipT), idents++map fst g_ids, arg_id, arg_id').
 
   (* Definition parallel_region : (statementT * (list ident) * (list annotatedFunction)) :=
      let '(new_body, idents', routine_arg_ty) := spawn_thread (nt - 1) idents in
@@ -790,8 +788,8 @@ end.
             | OMPParallel nt pc rc =>
               let '(s_body', idents', af, cds) := first_pass s_body idents temp_vars in
               let '(cd, ty_id, idents'') := gen_par_routine_input_ty a idents' in
-              let (annotatedParRoutineFunc, idents'''):= (gen_par_routine a idents'' s_body' ty_id temp_vars) in
-              let '(new_body, idents'''', thread_ids) := spawn_threads_pass a (nt - 1) idents''' ty_id in
+              let '(annotatedParRoutineFunc, idents''', par_routine_data_name, par_routine_data_type_name):= (gen_par_routine a idents'' s_body' ty_id temp_vars) in
+              let '(new_body, idents'''', thread_ids) := spawn_threads_pass a (nt - 1) idents''' ty_id par_routine_data_name par_routine_data_type_name in
               (new_body,
                 idents'''',
                 annotatedParRoutineFunc::af,
@@ -828,18 +826,17 @@ Definition par_routine_data_type : ident := 2%positive.
 Definition _a : ident := 3%positive.
 Definition _b: ident := 4%positive.
 Definition data_ty : ident := 5%positive.
-Definition __par_routine1 : ident := 6%positive.
-Definition __par_routine1_data_ty_again : ident := 7%positive.
-Definition __par_routine1_data_again : ident := 8%positive.
-Definition __par_routine1_again : ident := 9%positive.
-Definition par_routine_data_1 : ident := 10%positive.
-Definition par_routine_data_2 : ident := 11%positive.
-Definition par_routine_data_again : ident := 12%positive.
-Definition _t'3 : ident := 13%positive.
-Definition _t2 : ident := 14%positive.
-Declare Reduction name_idents := fold _t2 _t'3 par_routine_data_again par_routine_data_2 par_routine_data_1
-__par_routine1_again __par_routine1_data_again __par_routine1_data_ty_again
-__par_routine1 data_ty _b _a par_routine_data_type.
+Definition __par_routine1__data_1_again_2 : ident := 6%positive.
+Definition __par_routine1 : ident := 7%positive.
+Definition __par_routine1__data_2 : ident := 8%positive.
+Definition __par_routine1__data_1_again : ident := 9%positive.
+Definition __par_routine1_data_1 : ident := 10%positive.
+Definition _t'3 : ident := 11%positive.
+Definition _t2 : ident := 12%positive.
+Declare Reduction name_idents := fold _t2 _t'3 
+__par_routine1_data_1 __par_routine1__data_1_again 
+__par_routine1__data_2 __par_routine1 __par_routine1__data_1_again_2
+data_ty _b _a par_routine_data_type.
 
 Ltac pp_program prog :=
   let term := eval simpl_clight in prog in
