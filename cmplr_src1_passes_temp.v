@@ -617,6 +617,10 @@ end.
                              all_idents,
                              thread_ids)
       end.
+  Lemma spawn_threads_pass_idents_increasing:
+  forall (idents: list ident) p n a b c, let '(stmt, idents', idents2) := spawn_threads_pass p n idents a b c in
+  ~(Nat.ltb (length idents') (length idents)).
+  Proof. Abort.
     (* 1. call spawn_thread to generate n threads
        2. init args for the main thread (line 58 in target c code)
        3. main thread runs routine (Scall)
