@@ -1,7 +1,7 @@
 From Coq Require Import String ZArith.
 From compcert Require Import Clightdefs AST.
 From compcert Require Export -(notations) lib.Maps.
-From stdpp Require Import base tactics.
+From stdpp Require Export base tactics.
 Local Open Scope string_scope.
 Local Open Scope clight_scope.
 (* same as in Clightdefs, just redefine notation *)
@@ -25,48 +25,58 @@ Ltac unfold_mbind :=
     | |- context[@mbind _ ?instance _ _ _] => unfold mbind; unfold instance
     end.
 
-(* TODO rename these;
-   destruct the first pattern matching in goal *)
-Ltac destruct_match_in_goal :=
+(* Helpers: find the first match/decide and apply do_destruct to the scrutinee.
+   The decide case always uses [->|] regardless of the do_destruct continuation. *)
+Ltac with_first_match_in_goal do_destruct :=
     lazymatch goal with
     | |- context[if (decide (?x = ?y)) then _ else _] => destruct (decide (x = y)) as [->|]; try done
-    | |- context[match (match ?x with _ => _ end) with _ => _ end] => destruct x eqn:?; try done
-    | |- context[match ?x with _ => _ end] => destruct x eqn:?; try done
+    | |- context[match (match ?x with _ => _ end) with _ => _ end] => do_destruct x
+    | |- context[match ?x with _ => _ end] => do_destruct x
     end.
 
-(* destruct the first pattern matching in hyp *)
-Ltac destruct_match :=
-    lazymatch goal with
-    | [ _ : context[if (decide (?x = ?y)) then _ else _] |- _] => destruct (decide (x = y)) as [->|]; try done
-    | [ _ : context[match (match ?x with _ => _ end) with _ => _ end] |- _] => destruct x eqn:?; try done
-    | [ _ : context[match ?x with _ => _ end] |- _] => destruct x eqn:?; try done
-    end.
-
-Ltac destruct_match_in H :=
+Ltac with_first_match_in H do_destruct :=
     lazymatch type of H with
     | context[if (decide (?x = ?y)) then _ else _] => destruct (decide (x = y)) as [->|]; try done
-    | context[match (match ?x with _ => _ end) with _ => _ end] => destruct x eqn:?; try done
-    | context[match ?x with _ => _ end] => destruct x eqn:?; try done
+    | context[match (match ?x with _ => _ end) with _ => _ end] => do_destruct x
+    | context[match ?x with _ => _ end] => do_destruct x
     end.
 
-Ltac destruct_match_no_eqn :=
+Ltac with_first_match_in_hyps do_destruct :=
     lazymatch goal with
     | [ _ : context[if (decide (?x = ?y)) then _ else _] |- _] => destruct (decide (x = y)) as [->|]; try done
-    | [ _ : context[match (match ?x with _ => _ end) with _ => _ end] |- _] => destruct x; try done
-    | [ _ : context[match ?x with _ => _ end] |- _] => destruct x; try done
+    | [ _ : context[match (match ?x with _ => _ end) with _ => _ end] |- _] => do_destruct x
+    | [ _ : context[match ?x with _ => _ end] |- _] => do_destruct x
     end.
 
-Ltac destruct_match_no_eqn_in H :=
-    lazymatch type of H with
-    | context[if (decide (?x = ?y)) then _ else _] => destruct (decide (x = y)) as [->|]; try done
-    | context[match (match ?x with _ => _ end) with _ => _ end] => destruct x; try done
-    | context[match ?x with _ => _ end] => destruct x; try done
-    end.
+(* TODO rename these;
+   destruct the first pattern matching in goal *)
+Tactic Notation "destruct_match" :=
+  with_first_match_in_goal ltac:(fun x => destruct x; try done).
+Tactic Notation "destruct_match"                "eqn" ":" ident(H2) :=
+  with_first_match_in_goal ltac:(fun x => destruct x eqn:H2; try done).
+Tactic Notation "destruct_match"                "eqn" ":" "?" :=
+  with_first_match_in_goal ltac:(fun x => destruct x eqn:?; try done).
 
-Tactic Notation "destruct_match!" := destruct_match_no_eqn.
-Tactic Notation "destruct_match" "in" ident(H) := destruct_match_in H.
-Tactic Notation "destruct_match!" "in" ident(H) := destruct_match_no_eqn_in H.
-Tactic Notation "destruct_match" "in" "|-*" := destruct_match_in_goal.
+Tactic Notation "destruct_match" "in" ident(H1) :=
+  with_first_match_in H1   ltac:(fun x => destruct x; try done).
+Tactic Notation "destruct_match" "in" ident(H1) "eqn" ":" ident(H2) :=
+  with_first_match_in H1   ltac:(fun x => destruct x eqn:H2; try done).
+Tactic Notation "destruct_match" "in" ident(H1) "eqn" ":" "?" :=
+  with_first_match_in H1   ltac:(fun x => destruct x eqn:?; try done).
+
+Tactic Notation "destruct_match" "in" "*" :=
+  with_first_match_in_hyps ltac:(fun x => destruct x; try done).
+Tactic Notation "destruct_match" "in" "*" "eqn" ":" ident(H2) :=
+  with_first_match_in_hyps ltac:(fun x => destruct x eqn:H2; try done).
+Tactic Notation "destruct_match" "in" "*" "eqn" ":" "?" :=
+  with_first_match_in_hyps ltac:(fun x => destruct x eqn:?; try done).
+
+(* look for a match in both goal and hyps, and destruct the first one *)
+Tactic Notation "destruct_match!" :=
+  progress (
+    destruct_match in * eqn:? ||
+    destruct_match eqn:?
+  ).
 
 (* mbind but allows filling in the MBind typeclass instance explicitly *)
 Notation "m '≫=@{' M '}' f" := (@mbind _ M _ _ f m) (at level 60, right associativity) : stdpp_scope.

@@ -72,11 +72,11 @@ Section MemOpsT.
     Proof.
         intros; unfold deref_loc_fun in *. destruct bf; try constructor.
         - destruct (access_mode ty) eqn:?.
-            + unfold deref_locT_fun in H. unfold_mbind_in_hyp. repeat destruct_match in H. inv H. eapply deref_locT_value; eauto.
-            + inv H. repeat destruct_match. inv H1. eapply deref_locT_reference; eauto.
-            + inv H. repeat destruct_match. inv H1. eapply deref_locT_copy; eauto.
+            + unfold deref_locT_fun in H. unfold_mbind_in_hyp. repeat destruct_match in H eqn:?. inv H. eapply deref_locT_value; eauto.
+            + inv H. repeat destruct_match!. inv H1. eapply deref_locT_reference; eauto.
+            + inv H. repeat destruct_match!. inv H1. eapply deref_locT_copy; eauto.
             + inv H. rewrite Heqm0 in H1. done.
-        - simpl in H. unfold_mbind_in_hyp. destruct_match. destruct p. inv H.
+        - simpl in H. unfold_mbind_in_hyp. destruct_match!. destruct p. inv H.
           by apply deref_locT_bitfield, load_bitfieldT_fun_correct1.
     Qed.
 
@@ -103,9 +103,7 @@ Section MemOpsT.
         intros; unfold assign_loc_fun in *.
         unfold assign_locT_fun in H.
         unfold_mbind_in_hyp.
-        destruct_match.
-        destruct_match.
-        destruct_match.
+        repeat destruct_match in H eqn:?.
         inv H.
         eapply assign_locT_value; done.
     Qed.
@@ -128,7 +126,7 @@ Section MemOpsT.
     Proof.
         intros until l. generalize ge le m. induction l; intros; simpl in H.
         - inv H. apply alloc_variablesT_nil.
-        - unfold_mbind_in_hyp. repeat destruct_match in H.
+        - unfold_mbind_in_hyp. repeat destruct_match in H eqn:?.
           inv H. econstructor 2; last apply IHl; done.
     Qed.
 End MemOpsT.
@@ -242,7 +240,7 @@ Section EvalExprFun.
                 ∀ bl ofs bt T, eval_lvalueT_fun exp = Some (bl, ofs, bt, T) -> eval_lvalueT ge e le m exp bl ofs bt T.
     Proof.
     intro exp; induction exp; intros; split; intros; inv H; try (by constructor);
-    try unfold_mbind_in_hyp; repeat destruct_match; inv H1.
+    try unfold_mbind_in_hyp; repeat destruct_match!; inv H1.
     - (* local *)
     fun_correct_tac.
     eapply evalT_Elvalue; eauto.
@@ -458,7 +456,7 @@ Section EVStepFun.
         | [ H: cl_evstep_fun _ _ = Some _ |- _ ] =>
             unfold cl_evstep_fun in H;
             try unfold_mbind_in_hyp;
-            repeat destruct_match;
+            repeat destruct_match!;
             inv H
         end.
 
@@ -473,7 +471,7 @@ Section EVStepFun.
             { rewrite Heqt0. repeat destruct a; subst; done. }
         + (* evstep_ifthenelse *)
             unfold cl_evstep_fun in H.
-            unfold_mbind_in_hyp; do 3 destruct_match in H.
+            unfold_mbind_in_hyp; do 3 destruct_match in H eqn:?.
             inv H.
             eapply evstep_ifthenelse; by fun_correct_tac.
         +(* Sreturn *) 
