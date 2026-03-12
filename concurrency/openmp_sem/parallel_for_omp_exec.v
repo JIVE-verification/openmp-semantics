@@ -16,6 +16,7 @@ Set Bullet Behavior "Strict Subproofs".
 Definition ge := Clight.globalenv prog.
 Instance Sem : Semantics := @Sem ge.
 Instance FinThreadPoolInst: ThreadPool := FinPool.FinThreadPool.
+Canonical FinThreadPoolInst.
 Instance OpenMP_semantics : MachineSig := @DryHybridMachineSig _ _.
 Definition OpenMP_steps := @Ostep_refl_trans_closure _ _.
 
@@ -155,7 +156,7 @@ Ltac mem_compat_tac :=
     revert cnt';
     rewrite /= /getThreadR /containsThread /num_threads /= => cnt';
     destruct tid'; [|lia]; simpl;
-    split; [ rewrite /getMaxPerm /=; apply cur_lt_max|apply empty_LT]
+    split; [ apply cur_lt_max|apply empty_LT]
   |intros;done..].
 
 
@@ -224,12 +225,12 @@ Ltac assert_cnt tid cnt Hcompat :=
   end.
 
 (* step_dry_tac can leave evstep execution uncompleted *)
-Ltac Ostep_step_dry_tac tid tp m ttree cnt Hcompat :=
+Ltac Ostep_step_dry_tac tid tp m ttree cnt Hcompat m' :=
   eapply (rt1n_trans Ostate Ostep _ (_, _, _, ttree, diluteMem _));
     first (
         (* take a threadStep *)
         rewrite /Ostep /MachStep /=;
-        eapply (thread_step tid _ tp _ m _ _ _ _ _ _ _);
+        eapply (thread_step tid _ tp _ m m' _ _ _ _ _ _);
         rewrite /= /DryHybridMachine.threadStep;
         step_dry_tac m Hcompat cnt
     ).
@@ -262,30 +263,126 @@ Ltac thread_step_tac tid tp' :=
     thread_step_clean_up cnt Hcompat tp tp'
   end.
 
-Ltac thread_step_tac_partial tid tp' :=
+Ltac thread_step_tac_partial tid tp' m' :=
   (*  like thread_step_tac, but may leave some subgoal *)
   let cnt := fresh "cnt" in
   let Hcompat := fresh "Hcompat" in
   assert_cnt tid cnt Hcompat;
   match current_config with
   | (?tp, ?ttree, ?m) =>
-    Ostep_step_dry_tac tid tp m ttree cnt Hcompat
+    Ostep_step_dry_tac tid tp m ttree cnt Hcompat m'
   end.
 
 Set Bullet Behavior "Strict Subproofs".
 
+(* Arguments Mem.mem_access : simpl never. *)
+
+Notation "os .schd" := (os.1.1.1.1) (at level 50).
+Notation "os .et" := (os.1.1.1.2) (at level 50).
+Notation "os .tp" := (os.1.1.2) (at level 50).
+Notation "os .ttree" := (os.1.2) (at level 50).
+Notation "os .m" := (os.2) (at level 50).
+
+Ltac forget a Ha :=
+  let Heqa := fresh "_mem" in
+  remember a as Ha eqn: Heqa; clear Heqa.
+
+(* simplify the term m (which is a mem) in hypothesis by forgetting the exact
+  term of m.(mem_access) in mem's last 3 fields, and foldling their types back
+  to the defininition in the mem record *)
+Ltac simplify_mem m :=
+  lazymatch goal with
+  | m := {| 
+      Mem.mem_contents := ?con;
+      Mem.mem_access := ?acc;
+      Mem.nextblock := ?nb
+    |} |- _ =>
+      let con' := eval simpl in con in
+      change con with con' in m;
+      let acc' := eval simpl in acc in
+      change acc with acc' in m;
+      let nb' := eval simpl in nb in
+      change nb with nb' in m
+  end;
+  lazymatch goal with
+  | m := {| Mem.mem_contents := ?con;
+        Mem.mem_access := ?acc;
+        Mem.nextblock := ?nb;
+        Mem.access_max := ?p1;
+        Mem.nextblock_noaccess := ?p2 ;
+        Mem.contents_default := ?p3
+    |} |- _ =>
+      let con' := eval simpl in con in
+      change con with con' in m;
+      let acc' := eval simpl in acc in
+      change acc with acc' in m;
+      let m_mem_contents := fresh m "_mem_contents" in
+      let m_mem_access := fresh m "_mem_access" in
+      let Hm_p1 := fresh m "_p1" in
+      let Hm_p2 := fresh m "_p2" in
+      let Hm_p3 := fresh m "_p3" in
+      forget p1 Hm_p1; forget p2 Hm_p2; forget p3 Hm_p3;
+      set con as m_mem_contents;
+      set acc as m_mem_access;
+      match type of Hm_p1 with
+      | ?ty_d => idtac ty_d "aaa"; change ty_d with
+        (forall b ofs, Mem.perm_order'' (m_mem_access !!!! b ofs Max) (m_mem_access !!!! b ofs Cur)) in Hm_p1 end;
+      match type of Hm_p2 with
+      | ?ty_e => idtac ty_e "bbb"; change ty_e with
+          (forall b ofs k, ~(Coqlib.Plt b nb) -> m_mem_access!!!!b ofs k = None) in Hm_p2 end;
+      match type of Hm_p3 with
+      | ?ty_f => idtac ty_f "ccc"; change ty_f with
+          (forall b, fst m_mem_contents !!!! b = Undef) in Hm_p3 end;
+      move Hm_p1 at top; move Hm_p2 at top; move Hm_p3 at top
+  end.
+
+Ltac set_mem_as m :=
+  lazymatch goal with
+  | |- context [ {| Mem.mem_contents := ?con;
+      Mem.mem_access := ?acc;
+      Mem.nextblock := ?nb;
+      Mem.access_max := ?p1;
+      Mem.nextblock_noaccess := ?p2 ;
+      Mem.contents_default := ?p3 |} ] =>
+      set ({| Mem.mem_contents := con;
+      Mem.mem_access := acc;
+      Mem.nextblock := nb;
+      Mem.access_max := p1;
+      Mem.nextblock_noaccess := p2 ;
+      Mem.contents_default := p3 |}) as m in * end.
+
+Ltac set_mem_as_in m hyp :=
+  lazymatch type of hyp with
+  | context [ {| Mem.mem_contents := ?con;
+      Mem.mem_access := ?acc;
+      Mem.nextblock := ?nb;
+      Mem.access_max := ?p1;
+      Mem.nextblock_noaccess := ?p2 ;
+      Mem.contents_default := ?p3 |} ] =>
+      set ({| Mem.mem_contents := con;
+      Mem.mem_access := acc;
+      Mem.nextblock := nb;
+      Mem.access_max := p1;
+      Mem.nextblock_noaccess := p2 ;
+      Mem.contents_default := p3 |}) as m in * end.
+
+Tactic Notation "set_mem_as" ident(m) := set_mem_as m.
+Tactic Notation "set_mem_as" ident(m) "in" ident(hyp) := set_mem_as_in m hyp.
+Tactic Notation "simplify_mem" "in" ident(hyp) "as" ident(m) :=
+  set_mem_as m in hyp; simplify_mem m; subst m.
+
 Theorem parallel_for_exec :
     ∀ os1, init_Ostate os1 ->
-    os1.1.1.1.1 = [0;0;0] ->
+    os1.schd = [0;0;0] ->
     ∃ os2, OpenMP_steps os1 os2.
 Proof.
     intros os1 H HU.
     (* get initial state *)
     unfold init_Ostate in H.
-    destruct H as (m&b&tp&U&Hm&Hb&Hinit&Hos).
+    destruct H as (m0&b&tp&U&Hm0&Hb&Hinit&Hos).
     simpl in Hinit. unfold DryHybridMachine.init_mach in Hinit.
-    destruct Hinit as (c&Hc&Hq). simpl in Hc. destruct_match! in Hc. clear e.
-    destruct Hc as [Hc _]. destruct_match in Hc. rename Heqo into Hf. rename Hq into Htp.
+    destruct Hinit as (c&Hc&Htp). simpl in Hc. destruct_match in Hc. clear e.
+    destruct Hc as [Hc _]. destruct_match in Hc eqn:Hf.
     inv' Hc.
     rewrite -> Hos in *.
     simpl in HU. subst.
@@ -293,63 +390,65 @@ Proof.
     | |- ∃ _, OpenMP_steps (?_U, ?_tr, ?_tp, ?_ttree, _) _ =>
         set (U' := _U); set (tr := _tr); set (tp := _tp); set (ttree := _ttree)
     end.
+    
+    rewrite /Genv.find_symbol /Genv.genv_symb in Hb.
+    unfold PTree.get in Hb.
+    simpl in Hb.
+    injection Hb as <-.
+    rewrite /Genv.find_funct_ptr /= in Hf.
+    injection Hf as <-.
 
     (* compute m *)
 
-    rewrite /Genv.init_mem /= in Hm.
+    rewrite /Genv.init_mem /= in Hm0.
+    rewrite /Mem.drop_perm in Hm0.
+    destruct_match in Hm0 eqn:Hm0_0.
+    (* Transparent Mem.alloc. rewrite /Mem.alloc in Hm0_0. Opaque Mem.alloc. *)
+    simpl in Hm0_0. inv Hm0_0.
+    simpl in Hm0.
+    destruct_match in Hm0 eqn:Hm1. injection Hm0 as <-.
 
-    set (PMap.set xH (λ (ofs : Z) (_ : perm_kind), if Coqlib.proj_sumbool (Coqlib.zle Z0 ofs) && Coqlib.proj_sumbool (Coqlib.zlt ofs (Zpos xH)) then Some Freeable else None)
-        (PMap.init (λ (_ : Z) (_ : perm_kind), None))) as m1_mem_access in Hm.
+    (* simplify m1 *)
+    set_mem_as m1. simplify_mem m1.
 
-    rewrite /Mem.drop_perm in Hm.
-    repeat destruct_match_q Hm.
-    inv Hm.
-    destruct_match_q Heqo.
-    match type of Heqo with
-    | Some ?m_term = Some m => remember m_term as m1_def eqn:Hm1_def
-    end.
-    inversion Heqo as [Hm]; clear Heqo.
-    symmetry in Hm.
+    (* extract intermediate memories.
+      Naming convention: mi is the memory when taking the `i`th step;
+      after m(i-1), the intermediate memories are mi_j:
+        m(i-1) -> mi_0 -> mi_1 -> mi_2 -> ... mi;
+      Hmi_j are hyps about mi_j.
+       *)
+    destruct ( Mem.alloc Mem.empty Z0 (Zpos xH)) as [m1_0 b1_0] eqn:Hm1_0.
+    (* extract information from m1 *)
+    apply Mem.nextblock_alloc in Hm1_0 as Hm1_0'. simpl in Hm1_0'.
+
+    (* simplify tp *)
+    unfold getCurPerm, Mem.mem_access in tp; simpl in tp.
 
     (* take steps *)
     eexists.
 
     (** take 1st step *)
-
-    rewrite  /= in Hm1_def.
-
     pose tid:nat:=0.
-    subst.
-    destruct (Mem.alloc m Z0 (Zpos (xO (xO xH)))) as [m2_0 b_i] eqn:Hm2_0.
-
-    destruct (Mem.alloc m2_0 Z0 (Zpos (xO (xO xH)))) as [m2_1 b_count] eqn:Hm2_1.
-
-    assert (Hb_i'' : b_i = Mem.nextblock m).
-    { rewrite /Mem.alloc /= in Hm2_0. injection Hm2_0 =>?? //. }
-    assert (Hb_i': b_i = xO xH).
-    { rewrite Hm Hm1_def /BinPos.Pos.succ /= // in Hb_i''. }
-    assert (Hb_count': b_count = xI xH).
-    { rewrite /Mem.alloc /= in Hm2_1. injection Hm2_1 => <-_ //.
-      rewrite /Mem.alloc /= in Hm2_0. injection Hm2_0 => _ <- /=.
-        lia. } *)
-
-    eexists.
-
+    (* technically it would be equivalent to not instantiate this evar and just
+       replace m' in Ostep_step_dry_tac with '_', but for some reason that makes
+       thread_step_tac_partial generates a huge proof term for the memory and
+       slows computation down drastically.  *)
+    evar (m2:mem).
     (* assert_cnt 0 cnt Hcompat. *)
-    thread_step_tac_partial 0 tp1.
+    thread_step_tac_partial 0 tp1 m2.
     {
-      rewrite /Genv.find_symbol /Genv.genv_symb in Hb.
-      unfold PTree.get in Hb.
-      simpl in Hb.
-      inv' Hb.
-      rewrite Hb /Genv.find_funct_ptr  /= in Hf.
-      inv' Hf.
-
       apply evstep_fun_correct.
-      rewrite /cl_evstep_fun /=.
-      done. }
+      rewrite /cl_evstep_fun /m2 /=.
+      destruct_match eqn: Hm3.
+      destruct_match eqn: Hm4.
+      simpl.
+      inv Hm3. inv Hm4. done.
+    }
     { done. }
-    simpl_mem.
+    simplify_mem m2.
+    destruct (Mem.alloc m1 Z0 (Zpos (xO (xO xH)))) as [m2_0 b2_0] eqn: Hm2_0.
+    destruct (Mem.alloc m2_0 Z0 (Zpos (xO (xO xH)))) as [m2_1 b2_1] eqn: Hm2_1.
+
     thread_step_clean_up cnt Hcompat tp tp2.
     
     (** take 2nd step *)
@@ -358,33 +457,31 @@ Proof.
     (** take 3rd step *)
     thread_step_tac 0 tp4.
 
+
+    assert (∃ m3, Some m3 = Mem.storev Mint32 m2 (Vptr b2_0 Ptrofs.zero) (Vint (Int.repr Z0))) as [m3 Hm3].
+    { 
+      Transparent Mem.store. rewrite /Mem.storev /Mem.store /=. Opaque Mem.store.
+      destruct (Mem.valid_access_dec _ _ _ _ _) as [|not_writable]; [ eexists; done | contradict not_writable].
+
+      eapply Mem.valid_access_alloc_other; eauto.
+      apply Mem.valid_access_freeable_any.
+      apply (Mem.valid_access_alloc_same _ _ _ _ _ Hm2_0); try done.
+      rewrite /BinInt.Z.divide. exists Z0. done.
+    }
+    
+    evar (m5: mem).
     (** take 4th step *)
-    thread_step_tac_partial 0 tp4.
+    thread_step_tac_partial 0 tp4 m5.
     1: {
-            apply evstep_fun_correct.
-            rewrite /cl_evstep_fun /=.
-            destruct decide; try done.
-            unfold_mbind.
-            rewrite Cop.cast_val_casted; last by constructor.
-            simpl.
-            Transparent Mem.store.
-            rewrite  /Mem.storev /Mem.store /=.
-
-            destruct (Mem.valid_access_dec _ _ _ _ _) as [|not_writable]; try done.
-            contradict not_writable.
-
-            eapply Mem.valid_access_alloc_other.
-            rewrite /Mem.alloc /=.
-            
-            apply Hm2_1.
-            apply Mem.valid_access_freeable_any.
-            apply (Mem.valid_access_alloc_same _ _ _ _ _ Hm2_0); try done.
-            rewrite /BinInt.Z.divide. exists Z0. done.
+      apply evstep_fun_correct.
+      rewrite /cl_evstep_fun /=.
+      destruct decide; try done. simpl.
+      rewrite Cop.cast_val_casted; last (by constructor); simpl.
+      rewrite -Hm3 /m5 //=.
     }
     1: { done. }
+    subst m5.
     thread_step_clean_up cnt Hcompat tp4 tp5.
-
-
 
     (* take 5th step *)
     thread_step_tac 0 tp5.
@@ -395,10 +492,6 @@ Proof.
     (* take 7th step: suspend_step_pragma
        TODO automate this *)
     assert_cnt 0 cnt7 Hcompat7.
-       match current_config with
-      | (?tp, _, ?m) =>
-        set m as m5
-      end.
         
     eapply (rt1n_trans Ostate Ostep _ (_, _, _, ttree, diluteMem _)).
     {
@@ -407,7 +500,7 @@ Proof.
         eapply (SuspendThreadPragma _ _ _ _ _ _ _ _ Hcompat7).
         { rewrite vector.vlookup_lookup //=. }
         { simpl. unfold DryHybridMachine.install_perm.
-          rewrite (@restrPermMap_eq m5 (proj1 (Hcompat7 0 _))) //. }
+          rewrite (@restrPermMap_eq m3 (proj1 (Hcompat7 0 _))) //. }
         { done. }
         { tp_inv_tac. }
         simpl.
@@ -419,16 +512,16 @@ Proof.
     assert_cnt 0 cnt8 Hcompat8.
     
     assert (Hres: res = (access_map * access_map)%type) by done.
-    pose amap8 := (getCurPerm m5).
+    pose amap8 := (getCurPerm m3).
     pose perm8 := (amap8, empty_map).
 
     pose curPerm_m1 := (PMap.map (λ (entry : Z → perm_kind → option permission) (ofs : Z),
-                        entry ofs Cur) (Mem.mem_access m)).         
+                        entry ofs Cur) (Mem.mem_access m1)).         
     assert (curPerm_m1_unit: permMapJoin curPerm_m1 curPerm_m1 curPerm_m1).
     {
       (* by case-analysis on block *)
       rewrite /permMapJoin => _b _ofs.
-      rewrite /curPerm_m1 Hm Hm1_def /=.
+      rewrite /curPerm_m1 /m1 /=.
       rewrite PMap.gmap /=.
       destruct (decide (_b = xH)) as [H_b|H_b].
       - rewrite H_b PMap.gss /=.
