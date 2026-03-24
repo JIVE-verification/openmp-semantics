@@ -129,6 +129,78 @@ Proof.
     rewrite !gmap1 /Coqlib.option_map PTree.gso //.
 Qed.
 
+Lemma permMapLt_refl : forall p, permMapLt p p.
+Proof.
+  intros. rewrite /permMapLt.
+  intros. rewrite /Mem.perm_order''.
+  destruct_match eqn:?.
+  constructor.
+Qed.
+
+Lemma permMapJoinPair_comm' : forall p1 p2 p,
+  permMapJoinPair p1 p2 p ->
+  permMapJoinPair p2 p1 p.
+Proof.
+  intros.
+  destruct H as [H1 H2]; split; intros ??; by apply permjoin_def.permjoin_comm.
+Qed.
+
+Lemma permMapJoinPair_comm : forall p1 p2 p,
+  permMapJoinPair p1 p2 p <->
+  permMapJoinPair p2 p1 p.
+Proof.
+  split; apply permMapJoinPair_comm'.
+Qed.
+
+Lemma permMapJoinPair_permMapLt_1 : forall p1 p2 p,
+  permMapJoinPair p1 p2 p ->
+  permMapLt p1.1 p.1.
+Proof.
+  intros.
+  destruct H as [H _].
+  eapply permMapJoin_lt; done.
+Qed.
+
+
+Lemma permMapJoinPair_permMapLt_2 : forall p1 p2 p,
+  permMapJoinPair p1 p2 p ->
+  permMapLt p2.1 p.1.
+Proof.
+  intros. apply permMapJoinPair_comm in H.
+  eapply permMapJoinPair_permMapLt_1; eauto.
+Qed.
+
+Lemma permMapJoin_list_permMapLt' :
+  forall ps p0  pi p,
+    permMapLt pi.1 p0.1 \/ pi ∈ ps ->
+    sepalg_list.fold_rel permMapJoinPair p0 ps p ->
+    permMapLt pi.1 p.1.
+Proof.
+  induction ps; intros.
+  - inv H0. destruct H.
+    + subst. done.
+    + inv H. 
+  - inv H0. eapply IHps in H6; eauto.
+    destruct H.
+    { left. trans p0.1; try done.
+      eapply permMapJoinPair_permMapLt_1; eauto. }
+    inv H.
+    { left.
+      eapply permMapJoinPair_permMapLt_2; eauto. }
+    { right. done. }
+Qed.
+
+Lemma permMapJoin_list_permMapLt :
+  forall pi ps p,
+    pi ∈ ps ->
+    permMapJoin_list ps p -> permMapLt pi.1 p.1.
+Proof.
+  intros.
+  destruct ps.
+  - inv H.
+  - eapply permMapJoin_list_permMapLt' in H0; eauto.
+Qed.
+
 Ltac destruct_match_goal :=
     lazymatch goal with
     | |- context[if (decide (?x = ?y)) then _ else _] => destruct (decide (x = y)) as [->|]; try done
@@ -479,7 +551,7 @@ Proof.
       apply (Mem.valid_access_alloc_same _ _ _ _ _ Hm2_0); try done.
       rewrite /BinInt.Z.divide. exists Z0. done.
     }
-    
+
     evar (m5: mem).
     (** take 4th step *)
     thread_step_tac_partial 0 tp4 m5.
@@ -523,8 +595,8 @@ Proof.
     assert_cnt 0 cnt8 Hcompat8.
     
     assert (Hres: res = (access_map * access_map)%type) by done.
-    pose amap8 := (getCurPerm m3).
-    pose perm8 := (amap8, empty_map).
+    pose cur_m3 := (getCurPerm m3).
+    pose perm8 := (cur_m3, empty_map).
 
     pose curPerm_m1 := (PMap.map (λ (entry : Z → perm_kind → option permission) (ofs : Z),
                         entry ofs Cur) (Mem.mem_access m1)).
@@ -564,7 +636,7 @@ Proof.
                      empty_map).
     pose perms8 := [perm8_1; perm8_2].
 
-    assert (Hamap8 : amap8 = (PMap.set b_count (int_perm $ Some Freeable) $
+    assert (Hcur_m3 : cur_m3 = (PMap.set b_count (int_perm $ Some Freeable) $
                                           PMap.set b_i (int_perm $ Some Freeable) curPerm_m1)).
     {
       Set Nested Proofs Allowed.
@@ -573,7 +645,7 @@ Proof.
         Mem.mem_access m' = Mem.mem_access m.
       Admitted.
 
-      rewrite /amap8 /getCurPerm /=.
+      rewrite /cur_m3 /getCurPerm /=.
       apply storev_mem_access in Hm3 as ->.
       inv Hm2_1. inv Hm2_0.
       remember m1 as m1' eqn:Hm1'.
@@ -581,13 +653,12 @@ Proof.
       rewrite !getCurPerm_set /curPerm_m1  /b_count /b_i //.
     }
 
-
     assert (Hperms8_lemma : permMapJoinPair perm8_1 perm8_2 perm8).
     {
-      clear -Hamap8 curPerm_m1_unit.
+      clear -Hcur_m3 curPerm_m1_unit.
       rewrite /permMapJoinPair /=.
       split; [|apply permMapJoin_empty].
-      rewrite Hamap8.
+      rewrite Hcur_m3.
       apply permMapJoin_split_perm;[constructor|].
       apply permMapJoin_split_perm;[constructor|].
       apply curPerm_m1_unit.
@@ -610,7 +681,7 @@ Proof.
         rewrite /Ostep /MachStep /=.
         eapply pragma_step.
         { done. }
-        eapply (step_parallel cnt8 Hcompat8 _  _ _ _ _ _ m3 _ _ _ 2 _ _ _ _ _ perm8 perms8).
+        eapply (step_parallel cnt8 Hcompat8 _ _ _ _ _ _ _ _ m3 _ 2 _ _ _ _ _ perm8 perms8).
         { tp_inv_tac. }
         { apply (restrPermMap_eq (proj1 (Hcompat8 0 cnt8))). }
         { simpl. done. }
@@ -619,95 +690,66 @@ Proof.
         { done. }
         { apply Hperms8. }
         { done. }
-        { (* current thread's new permission*) exists perm8_1.
-          split; done. }
-        { simpl. done. }
+        { done. }
+        { done. }
+        { done. }
+        { done. }
         { done. }
         { done. }
         {
           simpl.
-          (* rewrite /team_tree_init /ot_init /PTree.empty /=. *)
-          rewrite /spawn_team /update_tid /stree_update /from_stree /team_tree_init /=.
-          rewrite stree_lookup_unfold_eq /=.
-          cbn.
-          rewrite /is_tid /ot_init /=.
-          case_bool_decide as H; try lia; clear H.
-          cbn.
-          rewrite /RecordSet.set /=.
-          f_equal.
+          
+          (* simplify spawn_team *)
+          rewrite /spawn_team /update_tid /stree_update /tz_update tz_lookup_unfold_eq /= /is_tid /=.
+          case_bool_decide as H; [|lia].
+
+          (* simplfiy RecordSet.set and to_tree *)
+          rewrite /to_stree /RecordSet.set /=.
+          done.
         }
-        
-        simpl.
-        unfold_mbind.
-        simpl.
-        
-        rewrite /mate_add_td_ctx /update_tid /stree_update /=.
-        rewrite /from_stree /=.
-
-        (*  simplify stree_lookup *)
-        rewrite /is_leaf_tid /ttree /team_tree_init /ot_init /=.
-
-        rewrite stree_lookup_unfold_eq /=.
-
-        rewrite stree_lookup_unfold_eq /=.
-        rewrite /is_tid /=.
-        case_bool_decide as H; try lia; clear H.
-
-        rewrite stree_lookup_unfold_eq /=.
-        rewrite /is_tid /=.
-        case_bool_decide as H; try lia; clear H.
-        unfold_mbind.
-        simpl.
-        rewrite stree_lookup_unfold_eq /=.
-        rewrite stree_lookup_unfold_eq /=.
-        rewrite /is_tid /=.
-        case_bool_decide as H; try lia; clear H.
-
-        simpl.
-        rewrite /updThreadC /=.
-        repeat rewrite /eqtype.eq_op /=.
-
-        rewrite /RecordSet.set /=.
-        rewrite /leaf_add_td_ctx /=.
-        rewrite /RecordSet.set /=.
-        rewrite /PTree.empty /=.
-        rewrite /forest /=.
-        (* FIXME tid=0's permission is not reduced? *)
-        done.
-    }
+      }
     thread_step_clean_up tp8 cnt8 Hcompat8 tp9.
+    
 
-
-  
-      match current_config with
+    (* make mem_compatible for tp  *)
+  match current_config with
   | (?tp, _, ?m) =>
     assert (cnt: ThreadPool.containsThread tp 0) by (subst tp; rewrite /= /containsThread //=; lia);
     assert (mem_compatible tp m) as Hcompat 
   end.
   {  simpl; constructor;
-  [ let tid' := fresh "tid" in
-   let cnt' := fresh "cnt" in
-    intros tid' cnt';
-    revert cnt';
-    rewrite /= /getThreadR /containsThread /num_threads /= => cnt'
-    (* ;
-    destruct tid'; [|lia]; simpl;
-    split; [apply cur_lt_max|apply empty_LT] *)
-  |intros;done..].
+      [ let tid' := fresh "tid" in
+      let cnt' := fresh "cnt" in
+        intros tid' cnt';
+        revert cnt';
+        rewrite /= /getThreadR /containsThread /num_threads /= => cnt'
+        (* ;
+        destruct tid'; [|lia]; simpl;
+        split; [apply cur_lt_max|apply empty_LT] *)
+      |intros;done..].
 
-  destruct tid0. 
-  - simpl; split. 
-  { rewrite /getMaxPerm /curPerm_m1 /=. }
-
-  
-  [apply cur_lt_max|apply empty_LT].
-  Ltac solve_permMapLt :=
-    solve [lia (* tid out of bound *)
-    | 
-    ]
-    destruct tid'; [|lia]; simpl;
-    split; [apply cur_lt_max|apply empty_LT]
-  
+      destruct tid0.
+      - split.
+        { cbn -[perm8_1 perm8_2].
+          trans cur_m3.
+          { 
+            eapply (permMapJoin_list_permMapLt _ perms8 perm8); eauto.
+            { repeat constructor. }
+          } 
+          apply cur_lt_max.
+        }
+        { apply empty_LT. }
+      - destruct tid0; [|lia].
+        split.
+        { cbn -[perm8_1 perm8_2].
+          trans cur_m3.
+          {
+            eapply (permMapJoin_list_permMapLt _ perms8 perm8); eauto.
+            { repeat constructor. }
+          }
+          apply cur_lt_max.
+        }
+        { apply empty_LT. }
   }
 
     (* execute left thread  *)
