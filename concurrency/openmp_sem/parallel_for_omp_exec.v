@@ -13,6 +13,9 @@ Require Import Coq.Program.Equality.
 
 Set Bullet Behavior "Strict Subproofs".
 
+(* FIXME remove when done *)
+Set Nested Proofs Allowed.
+
 Definition ge := Clight.globalenv prog.
 Instance Sem : Semantics := @Sem ge.
 Instance FinThreadPoolInst: ThreadPool := FinPool.FinThreadPool.
@@ -191,15 +194,57 @@ Proof.
 Qed.
 
 Lemma permMapJoin_list_permMapLt :
-  forall pi ps p,
-    pi ∈ ps ->
-    permMapJoin_list ps p -> permMapLt pi.1 p.1.
+  forall pi1 pi2 ps p1 p2,
+    (pi1, pi2) ∈ ps ->
+    permMapJoin_list ps (p1, p2) -> permMapLt pi1 p1.
 Proof.
   intros.
   destruct ps.
   - inv H.
-  - eapply permMapJoin_list_permMapLt' in H0; eauto.
+  - eapply permMapJoin_list_permMapLt' in H0; eauto. apply H0.
 Qed.
+
+Lemma permMapJoin_list_permMapsDisjoint {ge:genv} (tp:@ThreadPool.t dryResources (@DryHybridMachine.Sem ge) FinPool.FinThreadPool) i j
+  (cnti : ThreadPool.containsThread tp i)
+  (cntj : ThreadPool.containsThread tp j) (ps: seq.seq res) (p: res):
+  i ≠ j ->
+  permMapJoin_list ps p ->
+  (ThreadPool.getThreadR cnti) ∈ ps ->
+  (ThreadPool.getThreadR cntj) ∈ ps ->
+  permMapsDisjoint2 (ThreadPool.getThreadR cnti) (ThreadPool.getThreadR cntj).
+Proof.
+  intros. rewrite /permMapsDisjoint2.
+  split.
+Admitted.
+
+Lemma no_lock_tp_inv : forall {ge:genv} (tp:@ThreadPool.t dryResources (@DryHybridMachine.Sem ge) FinPool.FinThreadPool),
+  (∃ p, permMapJoin_list (vector.vec_to_list tp.(perm_maps)) p) ->
+  no_lock_res tp ->
+  lock_perm_empty tp ->
+  DryHybridMachine.invariant tp.
+Proof.
+  intros.
+  
+   destruct H as [p H].
+  (* apply one_thread_tp'_equiv in H. *)
+  constructor; intros.
+  -eapply permMapJoin_list_permMapsDisjoint; eauto;
+   rewrite /getThreadR vector.elem_of_vlookup; eauto.
+  - specialize (H0 laddr1). rewrite H0 in Hres1; done.
+  - specialize (H0 laddr). rewrite H0 in Hres; done.
+  - rewrite /lock_perm_empty /FinPool.getThreadR in H1.
+    rewrite /ThreadPool.getThreadR /= /FinPool.getThreadR.
+    rewrite (H1 (Fin.of_nat_lt cnti)). split; intros; apply permCoh_empty'.
+  - specialize (H0 laddr). rewrite H0 in Hres; done.
+  - rewrite /ThreadPool.lr_valid /=  /FinPool.lr_valid. 
+    intros. unfold no_lock_res in H0. simpl in H0. rewrite H0 //.
+Qed.
+
+
+Lemma storev_mem_access ch m v1 v2 m' : 
+  Some m' = Mem.storev ch m v1 v2 -> 
+  Mem.mem_access m' = Mem.mem_access m.
+Admitted.
 
 Ltac destruct_match_goal :=
     lazymatch goal with
@@ -636,15 +681,12 @@ Proof.
                      empty_map).
     pose perms8 := [perm8_1; perm8_2].
 
+    assert (perm8_1 ∈ perms8) by repeat constructor.
+    assert (perm8_2 ∈ perms8) by repeat constructor.
+    
     assert (Hcur_m3 : cur_m3 = (PMap.set b_count (int_perm $ Some Freeable) $
                                           PMap.set b_i (int_perm $ Some Freeable) curPerm_m1)).
     {
-      Set Nested Proofs Allowed.
-      Lemma storev_mem_access ch m v1 v2 m' : 
-        Some m' = Mem.storev ch m v1 v2 -> 
-        Mem.mem_access m' = Mem.mem_access m.
-      Admitted.
-
       rewrite /cur_m3 /getCurPerm /=.
       apply storev_mem_access in Hm3 as ->.
       inv Hm2_1. inv Hm2_0.
@@ -701,7 +743,7 @@ Proof.
           
           (* simplify spawn_team *)
           rewrite /spawn_team /update_tid /stree_update /tz_update tz_lookup_unfold_eq /= /is_tid /=.
-          case_bool_decide as H; [|lia].
+          case_bool_decide; [|lia].
 
           (* simplfiy RecordSet.set and to_tree *)
           rewrite /to_stree /RecordSet.set /=.
@@ -733,8 +775,7 @@ Proof.
         { cbn -[perm8_1 perm8_2].
           trans cur_m3.
           { 
-            eapply (permMapJoin_list_permMapLt _ perms8 perm8); eauto.
-            { repeat constructor. }
+            eapply (permMapJoin_list_permMapLt _ _ perms8 perm8.1 perm8.2); eauto.
           } 
           apply cur_lt_max.
         }
@@ -744,37 +785,64 @@ Proof.
         { cbn -[perm8_1 perm8_2].
           trans cur_m3.
           {
-            eapply (permMapJoin_list_permMapLt _ perms8 perm8); eauto.
-            { repeat constructor. }
+            eapply (permMapJoin_list_permMapLt _ _ perms8 perm8.1 perm8.2); eauto.
           }
           apply cur_lt_max.
         }
         { apply empty_LT. }
   }
 
-    (* execute left thread  *)
-    (* thread_step_tac 0 tp9. *)
-    let tid := constr:(0) in
+  (* execute left thread  *)
+  (* thread_step_tac 0 tp9. *)
+  (* let tid := constr:(0) in
   (* create containsThread and mem_compatible proof terms; these are
      part of the new configuration, so have to be done before applying
      rt1n_trans that instantiates the evar for the new state *)
   let cnt := fresh "cnt" in
-  let Hcompat := fresh "Hcompat" in
-  assert_cnt tid cnt Hcompat;
+  let Hcompat := fresh "Hcompat" in *)
+
+
   match current_config with
   | (?tp, ?ttree, ?m) =>
     eapply (rt1n_trans Ostate Ostep _ (_, _, _, ttree, diluteMem _));
-    (* must solve step_dry completely *)
-    first (by (
-        (* take a threadStep *)
-        rewrite /Ostep /MachStep /=;
+    [ rewrite /Ostep /MachStep /=;
         eapply (thread_step tid _ tp _ m _ _ _ _ _ _ _);
         rewrite /= /DryHybridMachine.threadStep;
-        step_dry_tac m Hcompat cnt
-    ))
+        idtac
+        (* step_dry_tac m Hcompat cnt *)
+        |]
 
     (* thread_step_clean_up cnt Hcompat tp tp' *)
   end.
 
+  eapply (step_dry cnt Hcompat _ _ _ _ _ _).
+  { rewrite /ssrfun.pair_of_and /=.
+
+    Lemma restrPermMap_eq_2 (m : mem) p (Hlt : permMapLt p (getMaxPerm m))
+      (Hlt2 : permMapLt p (getCurPerm m)):  restrPermMap Hlt = m.
+    Proof.
+      rewrite /restrPermMap /=.
+    Admitted.
+
+    { apply restrPermMap_eq_2. eapply permMapJoin_list_permMapLt; eauto. }
+  }
+
+
+  (* for multiple threads; TODO make this work for one thread *)
+  Ltac tp_inv_tac ::=
+    eapply no_lock_tp_inv;
+    [ first [done | eexists; eauto]
+    | rewrite /lockRes /no_lock_res //
+    | rewrite /lock_perm_empty;
+      rewrite -vector.Forall_vlookup /=;
+      repeat apply Forall_cons; done].
+
+    tp_inv_tac. 
+    { rewrite vector.vlookup_lookup //=. }
+    { by apply evstep_fun_correct. }
+    { done. }
+
+     thread_step_clean_up cnt Hcompat tp9 tp10.
+  
 
 Admitted.
