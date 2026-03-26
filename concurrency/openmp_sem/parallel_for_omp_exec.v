@@ -284,7 +284,8 @@ Ltac destruct_match_q H:=
     | context[match ?x with _ => _ end] => destruct x eqn:?; last done
     end.
 
-Ltac tp_inv_tac :=
+(* for only one thread in tp *)
+Ltac tp_inv_tac_one :=
   eapply one_thread_tp_inv;
   [ done
   | rewrite /lockRes /no_lock_res //
@@ -292,11 +293,31 @@ Ltac tp_inv_tac :=
   rewrite -vector.Forall_vlookup /=;
   apply Forall_cons; done].
 
+(* for multiple threads in tp; TODO make this work for one thread *)
+Ltac tp_inv_tac_multiple :=
+  eapply no_lock_tp_inv;
+  [ first [done | eexists; eauto]
+  | rewrite /lockRes /no_lock_res //
+  | rewrite /lock_perm_empty;
+    rewrite -vector.Forall_vlookup /=;
+    repeat apply Forall_cons; done].
+
+Lemma restrPermMap_eq_2 (m : mem) p (Hlt : permMapLt p (getMaxPerm m))
+  (Hlt2 : permMapLt p (getCurPerm m)):  restrPermMap Hlt = m.
+Proof.
+  rewrite /restrPermMap /=.
+Admitted.
 
 Ltac step_dry_tac_full m Hcompat cnt :=
   eapply (step_dry _ _ _ _ m _ _ _);[
-      apply (@restrPermMap_eq m (proj1 (Hcompat 0 cnt)))
-    | tp_inv_tac
+      solve [ 
+        (* one thread in tp *)
+        apply (@restrPermMap_eq m (proj1 (Hcompat 0 cnt))) |
+        (* multiple therads in tp *)
+        rewrite /ssrfun.pair_of_and /=;
+        apply restrPermMap_eq_2; eapply permMapJoin_list_permMapLt; eauto
+      ]              
+    | solve [tp_inv_tac_one | tp_inv_tac_multiple]
     | rewrite vector.vlookup_lookup //=
     | by apply evstep_fun_correct
     | done
@@ -305,7 +326,7 @@ Ltac step_dry_tac_full m Hcompat cnt :=
 Ltac step_dry_tac_partial m Hcompat cnt :=
   eapply (step_dry _ _ _ _ m _ _ _);[
       simpl; apply (@restrPermMap_eq m (proj1 (Hcompat 0 cnt)))
-    | tp_inv_tac
+    | solve [tp_inv_tac_one | tp_inv_tac_multiple]
     | rewrite vector.vlookup_lookup //=
     | ..
   ].
@@ -630,7 +651,7 @@ Proof.
         { simpl. unfold DryHybridMachine.install_perm.
           rewrite (@restrPermMap_eq m3 (proj1 (Hcompat7 0 _))) //. }
         { done. }
-        { tp_inv_tac. }
+        { tp_inv_tac_one. }
         simpl.
         done.
     }
@@ -724,7 +745,7 @@ Proof.
         eapply pragma_step.
         { done. }
         eapply (step_parallel cnt8 Hcompat8 _ _ _ _ _ _ _ _ m3 _ 2 _ _ _ _ _ perm8 perms8).
-        { tp_inv_tac. }
+        { tp_inv_tac_one. }
         { apply (restrPermMap_eq (proj1 (Hcompat8 0 cnt8))). }
         { simpl. done. }
         { simpl. done. }
@@ -754,95 +775,68 @@ Proof.
     
 
     (* make mem_compatible for tp  *)
-  match current_config with
-  | (?tp, _, ?m) =>
-    assert (cnt: ThreadPool.containsThread tp 0) by (subst tp; rewrite /= /containsThread //=; lia);
-    assert (mem_compatible tp m) as Hcompat 
-  end.
-  {  simpl; constructor;
+  
+  (* perm8_1 perm8_2  *)
+
+    (* require assumptions 
+    H1: ps:=[p1 p2]
+    H2: permMapJoin_list ps p_sum *)
+  Ltac mem_compatible_tac_2_threads m p1 p2 ps p_sum := 
+      simpl; constructor;
       [ let tid' := fresh "tid" in
-      let cnt' := fresh "cnt" in
+        let cnt' := fresh "cnt" in
         intros tid' cnt';
         revert cnt';
-        rewrite /= /getThreadR /containsThread /num_threads /= => cnt'
-        (* ;
-        destruct tid'; [|lia]; simpl;
-        split; [apply cur_lt_max|apply empty_LT] *)
+        rewrite /= /getThreadR /containsThread /num_threads /= => cnt';
+        (* prove all threads' perm <= max perm *)
+        (* case on tid *)
+        destruct tid' as [|tid']; last (destruct tid'; last lia);
+        (split; [
+            cbn -[p1 p2];
+            trans (getCurPerm m); [
+                eapply (permMapJoin_list_permMapLt _ _ ps p_sum.1 p_sum.2); eauto
+              | apply cur_lt_max
+            ]
+          | apply empty_LT ])
       |intros;done..].
 
-      destruct tid0.
-      - split.
-        { cbn -[perm8_1 perm8_2].
-          trans cur_m3.
-          { 
-            eapply (permMapJoin_list_permMapLt _ _ perms8 perm8.1 perm8.2); eauto.
-          } 
-          apply cur_lt_max.
-        }
-        { apply empty_LT. }
-      - destruct tid0; [|lia].
-        split.
-        { cbn -[perm8_1 perm8_2].
-          trans cur_m3.
-          {
-            eapply (permMapJoin_list_permMapLt _ _ perms8 perm8.1 perm8.2); eauto.
-          }
-          apply cur_lt_max.
-        }
-        { apply empty_LT. }
-  }
 
-  (* execute left thread  *)
-  (* thread_step_tac 0 tp9. *)
-  (* let tid := constr:(0) in
+  Ltac assert_cnt_2_threads tid cnt Hcompat Hperm_join_list :=
+    match type of Hperm_join_list with
+    | permMapJoin_list ?ps ?p_sum =>
+      let ps' := eval unfold ps in ps in
+      match ps' with
+      | [?p1; ?p2] =>
+        match current_config with
+        | (?tp, _, ?m) =>
+          assert (cnt: ThreadPool.containsThread tp 0) by (subst tp; rewrite /= /containsThread //=; lia);
+          assert (mem_compatible tp m) as Hcompat by mem_compatible_tac_2_threads m p1 p2 ps p_sum
+        end
+      end
+    end.
+
+  Ltac thread_step_tac_2_threads tid tp' Hperms :=
   (* create containsThread and mem_compatible proof terms; these are
      part of the new configuration, so have to be done before applying
      rt1n_trans that instantiates the evar for the new state *)
   let cnt := fresh "cnt" in
-  let Hcompat := fresh "Hcompat" in *)
-
-
+  let Hcompat := fresh "Hcompat" in
+  assert_cnt_2_threads tid cnt Hcompat Hperms;
   match current_config with
   | (?tp, ?ttree, ?m) =>
     eapply (rt1n_trans Ostate Ostep _ (_, _, _, ttree, diluteMem _));
-    [ rewrite /Ostep /MachStep /=;
+    (* must solve step_dry completely *)
+    first (by (
+        (* take a threadStep *)
+        rewrite /Ostep /MachStep /=;
         eapply (thread_step tid _ tp _ m _ _ _ _ _ _ _);
         rewrite /= /DryHybridMachine.threadStep;
-        idtac
-        (* step_dry_tac m Hcompat cnt *)
-        |]
-
-    (* thread_step_clean_up cnt Hcompat tp tp' *)
+        step_dry_tac m Hcompat cnt
+    ));
+    thread_step_clean_up cnt Hcompat tp tp'
   end.
-
-  eapply (step_dry cnt Hcompat _ _ _ _ _ _).
-  { rewrite /ssrfun.pair_of_and /=.
-
-    Lemma restrPermMap_eq_2 (m : mem) p (Hlt : permMapLt p (getMaxPerm m))
-      (Hlt2 : permMapLt p (getCurPerm m)):  restrPermMap Hlt = m.
-    Proof.
-      rewrite /restrPermMap /=.
-    Admitted.
-
-    { apply restrPermMap_eq_2. eapply permMapJoin_list_permMapLt; eauto. }
-  }
-
-
-  (* for multiple threads; TODO make this work for one thread *)
-  Ltac tp_inv_tac ::=
-    eapply no_lock_tp_inv;
-    [ first [done | eexists; eauto]
-    | rewrite /lockRes /no_lock_res //
-    | rewrite /lock_perm_empty;
-      rewrite -vector.Forall_vlookup /=;
-      repeat apply Forall_cons; done].
-
-    tp_inv_tac. 
-    { rewrite vector.vlookup_lookup //=. }
-    { by apply evstep_fun_correct. }
-    { done. }
-
-     thread_step_clean_up cnt Hcompat tp9 tp10.
+  
+  thread_step_tac_2_threads 0 tp10 Hperms8.
   
 
 Admitted.
