@@ -4,7 +4,7 @@ Import PTree.
 From VST.concurrency.openmp_sem Require Import permissions HybridMachineSig HybridMachine finThreadPool clight_evsem_fun notations team_dyn Clight_evsem.
 Import HybridMachineSig.
 Import ThreadPool. Import FinPool.
-From VST.concurrency.openmp_sem Require Import parallel_for_omp.
+From VST.concurrency.openmp_sem Require Import parallel_for_omp mem_equiv.
 From stdpp Require Import base tactics option.
 From Coq Require Import Relations.Relation_Operators Numbers.BinNums.
 From mathcomp.ssreflect Require Import ssreflect.
@@ -241,10 +241,14 @@ Proof.
 Qed.
 
 
-Lemma storev_mem_access ch m v1 v2 m' : 
-  Some m' = Mem.storev ch m v1 v2 -> 
+Lemma storev_mem_access ch m v1 v2 m' :
+  Some m' = Mem.storev ch m v1 v2 ->
   Mem.mem_access m' = Mem.mem_access m.
-Admitted.
+Proof.
+  rewrite /Mem.storev. destruct v1; try done.
+  intros H. symmetry in H.
+  eapply Mem.store_access; eauto.
+Qed.
 
 Ltac destruct_match_goal :=
     lazymatch goal with
@@ -302,20 +306,13 @@ Ltac tp_inv_tac_multiple :=
     rewrite -vector.Forall_vlookup /=;
     repeat apply Forall_cons; done].
 
-Lemma restrPermMap_eq_2 (m : mem) p (Hlt : permMapLt p (getMaxPerm m))
-  (Hlt2 : permMapLt p (getCurPerm m)):  restrPermMap Hlt = m.
-Proof.
-  rewrite /restrPermMap /=.
-Admitted.
-
 Ltac step_dry_tac_full m Hcompat cnt :=
-  eapply (step_dry _ _ _ _ m _ _ _);[
+  eapply (step_dry cnt Hcompat _ _ _ _ _);[
       solve [ 
         (* one thread in tp *)
         apply (@restrPermMap_eq m (proj1 (Hcompat 0 cnt))) |
-        (* multiple therads in tp *)
-        rewrite /ssrfun.pair_of_and /=;
-        apply restrPermMap_eq_2; eapply permMapJoin_list_permMapLt; eauto
+        (* probably should not simplify restrPermMap if multiple therads in tp and perm split is not trivial *)
+        rewrite /ssrfun.pair_of_and //=
       ]              
     | solve [tp_inv_tac_one | tp_inv_tac_multiple]
     | rewrite vector.vlookup_lookup //=
@@ -324,7 +321,7 @@ Ltac step_dry_tac_full m Hcompat cnt :=
   ].
 
 Ltac step_dry_tac_partial m Hcompat cnt :=
-  eapply (step_dry _ _ _ _ m _ _ _);[
+  eapply (step_dry cnt Hcompat _ _ _ _ _ _);[
       simpl; apply (@restrPermMap_eq m (proj1 (Hcompat 0 cnt)))
     | solve [tp_inv_tac_one | tp_inv_tac_multiple]
     | rewrite vector.vlookup_lookup //=
@@ -375,7 +372,7 @@ Ltac Ostep_step_dry_tac tid tp m ttree cnt Hcompat m' :=
 
 Ltac thread_step_clean_up cnt Hcompat tp tp' :=
   simpl_updThread;
-  clear cnt Hcompat tp;
+  try clear cnt Hcompat tp;
   rewrite /diluteMem (* /getCurPerm *) /=;
   (* abbreviate tp *)
   set_tp_name tp'.
@@ -413,7 +410,9 @@ Ltac assert_cnt_1_tac tid tp' :=
   require assumptions of the form:
   H1: ps:=[p1 p2]
   H2: permMapJoin_list ps p_sum *)
-Ltac mem_compatible_2_tac m p1 p2 ps p_sum := 
+Ltac mem_compatible_2_tac m p1 p2 ps p_sum :=
+  (* for goals of the form `mem_compatible tp10 (restrPermMap _)` *)
+  try apply mem_compat_restrPermMap;
   simpl; constructor;
   [ let tid' := fresh "tid" in
     let cnt' := fresh "cnt" in
@@ -425,9 +424,14 @@ Ltac mem_compatible_2_tac m p1 p2 ps p_sum :=
     destruct tid' as [|tid']; last (destruct tid'; last lia);
     (split; [
         cbn -[p1 p2];
-        trans (getCurPerm m); [
-            eapply (permMapJoin_list_permMapLt _ _ ps p_sum.1 p_sum.2); eauto
-          | apply cur_lt_max
+        rewrite ?mem_equiv.getCur_restr ?restr_Max_eq;
+        solve [ 
+          apply cur_lt_max
+          |  
+            trans (p_sum.1); [
+              eapply (permMapJoin_list_permMapLt _ _ ps p_sum.1 p_sum.2); eauto
+            | apply cur_lt_max
+            ]
         ]
       | apply empty_LT ])
   | intros;done..].
@@ -449,8 +453,8 @@ Ltac assert_cnt_2_tac' tid Hperms k :=
   end;
   k cnt Hcompat.
 
-Ltac assert_cnt_2_tac tid Hperms :=
-  assert_cnt_2_tac' tid Hperms ltac:(fun _ _ => idtac).
+Ltac assert_cnt_2_tac tid Hperms cnt Hcompat :=
+  assert_cnt_2_tac' tid Hperms ltac:(fun cnt' Hcompat' => rename cnt' into cnt; rename Hcompat' into Hcompat).
 
 
 (* top level execution tactic that takes tid for a dry (a.k.a. Clight step) when
@@ -845,7 +849,50 @@ Proof.
       }
     thread_step_clean_up tp8 cnt8 Hcompat8 tp9.
 
-  thread_step_2_tac 0 tp10 Hperms8.
+    thread_step_2_tac 0 tp10 Hperms8.
+    eapply (rt1n_trans Ostate Ostep _ (_, _, _, _, diluteMem _)).
+    {
+        rewrite /Ostep /MachStep /=.
+        eapply suspend_step_pragma; try done.
+        eapply (SuspendThreadPragma _ _ _ _ _ _ _ _ _).
+        { rewrite vector.vlookup_lookup //=. }
+        { simpl. unfold DryHybridMachine.install_perm.
+          rewrite restrPermMap_eq. done. }
+        { done. }
+        { tp_inv_tac_multiple.
+          simpl.
+          Check mem_equiv.getCur_restr.
+          rewrite mem_equiv.getCur_restr.
+          }
+        simpl.
+        done.
+    }
 
-
+    
+    (* tid 0 take step_omp_for *)
+    assert_cnt_2_tac 0 Hperms8 cnt10 Hcompat10.
+    eapply (rt1n_trans Ostate Ostep _ (_, _, _, ttree, diluteMem _)).
+    {
+        rewrite /Ostep /MachStep /=.
+        eapply pragma_step; first done.
+        eapply (step_for cnt10 Hcompat10).
+        { simpl. done. }
+        { tp_inv_tac_one. }
+        { apply (restrPermMap_eq (proj1 (Hcompat10 0 cnt10))). }
+        { simpl. done. }
+        { simpl. done. }
+        { lia. }
+        { done. }
+        { apply Hperms8
+        eapply (SuspendThreadPragma _ _ _ _ _ _ _ _ Hcompat7).
+        { rewrite vector.vlookup_lookup //=. }
+        { simpl. unfold DryHybridMachine.install_perm.
+          rewrite (@restrPermMap_eq m3 (proj1 (Hcompat7 0 _))) //. }
+        { done. }
+        { tp_inv_tac_one. }
+        simpl.
+        done.
+    }
+               
+              
 Admitted.
