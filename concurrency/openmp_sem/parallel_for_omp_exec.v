@@ -380,13 +380,8 @@ Ltac thread_step_clean_up cnt Hcompat tp tp' :=
   (* abbreviate tp *)
   set_tp_name tp'.
 
-Ltac thread_step_tac tid tp' :=
-  (* create containsThread and mem_compatible proof terms; these are
-     part of the new configuration, so have to be done before applying
-     rt1n_trans that instantiates the evar for the new state *)
-  let cnt := fresh "cnt" in
-  let Hcompat := fresh "Hcompat" in
-  assert_cnt tid cnt Hcompat;
+(* take a dry step; requires (cnt: ThreadPool.containsThread tp tid) *)
+Ltac thread_step_tac' cnt Hcompat tid tp' :=
   match current_config with
   | (?tp, ?ttree, ?m) =>
     eapply (rt1n_trans Ostate Ostep _ (_, _, _, ttree, diluteMem _));
@@ -401,15 +396,92 @@ Ltac thread_step_tac tid tp' :=
     thread_step_clean_up cnt Hcompat tp tp'
   end.
 
-Ltac thread_step_tac_partial tid tp' m' :=
-  (*  like thread_step_tac, but may leave some subgoal *)
+
+(* create containsThread and mem_compatible proof terms; these are
+    part of the new configuration, so have to be done before applying
+    rt1n_trans that instantiates the evar for the new state *)
+Ltac assert_cnt_1_tac' tid tp' k :=
   let cnt := fresh "cnt" in
   let Hcompat := fresh "Hcompat" in
   assert_cnt tid cnt Hcompat;
-  match current_config with
-  | (?tp, ?ttree, ?m) =>
-    Ostep_step_dry_tac tid tp m ttree cnt Hcompat m'
-  end.
+  k cnt Hcompat.
+
+Ltac assert_cnt_1_tac tid tp' :=
+  assert_cnt_1_tac' tid tp' ltac:(fun _ _ => idtac).
+
+(* proves (mem_compatible tp m) when tp has 2 threads.
+  require assumptions of the form:
+  H1: ps:=[p1 p2]
+  H2: permMapJoin_list ps p_sum *)
+Ltac mem_compatible_2_tac m p1 p2 ps p_sum := 
+  simpl; constructor;
+  [ let tid' := fresh "tid" in
+    let cnt' := fresh "cnt" in
+    intros tid' cnt';
+    revert cnt';
+    rewrite /= /getThreadR /containsThread /num_threads /= => cnt';
+    (* prove all threads' perm <= max perm *)
+    (* case on tid *)
+    destruct tid' as [|tid']; last (destruct tid'; last lia);
+    (split; [
+        cbn -[p1 p2];
+        trans (getCurPerm m); [
+            eapply (permMapJoin_list_permMapLt _ _ ps p_sum.1 p_sum.2); eauto
+          | apply cur_lt_max
+        ]
+      | apply empty_LT ])
+  | intros;done..].
+
+Ltac assert_cnt_2_tac' tid Hperms k :=
+  let cnt := fresh "cnt" in
+  let Hcompat := fresh "Hcompat" in
+  match type of Hperms with
+  | permMapJoin_list ?ps ?p_sum =>
+    let ps' := eval unfold ps in ps in
+    match ps' with
+    | [?p1; ?p2] =>
+      match current_config with
+      | (?tp, _, ?m) =>
+        assert (cnt: ThreadPool.containsThread tp 0) by (subst tp; rewrite /= /containsThread //=; lia);
+        assert (mem_compatible tp m) as Hcompat by mem_compatible_2_tac m p1 p2 ps p_sum
+      end
+    end
+  end;
+  k cnt Hcompat.
+
+Ltac assert_cnt_2_tac tid Hperms :=
+  assert_cnt_2_tac' tid Hperms ltac:(fun _ _ => idtac).
+
+
+(* top level execution tactic that takes tid for a dry (a.k.a. Clight step) when
+ there is only one thread in tp, and name the new thread pool as `tp'` *)
+Ltac thread_step_1_tac tid tp' :=
+  assert_cnt_1_tac' tid tp' ltac:(fun cnt Hcompat =>
+    (* take a dry step *)
+    thread_step_tac' cnt Hcompat tid tp'
+  ).
+
+(*  like thread_step_tac, but may leave some subgoal *)
+Ltac thread_step_1_tac_partial tid tp' m' :=
+  assert_cnt_1_tac' tid tp' ltac:(fun cnt Hcompat =>
+    match current_config with
+    | (?tp, ?ttree, ?m) =>
+      Ostep_step_dry_tac tid tp m ttree cnt Hcompat m'
+    end
+  ).
+
+(* Execute tid for one thread step, and name the new thread pool as `tp'`.
+  require these assumptions:
+    H1: ps:=[p1 p2]
+    H2: permMapJoin_list ps p_sum
+  where p1, p2 are the permissions of the current threads.
+   *)
+Ltac thread_step_2_tac tid tp' Hperms :=
+  (* create containsThread and mem_compatible proof terms; these are
+     part of the new configuration, so have to be done before applying
+     rt1n_trans that instantiates the evar for the new state *)
+  assert_cnt_2_tac' tid Hperms ltac:(fun cnt Hcompat =>
+    thread_step_tac' cnt Hcompat tid tp').
 
 (* Arguments Mem.mem_access : simpl never. *)
 Arguments int_perm : simpl never.
@@ -575,7 +647,7 @@ Proof.
        slows computation down drastically.  *)
     evar (m2:mem).
     (* assert_cnt 0 cnt Hcompat. *)
-    thread_step_tac_partial 0 tp1 m2.
+    thread_step_1_tac_partial 0 tp1 m2.
     {
       apply evstep_fun_correct.
       rewrite /cl_evstep_fun /m2 /=.
@@ -595,10 +667,10 @@ Proof.
     subst m2.
     
     (** take 2nd step *)
-    thread_step_tac 0 tp3.
+    thread_step_1_tac 0 tp3.
 
     (** take 3rd step *)
-    thread_step_tac 0 tp4.
+    thread_step_1_tac 0 tp4.
 
     (* this magical term m3 is obtained by first running
         evar (m5: mem).
@@ -620,7 +692,7 @@ Proof.
 
     evar (m5: mem).
     (** take 4th step *)
-    thread_step_tac_partial 0 tp4 m5.
+    thread_step_1_tac_partial 0 tp4 m5.
     1: {
       apply evstep_fun_correct.
       rewrite /cl_evstep_fun /=.
@@ -633,10 +705,10 @@ Proof.
     thread_step_clean_up cnt Hcompat tp4 tp5.
 
     (* take 5th step *)
-    thread_step_tac 0 tp5.
+    thread_step_1_tac 0 tp5.
 
     (* take 6th step *)
-    thread_step_tac 0 tp6.
+    thread_step_1_tac 0 tp6.
     
     (* take 7th step: suspend_step_pragma
        TODO automate this *)
@@ -772,71 +844,8 @@ Proof.
         }
       }
     thread_step_clean_up tp8 cnt8 Hcompat8 tp9.
-    
 
-    (* make mem_compatible for tp  *)
-  
-  (* perm8_1 perm8_2  *)
+  thread_step_2_tac 0 tp10 Hperms8.
 
-    (* require assumptions 
-    H1: ps:=[p1 p2]
-    H2: permMapJoin_list ps p_sum *)
-  Ltac mem_compatible_tac_2_threads m p1 p2 ps p_sum := 
-      simpl; constructor;
-      [ let tid' := fresh "tid" in
-        let cnt' := fresh "cnt" in
-        intros tid' cnt';
-        revert cnt';
-        rewrite /= /getThreadR /containsThread /num_threads /= => cnt';
-        (* prove all threads' perm <= max perm *)
-        (* case on tid *)
-        destruct tid' as [|tid']; last (destruct tid'; last lia);
-        (split; [
-            cbn -[p1 p2];
-            trans (getCurPerm m); [
-                eapply (permMapJoin_list_permMapLt _ _ ps p_sum.1 p_sum.2); eauto
-              | apply cur_lt_max
-            ]
-          | apply empty_LT ])
-      |intros;done..].
-
-
-  Ltac assert_cnt_2_threads tid cnt Hcompat Hperm_join_list :=
-    match type of Hperm_join_list with
-    | permMapJoin_list ?ps ?p_sum =>
-      let ps' := eval unfold ps in ps in
-      match ps' with
-      | [?p1; ?p2] =>
-        match current_config with
-        | (?tp, _, ?m) =>
-          assert (cnt: ThreadPool.containsThread tp 0) by (subst tp; rewrite /= /containsThread //=; lia);
-          assert (mem_compatible tp m) as Hcompat by mem_compatible_tac_2_threads m p1 p2 ps p_sum
-        end
-      end
-    end.
-
-  Ltac thread_step_tac_2_threads tid tp' Hperms :=
-  (* create containsThread and mem_compatible proof terms; these are
-     part of the new configuration, so have to be done before applying
-     rt1n_trans that instantiates the evar for the new state *)
-  let cnt := fresh "cnt" in
-  let Hcompat := fresh "Hcompat" in
-  assert_cnt_2_threads tid cnt Hcompat Hperms;
-  match current_config with
-  | (?tp, ?ttree, ?m) =>
-    eapply (rt1n_trans Ostate Ostep _ (_, _, _, ttree, diluteMem _));
-    (* must solve step_dry completely *)
-    first (by (
-        (* take a threadStep *)
-        rewrite /Ostep /MachStep /=;
-        eapply (thread_step tid _ tp _ m _ _ _ _ _ _ _);
-        rewrite /= /DryHybridMachine.threadStep;
-        step_dry_tac m Hcompat cnt
-    ));
-    thread_step_clean_up cnt Hcompat tp tp'
-  end.
-  
-  thread_step_tac_2_threads 0 tp10 Hperms8.
-  
 
 Admitted.
