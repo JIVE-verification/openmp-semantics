@@ -1,32 +1,31 @@
 From Coq Require Import String List ZArith.
-From compcert Require Import Coqlib Integers Floats Values AST Ctypes Cop Csyntax Csyntaxdefs.
-Import Csyntaxdefs.CsyntaxNotations.
+From compcert Require Import Coqlib Integers Floats AST Ctypes Cop Clight Clightdefs.
+Import Clightdefs.ClightNotations.
 Local Open Scope Z_scope.
 Local Open Scope string_scope.
-Local Open Scope csyntax_scope.
+Local Open Scope clight_scope.
 
 Module Info.
   Definition version := "3.14".
   Definition build_number := "".
   Definition build_tag := "".
   Definition build_branch := "".
-  Definition arch := "aarch64".
-  Definition model := "default".
-  Definition abi := "apple".
+  Definition arch := "x86".
+  Definition model := "64".
+  Definition abi := "standard".
   Definition bitsize := 64.
   Definition big_endian := false.
-  Definition source_file := "cmplr_src1.c".
+  Definition source_file := "OMPcompiler/cmplr_src1.c".
+  Definition normalized := false.
 End Info.
 
+Definition ___builtin_ais_annot : ident := $"__builtin_ais_annot".
 Definition ___builtin_annot : ident := $"__builtin_annot".
 Definition ___builtin_annot_intval : ident := $"__builtin_annot_intval".
 Definition ___builtin_bswap : ident := $"__builtin_bswap".
 Definition ___builtin_bswap16 : ident := $"__builtin_bswap16".
 Definition ___builtin_bswap32 : ident := $"__builtin_bswap32".
 Definition ___builtin_bswap64 : ident := $"__builtin_bswap64".
-Definition ___builtin_cls : ident := $"__builtin_cls".
-Definition ___builtin_clsl : ident := $"__builtin_clsl".
-Definition ___builtin_clsll : ident := $"__builtin_clsll".
 Definition ___builtin_clz : ident := $"__builtin_clz".
 Definition ___builtin_clzl : ident := $"__builtin_clzl".
 Definition ___builtin_clzll : ident := $"__builtin_clzll".
@@ -46,6 +45,8 @@ Definition ___builtin_fnmsub : ident := $"__builtin_fnmsub".
 Definition ___builtin_fsqrt : ident := $"__builtin_fsqrt".
 Definition ___builtin_membar : ident := $"__builtin_membar".
 Definition ___builtin_memcpy_aligned : ident := $"__builtin_memcpy_aligned".
+Definition ___builtin_read16_reversed : ident := $"__builtin_read16_reversed".
+Definition ___builtin_read32_reversed : ident := $"__builtin_read32_reversed".
 Definition ___builtin_sel : ident := $"__builtin_sel".
 Definition ___builtin_sqrt : ident := $"__builtin_sqrt".
 Definition ___builtin_unreachable : ident := $"__builtin_unreachable".
@@ -53,6 +54,8 @@ Definition ___builtin_va_arg : ident := $"__builtin_va_arg".
 Definition ___builtin_va_copy : ident := $"__builtin_va_copy".
 Definition ___builtin_va_end : ident := $"__builtin_va_end".
 Definition ___builtin_va_start : ident := $"__builtin_va_start".
+Definition ___builtin_write16_reversed : ident := $"__builtin_write16_reversed".
+Definition ___builtin_write32_reversed : ident := $"__builtin_write32_reversed".
 Definition ___compcert_i64_dtos : ident := $"__compcert_i64_dtos".
 Definition ___compcert_i64_dtou : ident := $"__compcert_i64_dtou".
 Definition ___compcert_i64_sar : ident := $"__compcert_i64_sar".
@@ -72,25 +75,13 @@ Definition ___compcert_va_composite : ident := $"__compcert_va_composite".
 Definition ___compcert_va_float64 : ident := $"__compcert_va_float64".
 Definition ___compcert_va_int32 : ident := $"__compcert_va_int32".
 Definition ___compcert_va_int64 : ident := $"__compcert_va_int64".
-Definition ___opaque : ident := $"__opaque".
-Definition ___par_routine1_data : ident := $"__par_routine1_data".
-Definition ___sig : ident := $"__sig".
 Definition ___stringlit_1 : ident := $"__stringlit_1".
-Definition __i : ident := $"_i".
-Definition __opaque_pthread_mutex_t : ident := $"_opaque_pthread_mutex_t".
-Definition __par_routine1 : ident := $"_par_routine1".
-Definition __par_routine1_data : ident := $"_par_routine1_data".
-Definition __par_routine1_data_ty : ident := $"_par_routine1_data_ty".
-Definition _critical_mutex_1 : ident := $"critical_mutex_1".
 Definition _i : ident := $"i".
 Definition _j : ident := $"j".
 Definition _k : ident := $"k".
 Definition _l : ident := $"l".
 Definition _main : ident := $"main".
 Definition _printf : ident := $"printf".
-Definition _pthread_mutex_lock : ident := $"pthread_mutex_lock".
-Definition _pthread_mutex_unlock : ident := $"pthread_mutex_unlock".
-Definition _reduction_mutex_1 : ident := $"reduction_mutex_1".
 
 Definition v___stringlit_1 := {|
   gvar_info := (tarray tschar 24);
@@ -114,195 +105,37 @@ Definition f_main := {|
   fn_return := tint;
   fn_callconv := cc_default;
   fn_params := nil;
-  fn_vars := ((_i, tint) :: (_j, tint) :: (_k, tint) :: (_l, tint) :: nil);
+  fn_vars := nil;
+  fn_temps := ((_i, tint) :: (_j, tint) :: (_k, tint) :: (_l, tint) :: nil);
   fn_body :=
 (Ssequence
   (Ssequence
-    (Sdo (Eassign (Evar _i tint) (Eval (Vint (Int.repr 0)) tint) tint))
+    (Sset _i (Econst_int (Int.repr 0) tint))
     (Ssequence
-      (Sdo (Eassign (Evar _j tint) (Eval (Vint (Int.repr 0)) tint) tint))
+      (Sset _j (Econst_int (Int.repr 0) tint))
       (Ssequence
-        (Sdo (Eassign (Evar _k tint) (Eval (Vint (Int.repr 0)) tint) tint))
+        (Sset _k (Econst_int (Int.repr 0) tint))
         (Ssequence
           (Ssequence
-            (Sdo (Epostincr Incr (Evar _i tint) tint))
+            (Sset _i
+              (Ebinop Oadd (Etempvar _i tint) (Econst_int (Int.repr 1) tint)
+                tint))
             (Ssequence
-              (Sdo (Eassign (Evar _j tint) (Eval (Vint (Int.repr 1)) tint)
-                     tint))
+              (Sset _j (Econst_int (Int.repr 1) tint))
               (Ssequence
-                (Sdo (Eassign (Evar _k tint) (Eval (Vint (Int.repr 1)) tint)
-                       tint))
-                (Sdo (Eassign (Evar _l tint) (Eval (Vint (Int.repr 0)) tint)
-                       tint)))))
-          (Sdo (Ecall
-                 (Evalof
-                   (Evar _printf (Tfunction (Tcons (tptr tschar) Tnil) tint
-                                   {|cc_vararg:=(Some 1); cc_unproto:=false; cc_structret:=false|}))
-                   (Tfunction (Tcons (tptr tschar) Tnil) tint
-                     {|cc_vararg:=(Some 1); cc_unproto:=false; cc_structret:=false|}))
-                 (Econs
-                   (Evalof (Evar ___stringlit_1 (tarray tschar 24))
-                     (tarray tschar 24))
-                   (Econs (Evalof (Evar _i tint) tint)
-                     (Econs (Evalof (Evar _j tint) tint)
-                       (Econs (Evalof (Evar _k tint) tint) Enil)))) tint))))))
-  (Sreturn (Some (Eval (Vint (Int.repr 0)) tint))))
-|}.
-
-Definition v_critical_mutex_1 := {|
-  gvar_info := (Tstruct __opaque_pthread_mutex_t noattr);
-  gvar_init := (Init_space 64 :: nil);
-  gvar_readonly := false;
-  gvar_volatile := false
-|}.
-
-Definition v_reduction_mutex_1 := {|
-  gvar_info := (Tstruct __opaque_pthread_mutex_t noattr);
-  gvar_init := (Init_space 64 :: nil);
-  gvar_readonly := false;
-  gvar_volatile := false
-|}.
-
-Definition f__par_routine1 := {|
-  fn_return := (tptr tvoid);
-  fn_callconv := cc_default;
-  fn_params := ((___par_routine1_data, (tptr tvoid)) :: nil);
-  fn_vars := ((__par_routine1_data,
-               (tptr (Tstruct __par_routine1_data_ty noattr))) ::
-              (__i, (tptr tint)) :: (_j, tint) :: (_k, tint) :: nil);
-  fn_body :=
-(Ssequence
-  (Sdo (Eassign
-         (Evar __par_routine1_data (tptr (Tstruct __par_routine1_data_ty noattr)))
-         (Ecast
-           (Evalof (Evar ___par_routine1_data (tptr tvoid)) (tptr tvoid))
-           (tptr (Tstruct __par_routine1_data_ty noattr)))
-         (tptr (Tstruct __par_routine1_data_ty noattr))))
-  (Ssequence
-    (Sdo (Eassign (Evar __i (tptr tint))
-           (Evalof
-             (Efield
-               (Evalof
-                 (Ederef
-                   (Evalof
-                     (Evar __par_routine1_data (tptr (Tstruct __par_routine1_data_ty noattr)))
-                     (tptr (Tstruct __par_routine1_data_ty noattr)))
-                   (Tstruct __par_routine1_data_ty noattr))
-                 (Tstruct __par_routine1_data_ty noattr)) _i (tptr tint))
-             (tptr tint)) (tptr tint)))
-    (Ssequence
-      (Sdo (Eassign (Evar _k tint) (Eval (Vint (Int.repr 0)) tint) tint))
-      (Ssequence
-        (Sdo (Ecall
-               (Evalof
-                 (Evar _pthread_mutex_lock (Tfunction
-                                             (Tcons
-                                               (tptr (Tstruct __opaque_pthread_mutex_t noattr))
-                                               Tnil) tint cc_default))
-                 (Tfunction
-                   (Tcons (tptr (Tstruct __opaque_pthread_mutex_t noattr))
-                     Tnil) tint cc_default))
-               (Econs
-                 (Eaddrof
-                   (Evar _critical_mutex_1 (Tstruct __opaque_pthread_mutex_t noattr))
-                   (tptr (Tstruct __opaque_pthread_mutex_t noattr))) Enil)
-               tint))
-        (Ssequence
-          (Sdo (Epostincr Incr
-                 (Ederef (Evalof (Evar __i (tptr tint)) (tptr tint)) tint)
-                 tint))
-          (Ssequence
-            (Sdo (Ecall
-                   (Evalof
-                     (Evar _pthread_mutex_unlock (Tfunction
-                                                   (Tcons
-                                                     (tptr (Tstruct __opaque_pthread_mutex_t noattr))
-                                                     Tnil) tint cc_default))
-                     (Tfunction
-                       (Tcons
-                         (tptr (Tstruct __opaque_pthread_mutex_t noattr))
-                         Tnil) tint cc_default))
-                   (Econs
-                     (Eaddrof
-                       (Evar _critical_mutex_1 (Tstruct __opaque_pthread_mutex_t noattr))
-                       (tptr (Tstruct __opaque_pthread_mutex_t noattr)))
-                     Enil) tint))
-            (Ssequence
-              (Sdo (Eassign (Evar _j tint) (Eval (Vint (Int.repr 1)) tint)
-                     tint))
-              (Ssequence
-                (Sdo (Eassign (Evar _k tint) (Eval (Vint (Int.repr 1)) tint)
-                       tint))
-                (Ssequence
-                  (Sdo (Ecall
-                         (Evalof
-                           (Evar _pthread_mutex_lock (Tfunction
-                                                       (Tcons
-                                                         (tptr (Tstruct __opaque_pthread_mutex_t noattr))
-                                                         Tnil) tint
-                                                       cc_default))
-                           (Tfunction
-                             (Tcons
-                               (tptr (Tstruct __opaque_pthread_mutex_t noattr))
-                               Tnil) tint cc_default))
-                         (Econs
-                           (Eaddrof
-                             (Evar _reduction_mutex_1 (Tstruct __opaque_pthread_mutex_t noattr))
-                             (tptr (Tstruct __opaque_pthread_mutex_t noattr)))
-                           Enil) tint))
-                  (Ssequence
-                    (Sdo (Eassign
-                           (Efield
-                             (Evalof
-                               (Ederef
-                                 (Evalof
-                                   (Evar __par_routine1_data (tptr (Tstruct __par_routine1_data_ty noattr)))
-                                   (tptr (Tstruct __par_routine1_data_ty noattr)))
-                                 (Tstruct __par_routine1_data_ty noattr))
-                               (Tstruct __par_routine1_data_ty noattr)) _k
-                             (tptr tint))
-                           (Ebinop Oadd
-                             (Evalof
-                               (Efield
-                                 (Evalof
-                                   (Ederef
-                                     (Evalof
-                                       (Evar __par_routine1_data (tptr (Tstruct __par_routine1_data_ty noattr)))
-                                       (tptr (Tstruct __par_routine1_data_ty noattr)))
-                                     (Tstruct __par_routine1_data_ty noattr))
-                                   (Tstruct __par_routine1_data_ty noattr))
-                                 _k (tptr tint)) (tptr tint))
-                             (Evalof (Evar _k tint) tint) (tptr tint))
-                           (tptr tint)))
-                    (Ssequence
-                      (Sdo (Ecall
-                             (Evalof
-                               (Evar _pthread_mutex_unlock (Tfunction
-                                                             (Tcons
-                                                               (tptr (Tstruct __opaque_pthread_mutex_t noattr))
-                                                               Tnil) tint
-                                                             cc_default))
-                               (Tfunction
-                                 (Tcons
-                                   (tptr (Tstruct __opaque_pthread_mutex_t noattr))
-                                   Tnil) tint cc_default))
-                             (Econs
-                               (Eaddrof
-                                 (Evar _reduction_mutex_1 (Tstruct __opaque_pthread_mutex_t noattr))
-                                 (tptr (Tstruct __opaque_pthread_mutex_t noattr)))
-                               Enil) tint))
-                      (Sreturn (Some (Ecast (Eval (Vint (Int.repr 0)) tint)
-                                       (tptr tvoid)))))))))))))))
+                (Sset _k (Econst_int (Int.repr 1) tint))
+                (Sset _l (Econst_int (Int.repr 0) tint)))))
+          (Scall None
+            (Evar _printf (Tfunction (Tcons (tptr tschar) Tnil) tint
+                            {|cc_vararg:=(Some 1); cc_unproto:=false; cc_structret:=false|}))
+            ((Evar ___stringlit_1 (tarray tschar 24)) ::
+             (Etempvar _i tint) :: (Etempvar _j tint) ::
+             (Etempvar _k tint) :: nil))))))
+  (Sreturn (Some (Econst_int (Int.repr 0) tint))))
 |}.
 
 Definition composites : list composite_definition :=
-(Composite __opaque_pthread_mutex_t Struct
-   (Member_plain ___sig tlong :: Member_plain ___opaque (tarray tschar 56) ::
-    nil)
-   noattr ::
- Composite __par_routine1_data_ty Struct
-   (Member_plain _i (tptr tint) :: Member_plain _k (tptr tint) :: nil)
-   noattr :: nil).
+nil.
 
 Definition global_definitions : list (ident * globdef fundef type) :=
 ((___compcert_va_int32,
@@ -391,6 +224,12 @@ Definition global_definitions : list (ident * globdef fundef type) :=
                    (mksignature (AST.Tlong :: AST.Tlong :: nil) AST.Tlong
                      cc_default)) (Tcons tulong (Tcons tulong Tnil)) tulong
      cc_default)) :: (___stringlit_1, Gvar v___stringlit_1) ::
+ (___builtin_ais_annot,
+   Gfun(External (EF_builtin "__builtin_ais_annot"
+                   (mksignature (AST.Tlong :: nil) AST.Tvoid
+                     {|cc_vararg:=(Some 1); cc_unproto:=false; cc_structret:=false|}))
+     (Tcons (tptr tschar) Tnil) tvoid
+     {|cc_vararg:=(Some 1); cc_unproto:=false; cc_structret:=false|})) ::
  (___builtin_bswap64,
    Gfun(External (EF_builtin "__builtin_bswap64"
                    (mksignature (AST.Tlong :: nil) AST.Tlong cc_default))
@@ -503,18 +342,16 @@ Definition global_definitions : list (ident * globdef fundef type) :=
                    (mksignature (AST.Tlong :: AST.Tlong :: nil) AST.Tlong
                      cc_default)) (Tcons tlong (Tcons tlong Tnil)) tlong
      cc_default)) ::
- (___builtin_cls,
-   Gfun(External (EF_builtin "__builtin_cls"
-                   (mksignature (AST.Tint :: nil) AST.Tint cc_default))
-     (Tcons tint Tnil) tint cc_default)) ::
- (___builtin_clsl,
-   Gfun(External (EF_builtin "__builtin_clsl"
-                   (mksignature (AST.Tlong :: nil) AST.Tint cc_default))
-     (Tcons tlong Tnil) tint cc_default)) ::
- (___builtin_clsll,
-   Gfun(External (EF_builtin "__builtin_clsll"
-                   (mksignature (AST.Tlong :: nil) AST.Tint cc_default))
-     (Tcons tlong Tnil) tint cc_default)) ::
+ (___builtin_fmax,
+   Gfun(External (EF_builtin "__builtin_fmax"
+                   (mksignature (AST.Tfloat :: AST.Tfloat :: nil) AST.Tfloat
+                     cc_default)) (Tcons tdouble (Tcons tdouble Tnil))
+     tdouble cc_default)) ::
+ (___builtin_fmin,
+   Gfun(External (EF_builtin "__builtin_fmin"
+                   (mksignature (AST.Tfloat :: AST.Tfloat :: nil) AST.Tfloat
+                     cc_default)) (Tcons tdouble (Tcons tdouble Tnil))
+     tdouble cc_default)) ::
  (___builtin_fmadd,
    Gfun(External (EF_builtin "__builtin_fmadd"
                    (mksignature
@@ -543,16 +380,25 @@ Definition global_definitions : list (ident * globdef fundef type) :=
                      AST.Tfloat cc_default))
      (Tcons tdouble (Tcons tdouble (Tcons tdouble Tnil))) tdouble
      cc_default)) ::
- (___builtin_fmax,
-   Gfun(External (EF_builtin "__builtin_fmax"
-                   (mksignature (AST.Tfloat :: AST.Tfloat :: nil) AST.Tfloat
-                     cc_default)) (Tcons tdouble (Tcons tdouble Tnil))
-     tdouble cc_default)) ::
- (___builtin_fmin,
-   Gfun(External (EF_builtin "__builtin_fmin"
-                   (mksignature (AST.Tfloat :: AST.Tfloat :: nil) AST.Tfloat
-                     cc_default)) (Tcons tdouble (Tcons tdouble Tnil))
-     tdouble cc_default)) ::
+ (___builtin_read16_reversed,
+   Gfun(External (EF_builtin "__builtin_read16_reversed"
+                   (mksignature (AST.Tlong :: nil) AST.Tint16unsigned
+                     cc_default)) (Tcons (tptr tushort) Tnil) tushort
+     cc_default)) ::
+ (___builtin_read32_reversed,
+   Gfun(External (EF_builtin "__builtin_read32_reversed"
+                   (mksignature (AST.Tlong :: nil) AST.Tint cc_default))
+     (Tcons (tptr tuint) Tnil) tuint cc_default)) ::
+ (___builtin_write16_reversed,
+   Gfun(External (EF_builtin "__builtin_write16_reversed"
+                   (mksignature (AST.Tlong :: AST.Tint :: nil) AST.Tvoid
+                     cc_default)) (Tcons (tptr tushort) (Tcons tushort Tnil))
+     tvoid cc_default)) ::
+ (___builtin_write32_reversed,
+   Gfun(External (EF_builtin "__builtin_write32_reversed"
+                   (mksignature (AST.Tlong :: AST.Tint :: nil) AST.Tvoid
+                     cc_default)) (Tcons (tptr tuint) (Tcons tuint Tnil))
+     tvoid cc_default)) ::
  (___builtin_debug,
    Gfun(External (EF_external "__builtin_debug"
                    (mksignature (AST.Tint :: nil) AST.Tvoid
@@ -565,43 +411,31 @@ Definition global_definitions : list (ident * globdef fundef type) :=
                      {|cc_vararg:=(Some 1); cc_unproto:=false; cc_structret:=false|}))
      (Tcons (tptr tschar) Tnil) tint
      {|cc_vararg:=(Some 1); cc_unproto:=false; cc_structret:=false|})) ::
- (_pthread_mutex_lock,
-   Gfun(External (EF_external "pthread_mutex_lock"
-                   (mksignature (AST.Tlong :: nil) AST.Tint cc_default))
-     (Tcons (tptr (Tstruct __opaque_pthread_mutex_t noattr)) Tnil) tint
-     cc_default)) ::
- (_pthread_mutex_unlock,
-   Gfun(External (EF_external "pthread_mutex_unlock"
-                   (mksignature (AST.Tlong :: nil) AST.Tint cc_default))
-     (Tcons (tptr (Tstruct __opaque_pthread_mutex_t noattr)) Tnil) tint
-     cc_default)) :: (_main, Gfun(Internal f_main)) ::
- (_critical_mutex_1, Gvar v_critical_mutex_1) ::
- (_reduction_mutex_1, Gvar v_reduction_mutex_1) ::
- (__par_routine1, Gfun(Internal f__par_routine1)) :: nil).
+ (_main, Gfun(Internal f_main)) :: nil).
 
 Definition public_idents : list ident :=
-(__par_routine1 :: _reduction_mutex_1 :: _critical_mutex_1 :: _main ::
- _pthread_mutex_unlock :: _pthread_mutex_lock :: _printf ::
- ___builtin_debug :: ___builtin_fmin :: ___builtin_fmax ::
- ___builtin_fnmsub :: ___builtin_fnmadd :: ___builtin_fmsub ::
- ___builtin_fmadd :: ___builtin_clsll :: ___builtin_clsl :: ___builtin_cls ::
- ___builtin_expect :: ___builtin_unreachable :: ___builtin_va_end ::
- ___builtin_va_copy :: ___builtin_va_arg :: ___builtin_va_start ::
- ___builtin_membar :: ___builtin_annot_intval :: ___builtin_annot ::
- ___builtin_sel :: ___builtin_memcpy_aligned :: ___builtin_sqrt ::
- ___builtin_fsqrt :: ___builtin_fabsf :: ___builtin_fabs ::
- ___builtin_ctzll :: ___builtin_ctzl :: ___builtin_ctz :: ___builtin_clzll ::
- ___builtin_clzl :: ___builtin_clz :: ___builtin_bswap16 ::
- ___builtin_bswap32 :: ___builtin_bswap :: ___builtin_bswap64 ::
- ___compcert_i64_umulh :: ___compcert_i64_smulh :: ___compcert_i64_sar ::
- ___compcert_i64_shr :: ___compcert_i64_shl :: ___compcert_i64_umod ::
- ___compcert_i64_smod :: ___compcert_i64_udiv :: ___compcert_i64_sdiv ::
- ___compcert_i64_utof :: ___compcert_i64_stof :: ___compcert_i64_utod ::
- ___compcert_i64_stod :: ___compcert_i64_dtou :: ___compcert_i64_dtos ::
- ___compcert_va_composite :: ___compcert_va_float64 ::
- ___compcert_va_int64 :: ___compcert_va_int32 :: nil).
+(_main :: _printf :: ___builtin_debug :: ___builtin_write32_reversed ::
+ ___builtin_write16_reversed :: ___builtin_read32_reversed ::
+ ___builtin_read16_reversed :: ___builtin_fnmsub :: ___builtin_fnmadd ::
+ ___builtin_fmsub :: ___builtin_fmadd :: ___builtin_fmin ::
+ ___builtin_fmax :: ___builtin_expect :: ___builtin_unreachable ::
+ ___builtin_va_end :: ___builtin_va_copy :: ___builtin_va_arg ::
+ ___builtin_va_start :: ___builtin_membar :: ___builtin_annot_intval ::
+ ___builtin_annot :: ___builtin_sel :: ___builtin_memcpy_aligned ::
+ ___builtin_sqrt :: ___builtin_fsqrt :: ___builtin_fabsf ::
+ ___builtin_fabs :: ___builtin_ctzll :: ___builtin_ctzl :: ___builtin_ctz ::
+ ___builtin_clzll :: ___builtin_clzl :: ___builtin_clz ::
+ ___builtin_bswap16 :: ___builtin_bswap32 :: ___builtin_bswap ::
+ ___builtin_bswap64 :: ___builtin_ais_annot :: ___compcert_i64_umulh ::
+ ___compcert_i64_smulh :: ___compcert_i64_sar :: ___compcert_i64_shr ::
+ ___compcert_i64_shl :: ___compcert_i64_umod :: ___compcert_i64_smod ::
+ ___compcert_i64_udiv :: ___compcert_i64_sdiv :: ___compcert_i64_utof ::
+ ___compcert_i64_stof :: ___compcert_i64_utod :: ___compcert_i64_stod ::
+ ___compcert_i64_dtou :: ___compcert_i64_dtos :: ___compcert_va_composite ::
+ ___compcert_va_float64 :: ___compcert_va_int64 :: ___compcert_va_int32 ::
+ nil).
 
-Definition prog : Csyntax.program := 
+Definition prog : Clight.program := 
   mkprogram composites global_definitions public_idents _main Logic.I.
 
 

@@ -268,11 +268,11 @@ endif
 # ########## Flags ##########
 
 ifeq ($(ZLIST),platform)
-  VSTDIRS= shared msl sepcomp veric floyd $(PROGSDIR) concurrency ccc26x86 atomics OMPcompilerVerif
+  VSTDIRS= shared msl sepcomp veric floyd $(PROGSDIR) concurrency ccc26x86 atomics
 else
-  VSTDIRS= shared msl sepcomp veric zlist floyd $(PROGSDIR) concurrency ccc26x86 atomics OMPcompilerVerif
+  VSTDIRS= shared msl sepcomp veric zlist floyd $(PROGSDIR) concurrency ccc26x86 atomics
 endif
-OTHERDIRS= wand_demo sha hmacfcf tweetnacl20140427 hmacdrbg aes mailbox boringssl_fips_20180730
+OTHERDIRS= wand_demo sha hmacfcf tweetnacl20140427 hmacdrbg aes mailbox boringssl_fips_20180730 omp_compiler
 DIRS = $(VSTDIRS) $(OTHERDIRS)
 
 # ##### Compcert Flags #####
@@ -639,6 +639,9 @@ SINGLE_C_FILES = reverse.c reverse_client.c revarray.c queue.c queue2.c message.
 LINKED_C_FILES = even.c odd.c
 C_FILES = $(SINGLE_C_FILES) $(LINKED_C_FILES)
 
+OMP_COMPILER_FILES = \
+  stmt.v O2Clight.v sample\src1.v sample\tgt1.v sample\src1_tweak.v
+
 FILES = \
  veric/version.v \
  $(MSL_FILES:%=msl/%) \
@@ -877,11 +880,11 @@ floyd/floyd.coq: floyd/proofauto.vo
 	@echo 'coqdep ... >.depend'
 ifeq ($(COMPCERT_NEW),true)
 	# DEPENDENCIES VARIANT COMPCERT_NEW
-	$(COQDEP) $(DEPFLAGS) 2>&1 >.depend `find $(filter $(wildcard *), $(DIRS) refinedVST concurrency/common concurrency/compiler concurrency/juicy concurrency/util paco concurrency/sc_drf concurrency/openmp_sem concurrency/openmp_sem/sc_drf OMPcompilerVerif) -name "*.v"` | grep -v 'Warning:.*found in the loadpath' || true
+	$(COQDEP) $(DEPFLAGS) 2>&1 >.depend `find $(filter $(wildcard *), $(DIRS) refinedVST concurrency/common concurrency/compiler concurrency/juicy concurrency/util paco concurrency/sc_drf concurrency/openmp_sem concurrency/openmp_sem/sc_drf omp_compiler omp_compiler/sample) -name "*.v"` | grep -v 'Warning:.*found in the loadpath' || true
 	@echo "" >>.depend
 else
 	# DEPENDENCIES DEFAULT
-	$(COQDEP) $(DEPFLAGS) 2>&1 >.depend `find $(filter $(wildcard *), $(DIRS) refinedVST cmplr_src1_passes_temp.v) -name "*.v"` | grep -v 'Warning:.*found in the loadpath' || true
+	$(COQDEP) $(DEPFLAGS) 2>&1 >.depend `find $(filter $(wildcard *), $(DIRS) refinedVST concurrency/common concurrency/compiler concurrency/juicy concurrency/util paco concurrency/sc_drf concurrency/openmp_sem concurrency/openmp_sem/sc_drf omp_compiler omp_compiler/sample) -name "*.v"` | grep -v 'Warning:.*found in the loadpath' || true
 endif
 ifeq ($(COMPCERT_BUILD_FROM_SRC),true)
 	# DEPENDENCIES TO BUILD COMPCERT FROM SOURCE
