@@ -7,6 +7,10 @@ Local Open Scope string_scope.
 Local Open Scope csyntax_scope.
 From stdpp Require Import base list.
 
+(* assume existence of pthread function names *)
+Definition __opaque_pthread_t : ident := $"_opaque_pthread_t".
+Definition __opaque_pthread_attr_t : ident := $"_opaque_pthread_attr_t".
+
 (** *
 
   We lift CLight stmt to stmtT to include extra info about variables in an OMP
@@ -113,12 +117,38 @@ with labeled_statements_to_labeled_statementsT (ls: labeled_statements) : labele
   | LSnil => LSnilT
   | LScons c s ls' => LSconsT c (stmt_to_stmtT s) (labeled_statements_to_labeled_statementsT ls')
   end.
-
-Record annotatedFunction  : Type := makeAnnotatedFunction {
-  fn_return_annot: type;
-  fn_callconv_annot: calling_convention;
-  fn_params_annot: list (ident * type);
-  fn_vars_annot: list (ident * type);
-  fn_temps_annot: list (ident * type);
-  fn_body_annot: statementT
+Record functionT  : Type := makeFunctionT {
+  fn_returnT: type;
+  fn_callconvT: calling_convention;
+  fn_paramsT: list (ident * type);
+  fn_varsT: list (ident * type);
+  fn_tempsT: list (ident * type);
+  fn_bodyT: statementT
 }.
+
+Definition program := Ctypes.program functionT.
+
+Fixpoint lower_stmt (s: statementT) : statement :=
+  match s with
+  | SsequenceT a b => Ssequence (lower_stmt a) (lower_stmt b)
+  | SifthenelseT a b c => Sifthenelse a (lower_stmt b) (lower_stmt c)
+  | SloopT a b => Sloop (lower_stmt a) (lower_stmt b)  
+  | SlabelT a b => Slabel a (lower_stmt b)
+  | SpragmaT a b c d => (lower_stmt d)
+  | SassignT l r => Sassign l r
+  | SsetT id e => Sset id e
+  | ScallT id e args => Scall id e args
+  | SbuiltinT id ef tl args => Sbuiltin id ef tl args
+  | SbreakT => Sbreak
+  | ScontinueT => Scontinue
+  | SreturnT oe => Sreturn oe
+  | SswitchT e ls => Sswitch e (lower_labeled_statements ls)
+  | SgotoT l => Sgoto l
+  | SskipT => Sskip
+  end 
+  with lower_labeled_statements (ls: labeled_statementsT) : labeled_statements :=
+  match ls with
+  | LSnilT => LSnil
+  | LSconsT c s ls => LScons c (lower_stmt s) (lower_labeled_statements ls)
+  end
+.

@@ -640,7 +640,7 @@ LINKED_C_FILES = even.c odd.c
 C_FILES = $(SINGLE_C_FILES) $(LINKED_C_FILES)
 
 OMP_COMPILER_FILES = \
-  stmt.v O2Clight.v sample\src1.v sample\tgt1.v sample\src1_tweak.v
+  ClightT.v O2Clight.v sample\src1.v sample\tgt1.v sample\src1_tweak.v
 
 FILES = \
  veric/version.v \
@@ -789,6 +789,7 @@ mailbox: _CoqProject mailbox/verif_mailbox_all.vo
 # atomics: _CoqProject atomics/verif_kvnode_atomic.vo atomics/verif_kvnode_atomic_ra.vo atomics/verif_hashtable_atomic.vo atomics/verif_hashtable_atomic_ra.vo
 atomics: _CoqProject atomics/verif_hashtable_atomic.vo $(PROGSDIR)/verif_incr_atomic.vo atomics/verif_lock.vo atomics/verif_lock_atomic.vo
 io: _CoqProject $(PROGSDIR)/os_combine.vo $(PROGSDIR)/verif_printf.vo $(PROGSDIR)/verif_io.vo $(PROGSDIR)/verif_io_mem.vo $(PROGSDIR)/io_specs.vo floyd/printf.vo
+omp-compiler: _CoqProject $(OMP_COMPILER_FILES:%.v=omp_compiler/%.vo)
 
 $(CVOFILES): compcert
 
@@ -923,6 +924,9 @@ clean-concur:
 	rm -f $(CONCUR_FILES:%.v=concurrency/%.vo) $(CONCUR_FILES:%.v=concurrency/%.glob) $(CONCUR_COMPILER_FILES:%.v=concurrency/compiler/%.vo) $(CONCUR_COMPILER_FILES:%.v=concurrency/compiler/%.glob) $(CONCUR_COMMON_FILES:%.v=concurrency/common/%.vo) $(CONCUR_COMMON_FILES:%.v=concurrency/common/%.glob) $(CONCUR_JUICY_FILES:%.v=concurrency/juicy/%.vo) $(CONCUR_JUICY_FILES:%.v=concurrency/juicy/%.glob)
 	rm -f concurrency/lib/*.{vo,vos,vok,glob}
 	rm -f concurrency/openmp_sem/*.{vo,vos,vok,glob}
+
+clean-omp-compiler:
+	rm -f $(OMP_COMPILER_FILES:%.v=omp_compiler/%.vo) $(OMP_COMPILER_FILES:%.v=omp_compiler/%.glob)
 
 clean-linking:
 	rm -f $(LINKING_FILES:%.v=linking/%.vo) $(LINKING_FILES:%.v=linking/%.glob)
