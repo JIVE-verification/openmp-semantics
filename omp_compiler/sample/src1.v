@@ -1,9 +1,9 @@
 From Coq Require Import String List ZArith.
-From compcert Require Import Coqlib Integers Floats AST Ctypes Cop Clight Clightdefs.
-Import Clightdefs.ClightNotations.
+From compcert Require Import Coqlib Integers Floats Values AST Ctypes Cop Csyntax Csyntaxdefs.
+Import Csyntaxdefs.CsyntaxNotations.
 Local Open Scope Z_scope.
 Local Open Scope string_scope.
-Local Open Scope clight_scope.
+Local Open Scope csyntax_scope.
 
 Module Info.
   Definition version := "3.14".
@@ -15,8 +15,7 @@ Module Info.
   Definition abi := "standard".
   Definition bitsize := 64.
   Definition big_endian := false.
-  Definition source_file := "OMPcompiler/cmplr_src1.c".
-  Definition normalized := false.
+  Definition source_file := "src1.c".
 End Info.
 
 Definition ___builtin_ais_annot : ident := $"__builtin_ais_annot".
@@ -105,33 +104,39 @@ Definition f_main := {|
   fn_return := tint;
   fn_callconv := cc_default;
   fn_params := nil;
-  fn_vars := nil;
-  fn_temps := ((_i, tint) :: (_j, tint) :: (_k, tint) :: (_l, tint) :: nil);
+  fn_vars := ((_i, tint) :: (_j, tint) :: (_k, tint) :: (_l, tint) :: nil);
   fn_body :=
 (Ssequence
   (Ssequence
-    (Sset _i (Econst_int (Int.repr 0) tint))
+    (Sdo (Eassign (Evar _i tint) (Eval (Vint (Int.repr 0)) tint) tint))
     (Ssequence
-      (Sset _j (Econst_int (Int.repr 0) tint))
+      (Sdo (Eassign (Evar _j tint) (Eval (Vint (Int.repr 0)) tint) tint))
       (Ssequence
-        (Sset _k (Econst_int (Int.repr 0) tint))
+        (Sdo (Eassign (Evar _k tint) (Eval (Vint (Int.repr 0)) tint) tint))
         (Ssequence
           (Ssequence
-            (Sset _i
-              (Ebinop Oadd (Etempvar _i tint) (Econst_int (Int.repr 1) tint)
-                tint))
+            (Sdo (Epostincr Incr (Evar _i tint) tint))
             (Ssequence
-              (Sset _j (Econst_int (Int.repr 1) tint))
+              (Sdo (Eassign (Evar _j tint) (Eval (Vint (Int.repr 1)) tint)
+                     tint))
               (Ssequence
-                (Sset _k (Econst_int (Int.repr 1) tint))
-                (Sset _l (Econst_int (Int.repr 0) tint)))))
-          (Scall None
-            (Evar _printf (Tfunction (Tcons (tptr tschar) Tnil) tint
-                            {|cc_vararg:=(Some 1); cc_unproto:=false; cc_structret:=false|}))
-            ((Evar ___stringlit_1 (tarray tschar 24)) ::
-             (Etempvar _i tint) :: (Etempvar _j tint) ::
-             (Etempvar _k tint) :: nil))))))
-  (Sreturn (Some (Econst_int (Int.repr 0) tint))))
+                (Sdo (Eassign (Evar _k tint) (Eval (Vint (Int.repr 1)) tint)
+                       tint))
+                (Sdo (Eassign (Evar _l tint) (Eval (Vint (Int.repr 0)) tint)
+                       tint)))))
+          (Sdo (Ecall
+                 (Evalof
+                   (Evar _printf (Tfunction (Tcons (tptr tschar) Tnil) tint
+                                   {|cc_vararg:=(Some 1); cc_unproto:=false; cc_structret:=false|}))
+                   (Tfunction (Tcons (tptr tschar) Tnil) tint
+                     {|cc_vararg:=(Some 1); cc_unproto:=false; cc_structret:=false|}))
+                 (Econs
+                   (Evalof (Evar ___stringlit_1 (tarray tschar 24))
+                     (tarray tschar 24))
+                   (Econs (Evalof (Evar _i tint) tint)
+                     (Econs (Evalof (Evar _j tint) tint)
+                       (Econs (Evalof (Evar _k tint) tint) Enil)))) tint))))))
+  (Sreturn (Some (Eval (Vint (Int.repr 0)) tint))))
 |}.
 
 Definition composites : list composite_definition :=
@@ -435,7 +440,7 @@ Definition public_idents : list ident :=
  ___compcert_va_float64 :: ___compcert_va_int64 :: ___compcert_va_int32 ::
  nil).
 
-Definition prog : Clight.program := 
+Definition prog : Csyntax.program := 
   mkprogram composites global_definitions public_idents _main Logic.I.
 
 
