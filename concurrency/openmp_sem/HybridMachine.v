@@ -36,12 +36,20 @@ Import RecordSetNotations.
 Require Import Coq.Relations.Relation_Operators.
 
 Lemma at_external_SEM_eq:
-   forall ge c m, memory_semantics.at_external (csem (msem (CLC_evsem ge))) c m =
-   match c with
-   | Callstate (Ctypes.External ef _ _ _) args _ => 
-       if ef_inline ef then None else Some (ef, args)
-   | _ => None
- end.
+  forall ge c m, memory_semantics.at_external (csem (msem (CLC_evsem ge))) c m =
+  match c with
+  | Callstate (Ctypes.External ef _ _ _) args _ => 
+      if ef_inline ef then None else Some (ef, args)
+  | _ => None
+  end.
+Proof. auto. Qed.
+
+Lemma at_pragma_SEM_eq:
+   forall ge c, memory_semantics.at_pragma (csem (msem (CLC_evsem ge))) c =
+  match c with
+  | Pragmastate n pl _ => Some (n, pl)
+  | _ => None
+  end.
 Proof. auto. Qed.
 
 #[export] Instance ClightSem ge : Semantics :=
@@ -145,6 +153,7 @@ Module DryHybridMachine.
         lockRes_valid: lr_valid (lockRes tp) (*well-formed locks*)
       }.
 
+
     (** Steps*)
     Inductive dry_step {tid0 tp m} (cnt: containsThread tp tid0)
               (Hcompatible: mem_compatible tp m) :
@@ -210,7 +219,6 @@ Module DryHybridMachine.
     Definition transform_state_parallel (c: state) (rcs_env: env) (is_leader:bool) : option state :=
       match c with
       | Clight_core.Pragmastate idx (OMPParallel tn pc pc_first rcs) (f,s,k,le,te) =>
-        (* need to bring threads in a `Pragmastate ParallelEnd` state to implement blocking/barrier for the parent *)
         let s' := Ssequence s (SBRB idx ParallelConstruct rcs rcs_env) in
         let s'' := Spriv idx pc pc_first rcs s' in
         let k' := if is_leader then k else Kstop in
@@ -221,11 +229,20 @@ Module DryHybridMachine.
     Definition transform_state_for (c: state) (rcs_env: env) (my_workload: list chunk) (cln: CanonicalLoopNest) : option state :=
       match c with
       | Clight_core.Pragmastate idx (OMPFor pc pc_first rcs) (f,s,k,le,te) =>
-        (* need to bring threads in a `Pragmastate ParallelEnd` state to implement blocking/barrier for the parent *)
          let s' := Ssequence (transform_chunks my_workload cln)
                              (SBRB idx ForConstruct rcs rcs_env) in
          let s'' := Spriv idx pc pc_first rcs s' in
         Some (Clight_core.State f s'' k le te)
+      | _ => None
+      end.
+
+    Definition transform_state_single (c: state) (is_chosen:bool) : option state :=
+      match c with
+      | Clight_core.Pragmastate idx (OMPSingle pc pc_first) (f,s,k,le,te) =>
+        let s' := if is_chosen then s else Sskip in
+        let s'' := Ssequence s' (Sbarrier idx true SingleConstruct) in
+        let s''' := Spriv idx pc pc_first [] s'' in
+        Some (Clight_core.State f s''' k le te)
       | _ => None
       end.
 
@@ -306,6 +323,68 @@ Module DryHybridMachine.
     Definition emptyPerm: res := (empty_map, empty_map).
     Definition permMapJoin_list pmaps pmap : Prop :=
       sepalg_list.fold_rel permMapJoinPair emptyPerm pmaps pmap.
+
+    (** Setoid instances for rewriting with [access_map_equiv] inside
+        [permMapJoin_list]. *)
+
+    #[export] Instance permMapJoin_proper :
+      Proper (access_map_equiv ==> access_map_equiv ==> access_map_equiv ==> iff)
+             permMapJoin.
+    Proof.
+      intros a1 a2 Ha b1 b2 Hb c1 c2 Hc.
+      unfold permMapJoin, access_map_equiv in *.
+      split; intros H b ofs; specialize (H b ofs).
+      - rewrite -(Ha b) -(Hb b) -(Hc b); exact H.
+      - rewrite (Ha b) (Hb b) (Hc b); exact H.
+    Qed.
+
+    Definition res_equiv (r1 r2 : res) : Prop :=
+      access_map_equiv r1.1 r2.1 /\ access_map_equiv r1.2 r2.2.
+
+    #[export] Instance res_equiv_Equivalence : Equivalence res_equiv.
+    Proof.
+      constructor.
+      - intros [? ?]; split; reflexivity.
+      - intros [? ?] [? ?] [H1 H2]; split; symmetry; assumption.
+      - intros [? ?] [? ?] [? ?] [H1 H2] [H3 H4]; split; etransitivity; eassumption.
+    Qed.
+
+    #[export] Instance permMapJoinPair_proper :
+      Proper (res_equiv ==> res_equiv ==> res_equiv ==> iff) permMapJoinPair.
+    Proof.
+      intros r1 s1 [H11 H12] r2 s2 [H21 H22] r3 s3 [H31 H32].
+      unfold permMapJoinPair.
+      split; intros [A B]; split.
+      - exact (proj1 (permMapJoin_proper H11 H21 H31) A).
+      - exact (proj1 (permMapJoin_proper H12 H22 H32) B).
+      - exact (proj2 (permMapJoin_proper H11 H21 H31) A).
+      - exact (proj2 (permMapJoin_proper H12 H22 H32) B).
+    Qed.
+
+    Lemma fold_rel_permMapJoinPair_Forall2 :
+      forall pmaps pmaps' (e : res) pmap,
+        List.Forall2 res_equiv pmaps pmaps' ->
+        sepalg_list.fold_rel permMapJoinPair e pmaps pmap <->
+        sepalg_list.fold_rel permMapJoinPair e pmaps' pmap.
+    Proof.
+      intros pmaps pmaps' e0 pmap0 HF. revert e0 pmap0.
+      induction HF as [| r r' rs rs' Hr _ IH]; intros e pmap.
+      - tauto.
+      - split; intro H; inversion H; subst.
+        + eapply sepalg_list.fold_rel_cons.
+          * setoid_rewrite <- Hr; eassumption.
+          * apply (proj1 (IH _ _)); eassumption.
+        + eapply sepalg_list.fold_rel_cons.
+          * setoid_rewrite Hr; eassumption.
+          * apply (proj2 (IH _ _)); eassumption.
+    Qed.
+
+    #[export] Instance permMapJoin_list_proper :
+      Proper (List.Forall2 res_equiv ==> eq ==> iff) permMapJoin_list.
+    Proof.
+      intros pmaps pmaps' HF pmap pmap' <-.
+      exact (fold_rel_permMapJoinPair_Forall2 pmaps pmaps' emptyPerm pmap HF).
+    Qed.
 
     Program Fixpoint fold_siblings {B:Type} (f: stree -> B -> B) (b:B) tz {measure (tree_pos_measure tz)} : (team_zipper * B) :=
       let b' := f tz.this b in
@@ -390,11 +469,12 @@ Module DryHybridMachine.
             (Htree': Some ttree' = spawn_team tid0 new_tids idx ttree),
             pragma_step cnt0 Hcompat tp'' m' ttree' []
     | step_for :
-      forall c c' le te rvs_env stmt cln lb incr 
-       (team_workloads : list $ list chunk) my_workload
+      forall c c' le te rvs_env stmt cln lb incr iter_num mates_tids team_size
+       chunks (team_workloads : list $ list chunk) (my_workload: list chunk)
        (ttree' : team_tree)
        tp' tnum pc pc_first rcs m' idx tm_exec_ctx
       (Hcode: getThreadC cnt0 = Kblocked c)
+      (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m')
       (Hat_pragma: at_pragma semSem c = Some (idx, OMPFor pc pc_first rcs))
       (* next statement is a canonical loop nest *)
       (Hstmt: Some stmt = get_stmt c)
@@ -403,8 +483,11 @@ Module DryHybridMachine.
       (* exists a chunk split of the iterations *)
       (His_cln: make_canonical_loop_nest stmt = Some cln)
       (Hlb_of_loop: lb_of_loop cln ge le te m = Some lb)
-      (Hincr_of_loop: incr_of_loop cln ge le te m = Some incr),
-      (* TODO angelically decides a chunk_split with parameters lb, incr, iter_num *)
+      (Hincr_of_loop: incr_of_loop cln ge le te m = Some incr)
+      (Hiter_num_of_loop: iter_num_of_loop cln ge le te m = Some iter_num)
+      (Hmates_tids: Some mates_tids = team_mates_tids tid0 ttree)
+      (Hteam_size: team_size = length mates_tids)
+      (chunkSplit: ChunkSplit lb incr iter_num team_size chunks team_workloads),
       forall
       (* 1. first thread encountering the for-construct adds the team_exec_ctx
             for the for-construct, including reduction info and a partition of
@@ -420,10 +503,26 @@ Module DryHybridMachine.
       (* 4. update tp with the new c' *)
       (Htp': tp' = updThreadC cnt0 (Krun c')),
       pragma_step cnt0 Hcompat tp' m' ttree' []
+    | step_single :
+      forall c c' pc pc_first m' idx tm_exec_ctx tnum chosen_tnum tp' ttree' 
+      (Hcode: getThreadC cnt0 = Kblocked c)
+      (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m')
+      (Hat_pragma: at_pragma semSem c = Some (idx, OMPSingle pc pc_first))
+      (* check ectx, see if I am the chosen team mate *)
+      (Htm_exec_ctx: tm_exec_ctx = (idx, team_ctx_single chosen_tnum) )
+      (Htnum: Some tnum = get_thread_num tid0 (from_stree ttree))
+      (Httree': Some ttree' = tz' ← mate_maybe_add_team_exec_ctx (from_stree ttree) tid0 tm_exec_ctx;
+                              to_stree tz')
+      (* update state *)
+      (Hc': Some c' = transform_state_single c (chosen_tnum =? tnum))
+      (Htp': tp' = updThreadC cnt0 (Krun c')),
+      pragma_step cnt0 Hcompat tp' m' ttree' []
     | step_barrier :
       (* if all teammates are at barrier, move them across the barrier. *)
-      forall m idx (is_ending_region:bool) (s_tag: construct_kind) mates_tids 
+      forall m' idx (is_ending_region:bool) (s_tag: construct_kind) mates_tids 
       ttree' tp' tp'' perms1 perms2 perm_sum
+      (Hinv : invariant tp)
+      (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m')
       (* 1. check all threads are at the same barrier, and then move them accross barrier *)
       (Hmates_tids: Some mates_tids = team_mates_tids tid0 ttree)
       (Hstep_barrier: Some tp' = foldr (λ tid maybe_tp,

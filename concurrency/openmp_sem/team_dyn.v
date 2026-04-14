@@ -189,18 +189,18 @@ Section SiblingTreeZipper.
   Proof.
     intros H.
     rewrite /tree_pos_iter in H.
-    destruct_match.
+    destruct_match!.
     { rewrite /go_right in Heqo.
       destruct tz => //.
       destruct a => //. inv Heqo.
       rewrite /tree_pos_measure /fmap /= -/fmap.
       assert (stree_measure tis > 0) by apply stree_measure_pos.
       lia. }
-    destruct_match.
+    destruct_match!.
     rewrite /go_down in Heqo0.
-    destruct_match.
-    destruct_match.
-    destruct_match.
+    destruct_match!.
+    destruct_match!.
+    destruct_match!.
     inv Heqo0.
     rewrite /tree_pos_measure.
     rewrite  /stree_measure /= -/stree_measure /fmap. lia.
@@ -302,7 +302,7 @@ Section SiblingTreeZipper.
     rewrite /go_up in H.
     destruct tz => //.
     destruct p; first done.
-    repeat destruct_match. inv H. simpl. lia.
+    repeat destruct_match!. inv H. simpl. lia.
   Defined.
 
   (* Using Equations would generate the rewrite lemmas automatically,
@@ -392,9 +392,9 @@ Section SiblingTreeZipper.
     ∃ k s', tz_comp k s' s1 ∧ tz_comp k (f s') s2.
   Proof.
     intros. rewrite /stree_update in H.
-    unfold_mbind_in_hyp; destruct_match.
+    unfold_mbind_in_hyp; destruct_match!.
     rewrite /tz_update in Heqo.
-    unfold_mbind_in_hyp; destruct_match.
+    unfold_mbind_in_hyp; destruct_match!.
     exists t0, (this t0).
     destruct (tz_lookup_correct _ _ _ Heqo0).
     rewrite /tz_comp; split.
@@ -433,7 +433,11 @@ Variant team_executing_context' :=
                A thread works on a chunk of iterations. *)
            (list $ list chunk) ->
            team_executing_context'
-| team_ctx_single : team_executing_context'
+| team_ctx_single :
+  (* the OpenMP thread number that identifies the thread that
+     executes the single construct *)
+  nat -> 
+  team_executing_context'
 | team_ctx_barrier : team_executing_context'
 .
 Definition team_executing_context : Type := (nat * team_executing_context').
@@ -692,7 +696,7 @@ Section OpenMPThreads.
           tz_ectx ← team_pop_team_exec_context tz tid;
           let (tz, ectx) := (tz_ectx: (team_zipper * team_executing_context)) in
           match ectx with
-          | (idx', team_ctx_single) => if idx' =? idx then Some tz else None
+          | (idx', team_ctx_single _) => if idx' =? idx then Some tz else None
           | _ => None
           end
         | ParallelConstruct =>

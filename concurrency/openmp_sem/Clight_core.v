@@ -358,7 +358,7 @@ unfold cl_after_external in H.
 destruct q; inv H. destruct f; inv H1. reflexivity.
 Qed.
 
-Definition cl_at_meta (c: CC_core) : option (nat * pragma_label) :=
+Definition cl_at_pragma (c: CC_core) : option (nat * pragma_label) :=
   match c with
   | Pragmastate n pl _ => Some (n, pl)
   | _ => None
@@ -371,7 +371,7 @@ Program Definition cl_core_sem (ge: genv) :
     (fun _ m c m' v args => cl_initial_core ge v args = Some c(* /\ Mem.arg_well_formed args m *) /\ m' = m)
     (fun c _ => cl_at_external c)
     (fun ret c _ => cl_after_external ret c)
-    cl_at_meta
+    cl_at_pragma
     (fun c _ =>  cl_halted c <> None) (* Why don't we use the int argument of halted? *)
     (cl_step ge)
     (cl_corestep_not_halted ge)

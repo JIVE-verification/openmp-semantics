@@ -26,6 +26,8 @@ From stdpp Require Import base list.
     3. insert barrier at the end
 *)
 
+Open Scope Z_scope.
+
 Definition val_to_Z (v: val) : option Z :=
     match v with
     | Vint i => Some $ Int.intval i
@@ -59,7 +61,7 @@ Definition incr_of_loop (loop: CanonicalLoopNest) ge e le m : option Z :=
     end.
 
 (* take a CanonicalLoopNest, return the number of iterations *)
-Definition iter_num_of_loop (loop: CanonicalLoopNest) ge e le m : option nat :=
+Definition iter_num_of_loop (loop: CanonicalLoopNest) ge e le m : option Z :=
     lb ← lb_of_loop loop ge e le m;
     incr ← incr_of_loop loop ge e le m;
     match loop with
@@ -73,31 +75,31 @@ Definition iter_num_of_loop (loop: CanonicalLoopNest) ge e le m : option nat :=
             | Some ub =>
                 match rel_op with
                 | ROP_le =>
-                    if decide (incr <= 0)%Z then None else (* standard p.201, 13 *)
-                    if decide ((ub - lb) / incr < 0)%Z
+                    if decide (incr <= 0) then None else (* standard p.201, 13 *)
+                    if decide ((ub - lb) / incr < 0)
                     then Some 0 (* this is what gcc does *)
-                    else Some $ 1 + Z.to_nat ((ub - lb) / incr)%Z
+                    else Some $ 1 + ((ub - lb) / incr)
                 | ROP_lt =>
-                    if decide (incr <= 0)%Z then None else
+                    if decide (incr <= 0) then None else
                     (* [var < ub] same as [var <= ub-1], and the arithmetics are in Z so no risk of overflow *)
-                    if decide (((ub-1) - lb) / incr < 0)%Z
+                    if decide (((ub-1) - lb) / incr < 0)
                     then Some 0
-                    else Some $ 1 + Z.to_nat (((ub-1) - lb) / incr)%Z
+                    else Some $ 1 + (((ub-1) - lb) / incr)
                 | ROP_ge => 
-                    if decide (incr >= 0)%Z then None else
-                    if decide ((ub - lb) / incr < 0)%Z
+                    if decide (incr >= 0) then None else
+                    if decide ((ub - lb) / incr < 0)
                     then Some 0
-                    else Some $ 1 + Z.to_nat ((ub - lb) / incr)%Z
+                    else Some $ 1 + ((ub - lb) / incr)
                 | ROP_gt =>
-                    if decide (incr >= 0)%Z then None else
+                    if decide (incr >= 0) then None else
                     (* [var > ub] same as [var >= ub+1], and the arithmetics are in Z so no risk of overflow *)
-                    if decide ((lb - (ub-1)) / incr < 0)%Z
+                    if decide ((lb - (ub-1)) / incr < 0)
                     then Some 0
-                    else Some $ 1 + Z.to_nat (((ub+1) - lb) / incr)%Z
+                    else Some $ 1 + (((ub+1) - lb) / incr)
                 | ROP_ne =>
                     (* standard p.201, 21 *)
-                    if decide ((incr <> 1) ∨ incr <> -1)%Z then None else
-                    Some $ Z.to_nat ((ub - lb) / incr)%Z
+                    if decide ((incr <> 1) ∨ incr <> -1) then None else
+                    Some $ ((ub - lb) / incr)
                 end
             end
         | _ => None (* assume TestExpr2 has been converted to TestExpr1 *)
@@ -107,53 +109,46 @@ Definition iter_num_of_loop (loop: CanonicalLoopNest) ge e le m : option nat :=
 
 (* a chunk (a,b) specifies a portion of the loop boundary [a,b), where a<b *)
 Definition chunk : Type := nat * nat.
-Definition sum_list (l: list nat) := fold_right plus 0 l.
+Definition sum_list (l: list nat) := fold_right plus 0%nat l.
 Definition sum_firstn (n: nat) (l: list nat) := sum_list (firstn n l).
 
-(* split the index into segments. *)
-Module Type ChunkSplit.
-
-    (* the logical iteration indexes for the for loop;
-       derived with simple static analysis? *)
-
+(* chunks is a ChunkSplit of some canonical loop nest of the following parameters if they satisfy these properties.  *)
+Record ChunkSplit 
     (* the lowerbound of loop range *)
-    Parameter lb : nat.
+    (lb : Z)
     (* each loop increases by incr *)
-    Parameter incr : nat.
+    (incr : Z)
     (* the number of iterations *)
-    Parameter iter_num : nat.
-    
-
+    (iter_num : Z)
     (* number of threads to split the workloads  *)
-    Parameter thread_num : nat.
-    Parameter thread_num_positive : 0 < thread_num.
-
+    (thread_num : nat)
     (* a partition of the loop range.
        =nil or [lb, lb)? if iter_num = 0,
        =[lb,lb+incr) if iter_num=1 *)
-    Parameter chunks : list chunk.
+    (chunks : list chunk)
+    (* for some i that represents the OMP team thread number,
+       team_workloads[i] is a list of chunks that is assigned to thread i *)
+    (team_workloads : list $ list chunk)
+    : Type := {
+    thread_num_positive : (0 < thread_num)%nat;
 
     (* the chunks are constructed with a list of chunk sizes *)
-    Parameter chunks_is_a_partition :
+    chunks_is_a_partition :
         iter_num > 1 ->
         (* the chunks are constructed with a list of positive chunk ste *)
         ∃ chunk_sizes : list nat,
-        Forall (λ n, 0 < n) chunk_sizes ∧
+        Forall (λ n, 0 < n)%nat chunk_sizes ∧
         length chunk_sizes = length chunks ∧
-        ∀ i chk, nth_error chunks i = Some chk ->
-            chk = (lb + incr * (sum_firstn i chunk_sizes),
-                   lb + incr * (sum_firstn (i + 1) chunk_sizes)).
-
-    (* i: the OMP team thread number
-       team_workloads[i] : a list of chunks that is assigned to thread i *)
-    Parameter team_workloads : list $ list chunk.
-    Parameter team_workloads_length : length team_workloads = thread_num.
+        ∀ (i: nat) chk, nth_error chunks i = Some chk ->
+            chk = (Z.to_nat (lb + incr * (Z.of_nat (sum_firstn i chunk_sizes))),
+                   Z.to_nat (lb + incr * (Z.of_nat (sum_firstn (i + 1) chunk_sizes))));
+    team_workloads_length : length team_workloads = thread_num;
     (* team workloads is a permutation of [0..chunk_num) *)
-    Parameter team_workloads_is_a_division :
-        Permutation (concat team_workloads) chunks.
-End ChunkSplit.
+    team_workloads_is_a_division :
+        Permutation (concat team_workloads) chunks
+}.
 
-Module ExampleSplit : ChunkSplit.
+Module ExampleSplit.
     (*
         step = 2
         lb = 3
@@ -209,39 +204,51 @@ Module ExampleSplit : ChunkSplit.
     Definition lb := 3.
     Definition incr := 2.
     Definition iter_num := 3.
-    Definition thread_num := 5.
+    Definition thread_num := 5%nat.
 
-    Lemma thread_num_positive : 0 < thread_num. Proof. unfold thread_num. lia. Qed.
+    Lemma thread_num_positive : (0 < thread_num)%nat. Proof. unfold thread_num. lia. Qed.
     (* this specifies 3 loops, with loop indexes {3}, {5,7}, {9} *)
-    Definition chunks := [(3, 5); (5, 9); (9, 11)].
-    Definition chunk_sizes := [1;2;1].
+    Definition chunks := [(3, 5); (5, 9); (9, 11)]%nat.
+    Definition chunk_sizes := [1;2;1]%nat.
     Lemma chunks_is_a_partition : iter_num > 1 ->
         (* the chunks are constructed with a list of positive chunk ste *)
         ∃ chunk_sizes : list nat,
-        Forall (λ n, 0 < n) chunk_sizes ∧
+        Forall (λ n, 0 < n)%nat chunk_sizes ∧
         length chunk_sizes = length chunks ∧
         ∀ i chk, nth_error chunks i = Some chk ->
-            chk = (lb + incr * (sum_firstn i chunk_sizes),
-                   lb + incr * (sum_firstn (i + 1) chunk_sizes)).
+            chk = (Z.to_nat (lb + incr * (Z.of_nat (sum_firstn i chunk_sizes))),
+                   Z.to_nat (lb + incr * (Z.of_nat (sum_firstn (i + 1) chunk_sizes)))).
     Proof. intros _. exists chunk_sizes. split.
         { unfold chunk_sizes. repeat apply List.Forall_cons; try lia. done. }
         split.
         { done. }
-        intros. 
-        do 4 (destruct i; [ simpl in *; congruence | ]).
-        simpl in *. congruence.
+        intros.
+        destruct i; [ simpl in *; inv H; reflexivity | ].
+        destruct i; [ simpl in *; inv H; reflexivity | ].
+        destruct i; [ simpl in *; inv H; reflexivity | ].
+        destruct i; [ simpl in *; inv H; reflexivity | ].
+        done.
     Qed.
 
     Definition team_workloads := [[(9, 11); (3, 5)];
                                   [(5, 9)];
                                   [];
                                   [];
-                                  []].
+                                  []]%nat.
     Lemma team_workloads_length : length team_workloads = thread_num. Proof. reflexivity. Qed.
     Lemma team_workloads_is_a_division : Permutation (concat team_workloads) chunks.
     Proof. simpl concat. unfold chunks. rewrite Permutation_swap. 
           apply Permutation_skip.
           rewrite Permutation_swap. done. Qed.
+
+    Definition example_chunk_split : ChunkSplit lb incr iter_num thread_num chunks team_workloads :=
+        {|
+           for_construct.thread_num_positive := thread_num_positive;
+           for_construct.chunks_is_a_partition := chunks_is_a_partition;
+           for_construct.team_workloads_length := team_workloads_length;
+           for_construct.team_workloads_is_a_division := team_workloads_is_a_division
+        |}.
+
 End ExampleSplit.
 
 Section For.

@@ -89,11 +89,9 @@ Section MemOps.
         ∀ ce ty m b ofs bf v m', assign_loc_fun ce ty m b ofs bf v = Some m' -> assign_loc ce ty m b ofs bf v m'.
     Proof.
         intros; unfold assign_loc_fun in *.
-        destruct_match.
-        destruct_match.
-        destruct_match.
+        do 3 destruct_match in * eqn:?.
         inv H.
-        eapply assign_loc_value; done.
+        eapply assign_loc_value; try done.
     Qed.
 
     
@@ -229,7 +227,7 @@ Section EvalExprFun.
                 ∀ bl ofs bt, eval_lvalue_fun exp = Some (bl, ofs, bt) -> eval_lvalue ge e le m exp bl ofs bt.
     Proof.
     intro exp; induction exp; intros; split; intros; inv H; try (by constructor);
-    try unfold_mbind_in_hyp; repeat destruct_match.
+    try unfold_mbind_in_hyp; repeat destruct_match in * eqn: ?.
     - (* local *)
     apply deref_loc_fun_correct1 in H1.
     eapply eval_Elvalue; eauto.
@@ -422,7 +420,7 @@ Section EvalStatement.
         | [ H: step_fun _ = Some _ |- _ ] =>
             unfold step_fun in H;
             try unfold_mbind_in_hyp;
-            repeat destruct_match;
+            repeat destruct_match in * eqn: ?;
             inv H
         end.
 
@@ -437,7 +435,7 @@ Section EvalStatement.
             { rewrite Heqt0. repeat destruct a; subst; done. }
         + (* evstep_ifthenelse *)
             unfold step_fun in H.
-            do 2 destruct_match in H.
+            do 2 destruct_match in H eqn: ?.
             inv H.
             eapply step_ifthenelse; by fun_correct_tac.
         +(* Sreturn *) 
