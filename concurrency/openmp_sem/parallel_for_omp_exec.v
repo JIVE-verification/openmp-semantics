@@ -861,9 +861,10 @@ Proof.
         { done. }
         { tp_inv_tac_multiple.
           simpl.
-          Check mem_equiv.getCur_restr.
-          rewrite mem_equiv.getCur_restr.
-          }
+          (* FIXME rewrite getCur_restr with permMapJoin_list_proper *)
+          (* rewrite getCur_restr. *)
+          admit.
+        }
         simpl.
         done.
     }

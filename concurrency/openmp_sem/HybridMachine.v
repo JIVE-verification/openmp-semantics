@@ -52,13 +52,13 @@ Lemma at_pragma_SEM_eq:
   end.
 Proof. auto. Qed.
 
-#[export] Instance ClightSem ge : Semantics :=
+#[global] Instance ClightSem ge : Semantics :=
   { semG := G; semC := C; semSem := CLC_evsem ge; the_ge := ge }.
 
 Module DryHybridMachine.
   Import Events ThreadPool.
 
-  #[export] Instance dryResources: Resources:=
+  #[global] Instance dryResources: Resources:=
     {| res := access_map * access_map;
        lock_info := access_map * access_map |}.
 
@@ -327,7 +327,7 @@ Module DryHybridMachine.
     (** Setoid instances for rewriting with [access_map_equiv] inside
         [permMapJoin_list]. *)
 
-    #[export] Instance permMapJoin_proper :
+    #[global] Instance permMapJoin_proper :
       Proper (access_map_equiv ==> access_map_equiv ==> access_map_equiv ==> iff)
              permMapJoin.
     Proof.
@@ -341,7 +341,7 @@ Module DryHybridMachine.
     Definition res_equiv (r1 r2 : res) : Prop :=
       access_map_equiv r1.1 r2.1 /\ access_map_equiv r1.2 r2.2.
 
-    #[export] Instance res_equiv_Equivalence : Equivalence res_equiv.
+    #[global] Instance res_equiv_Equivalence : Equivalence res_equiv.
     Proof.
       constructor.
       - intros [? ?]; split; reflexivity.
@@ -349,16 +349,16 @@ Module DryHybridMachine.
       - intros [? ?] [? ?] [? ?] [H1 H2] [H3 H4]; split; etransitivity; eassumption.
     Qed.
 
-    #[export] Instance permMapJoinPair_proper :
+    #[global] Instance permMapJoinPair_proper :
       Proper (res_equiv ==> res_equiv ==> res_equiv ==> iff) permMapJoinPair.
     Proof.
       intros r1 s1 [H11 H12] r2 s2 [H21 H22] r3 s3 [H31 H32].
       unfold permMapJoinPair.
       split; intros [A B]; split.
-      - exact (proj1 (permMapJoin_proper H11 H21 H31) A).
-      - exact (proj1 (permMapJoin_proper H12 H22 H32) B).
-      - exact (proj2 (permMapJoin_proper H11 H21 H31) A).
-      - exact (proj2 (permMapJoin_proper H12 H22 H32) B).
+      - exact (proj1 (permMapJoin_proper _ _ H11 _ _ H21 _ _ H31) A).
+      - exact (proj1 (permMapJoin_proper _ _ H12 _ _ H22 _ _ H32) B).
+      - exact (proj2 (permMapJoin_proper _ _ H11 _ _ H21 _ _ H31) A).
+      - exact (proj2 (permMapJoin_proper _ _ H12 _ _ H22 _ _ H32) B).
     Qed.
 
     Lemma fold_rel_permMapJoinPair_Forall2 :
@@ -379,7 +379,7 @@ Module DryHybridMachine.
           * apply (proj2 (IH _ _)); eassumption.
     Qed.
 
-    #[export] Instance permMapJoin_list_proper :
+    #[global] Instance permMapJoin_list_proper :
       Proper (List.Forall2 res_equiv ==> eq ==> iff) permMapJoin_list.
     Proof.
       intros pmaps pmaps' HF pmap pmap' <-.
@@ -1125,7 +1125,7 @@ Module DryHybridMachine.
            (cnt:containsThread st i) m:=
       { th_comp: permMapLt (thread_perms _ _ cnt) (getMaxPerm m);
         lock_comp: permMapLt (lock_perms _ _ cnt) (getMaxPerm m)}.
-    #[export] Instance thread_compat_proper st i:
+    #[global] Instance thread_compat_proper st i:
         Proper (Logic.eq ==> Max_equiv ==> iff) (@thread_compat st i).
       Proof.
         intros ?? <- ???.
