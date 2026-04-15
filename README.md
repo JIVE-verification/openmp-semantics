@@ -79,7 +79,18 @@ make omp_compiler/O2Clight.vo
 make concurrency/openmp_sem/HybridMachine.vo
 ```
 
-Additionally, to generate `_CoqProject`:
+Additionally, generate `_CoqProject` if your Rocq IDE needs it:
 
 ```(bash)
 make _CoqProject
+```
+
+## Misc
+
+- After making changes to file names or creating a new .v file, edit
+  make the corresponding changes to `OMP_COMPILER_FILES` in [Makefile](Makefile),
+  and update the dependency file `.depend` and `_CoqProject` by
+  ```
+  make .depend -B
+  make _CoqProject -B
+  ```

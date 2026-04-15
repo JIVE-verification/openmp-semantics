@@ -640,7 +640,7 @@ LINKED_C_FILES = even.c odd.c
 C_FILES = $(SINGLE_C_FILES) $(LINKED_C_FILES)
 
 OMP_COMPILER_FILES = \
-  ClightT.v O2Clight.v sample\src1.v sample\tgt1.v sample\src1_tweak.v
+  ClightT.v common.v par_pass.v sample\src1.v sample\tgt1.v sample\src1_tweak.v O2Clight.v
 
 FILES = \
  veric/version.v \

@@ -69,29 +69,32 @@ with labeled_statementsT : Type :=            (**r cases of a [switch] *)
    2. reduction variable, similar to 1
    3. local, declared in this parallel region
    4. otherwise, shared.  *)
-Fixpoint liftT (stmt: statement) : statementT :=
+
+(* Utility for generating a lifted stmt, which we can then fill in the pragma info. *)
+Fixpoint lift_stmt (stmt: statement) : statementT :=
   match stmt with
   | Sskip => SskipT
   | Sassign l r => SassignT l r
   | Sset id e => SsetT id e
   | Scall id e args => ScallT id e args
   | Sbuiltin id ef tl args => SbuiltinT id ef tl args
-  | Ssequence s1 s2 => SsequenceT (liftT s1) (liftT s2)
-  | Sifthenelse e s1 s2 => SifthenelseT e (liftT s1) (liftT s2)
-  | Sloop s1 s2 => SloopT (liftT s1) (liftT s2)
+  | Ssequence s1 s2 => SsequenceT (lift_stmt s1) (lift_stmt s2)
+  | Sifthenelse e s1 s2 => SifthenelseT e (lift_stmt s1) (lift_stmt s2)
+  | Sloop s1 s2 => SloopT (lift_stmt s1) (lift_stmt s2)
   | Sbreak => SbreakT
   | Scontinue => ScontinueT
   | Sreturn oe => SreturnT oe
   | Sswitch e ls => SswitchT e (lift_labeledT ls)
-  | Slabel l s => SlabelT l (liftT s)
+  | Slabel l s => SlabelT l (lift_stmt s)
   | Sgoto l => SgotoT l
-  | Spragma n pl stmt' => SpragmaT empty_pragma_info n pl (liftT stmt')
+  | Spragma n pl stmt' => SpragmaT empty_pragma_info n pl (lift_stmt stmt')
   end
   with lift_labeledT (ls: labeled_statements) : labeled_statementsT :=
-    match ls with
-    | LSnil => LSnilT
-    | LScons c s ls' => LSconsT c (liftT s) (lift_labeledT ls')
-    end.
+  match ls with
+  | LSnil => LSnilT
+  | LScons c s ls' => LSconsT c (lift_stmt s) (lift_labeledT ls')
+  end.
+
 Record functionT  : Type := makeFunctionT {
   fn_returnT: type;
   fn_callconvT: calling_convention;
@@ -103,13 +106,14 @@ Record functionT  : Type := makeFunctionT {
 
 Definition program := Ctypes.program functionT.
 
-Fixpoint lowerT (s: statementT) : statement :=
+(* can erase pragma info and get the lowered program *)
+Fixpoint lower_stmt (s: statementT) : statement :=
   match s with
-  | SsequenceT a b => Ssequence (lowerT a) (lowerT b)
-  | SifthenelseT a b c => Sifthenelse a (lowerT b) (lowerT c)
-  | SloopT a b => Sloop (lowerT a) (lowerT b)  
-  | SlabelT a b => Slabel a (lowerT b)
-  | SpragmaT a b c d => (lowerT d)
+  | SsequenceT a b => Ssequence (lower_stmt a) (lower_stmt b)
+  | SifthenelseT a b c => Sifthenelse a (lower_stmt b) (lower_stmt c)
+  | SloopT a b => Sloop (lower_stmt a) (lower_stmt b)  
+  | SlabelT a b => Slabel a (lower_stmt b)
+  | SpragmaT a b c d => (lower_stmt d)
   | SassignT l r => Sassign l r
   | SsetT id e => Sset id e
   | ScallT id e args => Scall id e args
@@ -117,13 +121,37 @@ Fixpoint lowerT (s: statementT) : statement :=
   | SbreakT => Sbreak
   | ScontinueT => Scontinue
   | SreturnT oe => Sreturn oe
-  | SswitchT e ls => Sswitch e (lower_labeledT ls)
+  | SswitchT e ls => Sswitch e (lower_labeled_stmt ls)
   | SgotoT l => Sgoto l
   | SskipT => Sskip
   end 
-  with lower_labeledT (ls: labeled_statementsT) : labeled_statements :=
+  with lower_labeled_stmt (ls: labeled_statementsT) : labeled_statements :=
   match ls with
   | LSnilT => LSnil
-  | LSconsT c s ls => LScons c (lowerT s) (lower_labeledT ls)
+  | LSconsT c s ls => LScons c (lower_stmt s) (lower_labeled_stmt ls)
   end
 .
+
+Definition lower_function (f: functionT) : function :=
+  mkfunction (fn_returnT f) (fn_callconvT f) (fn_paramsT f) (fn_varsT f) (fn_tempsT f) (lower_stmt (fn_bodyT f)).
+
+Definition lower_fundef (fd: @Ctypes.fundef functionT) : fundef :=
+  match fd with
+  | Internal f' => Internal (lower_function f')
+  | External ef tys ty cc => External ef tys ty cc
+  end.
+
+Definition lower_globdef {V: Type} (gd: globdef (Ctypes.fundef functionT) V) : globdef (Ctypes.fundef function) V :=
+  match gd with
+  | Gfun fd => Gfun (lower_fundef fd)
+  | Gvar v => Gvar v
+  end.
+
+Definition lower_prog (p: program) : Ctypes.program function :=
+  {| prog_defs := map (fun '(id, gd) => (id, lower_globdef gd)) p.(prog_defs);
+     prog_public := p.(prog_public);
+     prog_main := p.(prog_main);
+     prog_types := p.(prog_types);
+     prog_comp_env := p.(prog_comp_env);
+     prog_comp_env_eq := p.(prog_comp_env_eq)
+  |}.
