@@ -29,7 +29,24 @@ We omit irrelevant files from the VST repository.
   
 ### Compiler
 
-TODO fill this in
+Files are under [omp_compiler](omp_compiler).
+
+- [roadmap.md](omp_compiler/roadmap.md) has some notes about the compiler passes.
+- [ClightT.md](omp_compiler/ClightT.md) defines programT, a lifted Clight program
+  that can include pragma_info, analysis information about `Spragma`s.
+- [src1.c](omp_compiler/sample/src1.c) is a sample input to the compiler.
+  [src1_tweak.v](omp_compiler/sample/src1_tweak.v) is the corresponding AST.
+  The spragma and pragma_info part are added manually for now.
+  [tgt1.c](omp_compiler/sample/tgt1.c) and [tgt1.v](/omp_compiler/sample/tgt1.v)
+  are what the compiler's output is supposed to look like for
+  [src1.c](omp_compiler/sample/src1.c).
+- [O2Clight.v](omp_compiler/O2Clight.v) has the compiler passes.
+
+Some convenient commands to build/clean the `omp_compiler` folder:
+```(bash)
+make omp-compiler
+make clean-omp-compiler
+```
 
 ## Building
 
@@ -54,6 +71,11 @@ git submodule update --init --recursive
 Now we can use [`Makefile`](./Makefile) to compile the Rocq files:
 
 ```(bash)
+make PATH_TO_FILE (with .v replaced by .vo)
+```
+e.g.
+```
+make omp_compiler/O2Clight.vo
 make concurrency/openmp_sem/HybridMachine.vo
 ```
 
