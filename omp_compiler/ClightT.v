@@ -1,11 +1,11 @@
 From Coq Require Import String List ZArith.
+From stdpp Require Import base list.
 From compcert Require Import Coqlib Integers Floats Values AST Ctypes Cop Csyntax Csyntaxdefs.
-From compcert Require Import Clight SimplExpr .
+From compcert Require Import Clight SimplExpr.
 Import Csyntaxdefs.CsyntaxNotations.
 Local Open Scope Z_scope.
 Local Open Scope string_scope.
 Local Open Scope csyntax_scope.
-From stdpp Require Import base list.
 
 (* assume existence of pthread function names *)
 Definition __opaque_pthread_t : ident := $"_opaque_pthread_t".

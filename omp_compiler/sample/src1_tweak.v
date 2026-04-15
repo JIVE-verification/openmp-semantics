@@ -142,7 +142,7 @@ Definition spar_body : statement :=
           (Ssequence Sskip (Sassign (Evar _l tint) (Econst_int (Int.repr 0) tint)))
                                 ))).
 
-Definition f_main_clight :=
+Definition f_main_clight_no_pragma :=
   {|
     fn_return := tint;
     fn_callconv := cc_default;
@@ -203,7 +203,7 @@ Definition prog_clight_no_pragma :=
             {|
               cc_vararg := Some 1; cc_unproto := false; cc_structret := false
             |}))
-      :: (_main, Gfun (Internal f_main_clight))
+      :: (_main, Gfun (Internal f_main_clight_no_pragma))
                 :: nil;
     prog_public := public_idents;
     prog_main := _main;
@@ -213,12 +213,12 @@ Definition prog_clight_no_pragma :=
   |}.
 
 (* san check *)
-Lemma f_main_clight_eq :
+Lemma prog_main_clight_no_pragma_eq :
   Errors.OK prog_clight_no_pragma = prog_clight_no_pragma'.
 Proof. reflexivity. Qed.
 
 (* step 2 : add the missing [Spragma]s back to f_main_clight *)
-Definition f_main_omp : function :=
+Definition f_main_clight : function :=
   {|
     fn_return := tint;
     fn_callconv := cc_default;
@@ -280,7 +280,7 @@ Definition prog_clight : Clight.program :=
               {|
                 cc_vararg := Some 1; cc_unproto := false; cc_structret := false
               |}))
-        :: (_main, Gfun (Internal f_main_omp))
+        :: (_main, Gfun (Internal f_main_clight_no_pragma))
                   :: nil;
     prog_public := public_idents;
     prog_main := _main;
