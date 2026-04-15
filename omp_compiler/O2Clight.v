@@ -22,7 +22,6 @@ Section Common.
     | _                  => None
     end.
 
-  (* FIXME is this used? *)
   Definition fst_spragma_progT (f: functionT): option functionT:=
     (*TODO: revise argments to mkfunction*)
     s ← fst_SpragmaT (fn_bodyT f);
@@ -41,7 +40,7 @@ Section Common.
 
 End Common.
 
-Section SpawnPass.
+Section ParallelPragmaPass.
 
   Context (_spawn _join_thread : ident).
 
@@ -289,52 +288,50 @@ Section SpawnPass.
     (Ecast (Etempvar params_variable (tptr tvoid))
       (tptr (Tstruct arg_ty noattr)))) f_body_post_idents_replacement) init_shared_vars_stmt) SskipT), idents++map fst g_ids, par_routine_data_name, par_routine_data_ty_name).
 
-  (* Definition get_statement (s: statementT) *)
-  (*first_pass should recurse on s_body*)
-  Fixpoint first_pass (s: statementT) (idents: list ident) temp_vars : (statementT * (list ident) * (list functionT) * (list composite_definition)) :=
-  match s with
-    | SsequenceT a b => 
-            let '(s1, idents', pr1, cd1) := (first_pass a idents temp_vars) in 
-            let '(s2, idents'', pr2, cd2) := (first_pass b idents' temp_vars) in
-            ((SsequenceT s1 s2), idents'', pr1++pr2, cd1++cd2)
-    | SifthenelseT a b c =>   
-        (* FIXME fix statements below in SsequenceT style *)
-        let '(s1, idents', pr1, cd1) := (first_pass b idents temp_vars) in 
-        let '(s2, idents'', pr2, cd2) := (first_pass c idents' temp_vars) in
-                ((SifthenelseT a s1 s2), idents'', pr1++pr2, cd1++cd2)
-    | SloopT a b =>        
-        let '(s1, idents', pr1, cd1) := (first_pass a idents temp_vars) in 
-        let '(s2, idents'', pr2, cd2) := (first_pass b idents' temp_vars) in
-                ((SloopT s1 s2), idents'', pr1++pr2, cd1++cd2)
-    | SlabelT a b => let '(s1, idents', pr1, cd1) := (first_pass b idents temp_vars) in 
-                    ((SlabelT a s1), idents', pr1, cd1)
-    | SpragmaT a b c s_body => match c with 
-            | OMPParallel nt pc pc_f rc =>
-              let '(s_body', idents', af, cds) := first_pass s_body idents temp_vars in
-              let '(cd, ty_id, idents'') := gen_par_routine_input_ty a idents' in
-              let '(annotatedParRoutineFunc, idents''', par_routine_data_name, par_routine_data_type_name):= (gen_par_routine a idents'' s_body' ty_id temp_vars) in
-              let '(new_body, idents'''', thread_ids) := spawn_threads_pass a (nt - 1) idents''' ty_id par_routine_data_name par_routine_data_type_name in
-              (new_body,
-                idents'''',
-                annotatedParRoutineFunc::af,
-                cd::cds)
-            | OMPFor _ _ _ => (s, idents, [], [])
-            (* | OMPBarrier =>SskipT *) (*may deal with later*)
-            | _ => (SskipT, idents, [], [])
-            end
-    |_ => (s, idents, [], [])
+  (** a pass that turns a parallel pragma into pthread code.
+
+     s : a parallel pragma given by fst_spragma_progT.
+     idents : a list of current identifiers.
+     turn s (but not its body) into:
+        [arg_ty a1 = ...;
+         arg_ty a2 = ...;
+         ...`
+         int t2 = spawn(f, (void * )&a2);
+         int t3 = spawn(f, (void * )&a3);
+         ...
+         f((void * ) &a1); // a1 is for the current thread
+         join_thread(t2);
+         join_thread(t3);
+         ...
+        ]
+
+     returns a 4-tuple:
+     (transformed s * 
+      identifiers (including generated ones) *
+      f *
+      arg_ty )
+    *)
+  Definition par_pass (s: statementT) (idents: list ident) temp_vars : option (statementT * (list ident) * functionT * composite_definition) :=
+    match s with
+    | SpragmaT a b (OMPParallel nt pc pc_f rc) s_body =>
+        let '(cd, ty_id, idents) := gen_par_routine_input_ty a idents in
+        let '(annotatedParRoutineFunc, idents, par_routine_data_name, par_routine_data_type_name):= (gen_par_routine a idents s_body ty_id temp_vars) in
+        (* FIXME [thread_ids] is currently not used, is this correct? *)
+        let '(body', idents, thread_ids) := spawn_threads_pass a (nt - 1) idents ty_id par_routine_data_name par_routine_data_type_name in
+        Some (body', idents, annotatedParRoutineFunc, cd)
+    |_ => None
     end.
 
-End SpawnPass.
+End ParallelPragmaPass.
 
 (* TODO tests should be in another file *)
 From omp_compiler Require Import sample.src1_tweak.
-Section ParallelPassTest.
+Section ParallelPragmaPassTest.
 
   Context (_spawn _join_thread: ident).
 
   Definition first_pass_eg :=
-    first_pass _spawn _join_thread (fn_bodyT f_main_clightT) [] (fn_tempsT f_main_clightT).
+    par_pass _spawn _join_thread (fn_bodyT f_main_clightT) [] (fn_tempsT f_main_clightT).
 
   #[local] Transparent peq.
 
@@ -416,4 +413,4 @@ Section ParallelPassTest.
   Second pass: 
 
   *)
-End ParallelPassTest.
+End ParallelPragmaPassTest.
