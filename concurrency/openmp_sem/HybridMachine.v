@@ -1161,6 +1161,14 @@ End DryHybridMachine.
 
 Export DryHybridMachine.
 
+Notation "os .schd" := (os.1.1.1.1) (at level 50).
+Notation "os .et" := (os.1.1.1.2) (at level 50).
+Notation "os .tp" := (os.1.1.2) (at level 50).
+Notation "os .ttree" := (os.1.2) (at level 50).
+Notation "os .m" := (os.2) (at level 50).
+
+
+
 Definition one_thread_tp {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) FinPool.FinThreadPool) :=
   tp.(FinPool.num_threads) = 1.
 Definition one_thread_tp' {ge:genv} (tp:@ThreadPool.t dryResources (@Sem ge) FinPool.FinThreadPool) :=
