@@ -42,10 +42,10 @@ Files are under [omp_compiler](omp_compiler).
   [src1.c](omp_compiler/sample/src1.c).
 - [O2Clight.v](omp_compiler/O2Clight.v) has the compiler passes.
 
-Some convenient commands to build/clean the `omp_compiler` folder:
+Some convenient commands to compile/clean the `omp_compiler` folder:
 ```(bash)
-make omp-compiler
-make clean-omp-compiler
+make omp
+make clean-omp
 ```
 
 ## Building
@@ -71,12 +71,17 @@ git submodule update --init --recursive
 Now we can use [`Makefile`](./Makefile) to compile the Rocq files:
 
 ```(bash)
+make omp # compiles files registered in Makefile
+```
+
+Alternatively,
+```(bash)
 make PATH_TO_FILE (with .v replaced by .vo)
 ```
 e.g.
 ```
-make omp_compiler/O2Clight.vo
 make concurrency/openmp_sem/HybridMachine.vo
+make omp_compiler/O2Clight.vo
 ```
 
 Additionally, generate `_CoqProject` if your Rocq IDE needs it:

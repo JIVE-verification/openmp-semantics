@@ -640,7 +640,7 @@ LINKED_C_FILES = even.c odd.c
 C_FILES = $(SINGLE_C_FILES) $(LINKED_C_FILES)
 
 OMP_COMPILER_FILES = \
-  common.v par_pass.v sample\src1.v sample\tgt1.v sample\src1_tweak.v O2Clight.v
+  common.v par_pass.v sample/src1.v sample/tgt1.v sample/src1_tweak.v O2Clight.v correctness.v
 
 FILES = \
  veric/version.v \
@@ -789,7 +789,7 @@ mailbox: _CoqProject mailbox/verif_mailbox_all.vo
 # atomics: _CoqProject atomics/verif_kvnode_atomic.vo atomics/verif_kvnode_atomic_ra.vo atomics/verif_hashtable_atomic.vo atomics/verif_hashtable_atomic_ra.vo
 atomics: _CoqProject atomics/verif_hashtable_atomic.vo $(PROGSDIR)/verif_incr_atomic.vo atomics/verif_lock.vo atomics/verif_lock_atomic.vo
 io: _CoqProject $(PROGSDIR)/os_combine.vo $(PROGSDIR)/verif_printf.vo $(PROGSDIR)/verif_io.vo $(PROGSDIR)/verif_io_mem.vo $(PROGSDIR)/io_specs.vo floyd/printf.vo
-omp-compiler: _CoqProject $(OMP_COMPILER_FILES:%.v=omp_compiler/%.vo)
+omp: _CoqProject $(OMP_COMPILER_FILES:%.v=omp_compiler/%.vo)
 
 $(CVOFILES): compcert
 
@@ -925,7 +925,7 @@ clean-concur:
 	rm -f concurrency/lib/*.{vo,vos,vok,glob}
 	rm -f concurrency/openmp_sem/*.{vo,vos,vok,glob}
 
-clean-omp-compiler:
+clean-omp:
 	rm -f $(OMP_COMPILER_FILES:%.v=omp_compiler/%.vo) $(OMP_COMPILER_FILES:%.v=omp_compiler/%.glob)
 
 clean-linking:
