@@ -12,17 +12,22 @@ Section DryHybridMachineInst.
   Context `{p: Prog}.
 
   #[local] Notation prog := (p.(cprog)).
+
   Definition ge := Clight.globalenv prog.
+
   #[global] Instance Sem : Semantics := @Sem ge.
 
-  #[global] Instance FinThreadPoolInst: ThreadPool := FinPool.FinThreadPool.
-  #[global] Canonical FinThreadPoolInst.
+  #[global] Existing Instance FinPool.FinThreadPool.
+  (* useful when we need an abstract type ThreadPool.t from this concrete instance.*)
+  #[global] Canonical FinPool.FinThreadPool.
+
   #[global] Instance OpenMP_semantics : MachineSig := @DryHybridMachineSig _ _.
-  Definition OpenMP_steps := @Ostep_refl_trans_closure _ _.
+
+  Definition OpenMP_steps := @Ostep_refl_trans_closure ge _.
 
   Definition init_mem : option mem := Genv.init_mem prog.
 
-  Definition init_Ostate (os:@Ostate ge FinPool.FinThreadPool) : Prop :=
+  Definition init_Ostate (os:Ostate) : Prop :=
       ∃ m b q U,
       Genv.init_mem prog = Some m ∧
       Genv.find_symbol (Genv.globalenv prog) (prog_main prog) = Some b ∧

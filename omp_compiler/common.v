@@ -1,5 +1,5 @@
 From Coq Require Import ZArith.
-From VST.concurrency.openmp_sem Require Export notations.
+From VST.concurrency.openmp_sem Require Export notations HybridMachine.
 From stdpp Require Export base list.
 From compcert Require Export Globalenvs Clight Ctypes Ctypesdefs AST Coqlib Csyntaxdefs.
 Import Csyntaxdefs.CsyntaxNotations.
