@@ -148,10 +148,28 @@ Variant construct_kind : Type :=
   | BarrierConstruct
 .
 
+
+(**  pragma_info is only used for the OpenMP to Clight compiler and is ignored
+  by the semantics. 
+
+  shared vars, vars in the private cluse, vars in the reduction clause and
+  local vars.
+  This is designed for the parallel pragma; maybe other pragmas need different
+  kind of info. *)
+Record pragma_info : Type := mk_pragma_info {
+  shared_vars : list (ident * type);
+  private_vars : list (ident * type);
+  reduction_vars : list (ident * type);
+  local_vars: list (ident * type)
+}.
+
+Definition empty_pi : pragma_info :=
+  mk_pragma_info nil nil nil nil.
 Variant pragma_label : Type :=
   | OMPParallel (num_threads: nat)
                 (pc pc_first: privatization_clause_type)
                 (rcs: list reduction_clause_type)
+                (pi: pragma_info)
   | OMPFor (pc pc_first: privatization_clause_type)
            (rcs: list reduction_clause_type)
   | OMPSingle (pc pc_first: privatization_clause_type)
@@ -799,12 +817,12 @@ Inductive step: state -> trace -> state -> Prop :=
   | step_returnstate: forall v optid f e le k m,
       step (Returnstate v (Kcall optid f e le k) m)
         E0 (State f Sskip k e (set_opttemp optid v le) m)
-  | step_to_pragmastate: forall ml f s k e le m t n,
-     step (State f (Spragma n ml s) k e le m)
-        t (Pragmastate n ml (f, s, k, e, le, m))
-  | step_from_pragmastate: forall n ml sp sp' t,
-      run_pragma_label n ml sp sp' ->
-      step (Pragmastate n ml sp)
+  | step_to_pragmastate: forall pl f s k e le m t n,
+     step (State f (Spragma n pl s) k e le m)
+        t (Pragmastate n pl (f, s, k, e, le, m))
+  | step_from_pragmastate: forall n pl sp sp' t,
+      run_pragma_label n pl sp sp' ->
+      step (Pragmastate n pl sp)
          t (state_of sp').
 
 (** ** Whole-program semantics *)

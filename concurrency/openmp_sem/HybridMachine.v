@@ -218,7 +218,7 @@ Module DryHybridMachine.
     (* ge is genv_symb *)
     Definition transform_state_parallel (c: state) (rcs_env: env) (is_leader:bool) : option state :=
       match c with
-      | Clight_core.Pragmastate idx (OMPParallel tn pc pc_first rcs) (f,s,k,le,te) =>
+      | Clight_core.Pragmastate idx (OMPParallel tn pc pc_first rcs _) (f,s,k,le,te) =>
         let s' := Ssequence s (SBRB idx ParallelConstruct rcs rcs_env) in
         let s'' := Spriv idx pc pc_first rcs s' in
         let k' := if is_leader then k else Kstop in
@@ -443,7 +443,7 @@ Module DryHybridMachine.
       thread_pool -> mem -> team_tree -> list machine_event -> Prop :=
     | step_parallel :
         forall (tp' tp'' tp''':thread_pool) c c'_l c'_nl le rvs_env m'
-          ttree' (num_threads:nat) pc pc_first rcs (new_tids: list nat) idx
+          ttree' (num_threads:nat) pc pc_first rcs pi (new_tids: list nat) idx
           perm (perms:list res),
           forall
             (* TODO num_thread at least 2? *)
@@ -451,7 +451,7 @@ Module DryHybridMachine.
             (* To check if the machine is at an external step and load its arguments install the thread data permissions*)
             (Hrestrict_pmap: restrPermMap (Hcompat tid0 cnt0).1 = m')
             (Hc: Kblocked_at (getThreadC cnt0) = Some c)
-            (Hat_pragma: at_pragma semSem c = Some (idx, OMPParallel num_threads pc pc_first rcs))
+            (Hat_pragma: at_pragma semSem c = Some (idx, OMPParallel num_threads pc pc_first rcs pi))
             (* 1. spawn new threads as fork, add them to team, and split permissions angelically*)
             (Hnum_threads: num_threads > 0)
             (Hperm: perm = getThreadR cnt0)

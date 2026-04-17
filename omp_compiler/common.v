@@ -1,31 +1,34 @@
 From Coq Require Import ZArith.
 From VST.concurrency.openmp_sem Require Export notations.
 From stdpp Require Export base list.
-From compcert Require Export Globalenvs Clight Ctypes Ctypesdefs AST Coqlib.
-From omp_compiler Require Export ClightT.
+From compcert Require Export Globalenvs Clight Ctypes Ctypesdefs AST Coqlib Csyntaxdefs.
+Import Csyntaxdefs.CsyntaxNotations.
+Local Open Scope Z_scope.
+Local Open Scope string_scope.
+Local Open Scope csyntax_scope.
 
 Notation "a <|> b" := (match a with Some _ => a | None => b end)
     (at level 50, left associativity).
 
 Section Common.
+
+  (* assume existence of pthread function names *)
+  Definition __opaque_pthread_t : ident := $"_opaque_pthread_t".
+  Definition __opaque_pthread_attr_t : ident := $"_opaque_pthread_attr_t".
+
   (* FIXME is this used? *)
   Definition adding_ident (identifier: (ident * type)) (existing_list: list (ident * type)):=
     identifier::existing_list.
 
-  Fixpoint fst_SpragmaT (s: statementT) : option statementT :=
+  Fixpoint fst_Spragma (s: statement) : option statement :=
     match s with
-    | SsequenceT a b     => fst_SpragmaT a <|> fst_SpragmaT b
-    | SifthenelseT _ b c => fst_SpragmaT b <|> fst_SpragmaT c
-    | SloopT a b         => fst_SpragmaT a <|> fst_SpragmaT b
-    | SlabelT _ b        => fst_SpragmaT b
-    | SpragmaT _ _ _ _   => Some s
-    | _                  => None
+    | Ssequence a b     => fst_Spragma a <|> fst_Spragma b
+    | Sifthenelse _ b c => fst_Spragma b <|> fst_Spragma c
+    | Sloop a b         => fst_Spragma a <|> fst_Spragma b
+    | Slabel _ b        => fst_Spragma b
+    | Spragma _ _ _     => Some s
+    | _                 => None
     end.
-
-  Definition fst_spragma_progT (f: functionT): option functionT:=
-    (*TODO: revise argments to mkfunction*)
-    s ← fst_SpragmaT (fn_bodyT f);
-    Some (makeFunctionT (tptr tvoid) (fn_callconvT f) (fn_paramsT f) (fn_varsT f) (fn_tempsT f) s).
 
   Definition pos_max (l : list positive) :=
    foldr Pos.max 1%positive l.

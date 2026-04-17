@@ -256,7 +256,7 @@ Proof.
         rewrite /Ostep /MachStep /=.
         eapply pragma_step.
         { done. }
-        eapply (step_parallel cnt8 Hcompat8 _ _ _ _ _ _ _ _ m3 _ 2 _ _ _ _ _ perm8 perms8).
+        eapply (step_parallel cnt8 Hcompat8 _ _ _ _ _ _ _ _ m3 _ 2 _ _ _ _ _ _ perm8 perms8).
         { tp_inv_tac_one. }
         { apply (restrPermMap_eq (proj1 (Hcompat8 0 cnt8))). }
         { simpl. done. }

@@ -446,7 +446,7 @@ Section EVStepFun.
     (*TODO: step_builtin, step_external_function, step_to_metastate, step_from_metastate*)
     (* | State f (Sbuiltin optid ef tyargs al) k e le m) => vargs ← eval_exprlist_fun ge e le m al tyargs; external_call ef ge vargs m *)
     (* | Callstate (External ef targs tres cconv) vargs k m) => Some (Returnstate vres k m') *)
-    | State f (Spragma n ml s) k e le => Some (Pragmastate n ml (f, s, k, e, le), m, nil)
+    | State f (Spragma n pl s) k e le => Some (Pragmastate n pl (f, s, k, e, le), m, nil)
     | _ => None
         (* |(State f (Sbuiltin optid ef tyargs al) k e le m) => (State f Sskip k e (set_opttemp optid vres le) m') *)
     end .

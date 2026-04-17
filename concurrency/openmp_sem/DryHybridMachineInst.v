@@ -14,6 +14,7 @@ Section DryHybridMachineInst.
   #[local] Notation prog := (p.(cprog)).
   Definition ge := Clight.globalenv prog.
   #[global] Instance Sem : Semantics := @Sem ge.
+
   #[global] Instance FinThreadPoolInst: ThreadPool := FinPool.FinThreadPool.
   #[global] Canonical FinThreadPoolInst.
   #[global] Instance OpenMP_semantics : MachineSig := @DryHybridMachineSig _ _.

@@ -4,20 +4,20 @@ Section ParallelPragmaPass.
   Context (_spawn _join_thread : ident).
 
   Fixpoint spawn_thread (n: nat) (idents: list ident) (rou_id rou_arg_type_id: ident):
-    (statementT *
+    (statement *
       list ident * (* all identifiers in the program, including the type name for par routine argument *)
       list ident (* list of thread ids *)
     ) :=
   match n with 
-  | O => (SskipT, idents, []) 
+  | O => (Sskip, idents, []) 
   | S k =>
     let '(tl_stmt, idents, thread_ids) := spawn_thread k idents rou_id rou_arg_type_id in
     let (rou_arg_id, idents) := gen_ident idents in
     let (spawn_ret_id, idents) := gen_ident idents in
     let (thread_id, idents) := gen_ident idents in
-    (* let init_rou_arg_code := SskipT (* TODO *) in *)
+    (* let init_rou_arg_code := Sskip (* TODO *) in *)
     let spawn_thread_code :=
-      SsequenceT (ScallT (Some spawn_ret_id)
+      Ssequence (Scall (Some spawn_ret_id)
               (Evar _spawn (Tfunction
                               (Tcons
                                 (tptr (Tfunction
@@ -32,8 +32,8 @@ Section ParallelPragmaPass.
                   (Eaddrof
                     (Evar rou_arg_id (Tstruct rou_arg_type_id noattr))
                     (tptr (Tstruct rou_arg_type_id noattr)))
-                  (tptr tvoid)) :: nil)) (SsetT thread_id (Etempvar spawn_ret_id tint)) in
-      let code := SsequenceT tl_stmt spawn_thread_code in
+                  (tptr tvoid)) :: nil)) (Sset thread_id (Etempvar spawn_ret_id tint)) in
+      let code := Ssequence tl_stmt spawn_thread_code in
       (code, idents, thread_id::thread_ids)
     end.
 
@@ -42,55 +42,55 @@ Section ParallelPragmaPass.
     ~(Nat.ltb (length idents') (length idents)).
   Proof. Admitted.
 
-  Fixpoint post_spawn_thread_code (thread_ids: list ident): statementT := 
+  Fixpoint post_spawn_thread_code (thread_ids: list ident): statement := 
     match thread_ids with 
-    | [] => SskipT
+    | [] => Sskip
     | thread_id::rest_of_ids =>
-      SsequenceT
-        (ScallT None
+      Ssequence
+        (Scall None
           (Evar _join_thread (Tfunction (Tcons tint Tnil)
                               tvoid cc_default))
           ((Etempvar thread_id tint) :: nil)) (post_spawn_thread_code rest_of_ids)
     end. (* FIXME remove this hardcoded variable*)
 
-  Fixpoint shared_vars_setup_in_spawn_thread (list_of_shared_vars : list (ident * type)) (par_data_name arg_ty: ident): statementT :=
+  Fixpoint shared_vars_setup_in_spawn_thread (list_of_shared_vars : list (ident * type)) (par_data_name arg_ty: ident): statement :=
     match list_of_shared_vars with 
-    | shared_var::rest_of_list => (SsequenceT ((SassignT
+    | shared_var::rest_of_list => (Ssequence ((Sassign
                     (Efield
                       (Evar par_data_name (Tstruct arg_ty noattr))
                       (fst shared_var) (tptr (snd shared_var))) (Eaddrof (Evar (fst shared_var) (snd shared_var)) (tptr (snd shared_var)))))
                       (shared_vars_setup_in_spawn_thread rest_of_list par_data_name arg_ty))
-    | [] => SskipT
+    | [] => Sskip
     end.
 
-  Fixpoint reduction_vars_setup_in_spawn_thread (list_of_reduction_vars : list (ident * type)) (par_data_name arg_ty: ident): statementT :=
+  Fixpoint reduction_vars_setup_in_spawn_thread (list_of_reduction_vars : list (ident * type)) (par_data_name arg_ty: ident): statement :=
   match list_of_reduction_vars with 
-  | shared_var::rest_of_list => (SsequenceT (SassignT
+  | shared_var::rest_of_list => (Ssequence (Sassign
                     (Efield
                       (Evar par_data_name (Tstruct arg_ty noattr))
                       (fst shared_var) (tptr (snd shared_var))) (Eaddrof (Evar (fst shared_var) (snd shared_var)) (tptr (snd shared_var))))
                       (reduction_vars_setup_in_spawn_thread rest_of_list par_data_name arg_ty))
-  | [] => SskipT
+  | [] => Sskip
   end.
 
-  Fixpoint shared_and_reduction_vars_setup_in_spawn_thread (p: pragma_info) (n: nat) (arg_ty: ident) (idents: list ident): (statementT * list ident) :=
+  Fixpoint shared_and_reduction_vars_setup_in_spawn_thread (p: pragma_info) (n: nat) (arg_ty: ident) (idents: list ident): (statement * list ident) :=
   let (par_data_name, idents) := gen_ident idents in
   match n with 
-  | O => ((SsequenceT 
+  | O => ((Ssequence 
         (shared_vars_setup_in_spawn_thread (shared_vars p) par_data_name arg_ty)
     (reduction_vars_setup_in_spawn_thread (reduction_vars p) par_data_name arg_ty)), idents)
-  | S k => let (return_stmt, return_idents) := (shared_and_reduction_vars_setup_in_spawn_thread p k arg_ty idents) in ((SsequenceT (SsequenceT 
+  | S k => let (return_stmt, return_idents) := (shared_and_reduction_vars_setup_in_spawn_thread p k arg_ty idents) in ((Ssequence (Ssequence 
         (shared_vars_setup_in_spawn_thread (shared_vars p) par_data_name arg_ty)
     (reduction_vars_setup_in_spawn_thread (reduction_vars p) par_data_name arg_ty)) return_stmt), return_idents)
   end.
 
-  Definition spawn_threads_pass (p: pragma_info) (n: nat) (idents: list ident) (arg_ty par_routine_data_name par_routine_data_type_name: ident): (statementT * list ident * list ident) :=
+  Definition spawn_threads_pass (p: pragma_info) (n: nat) (idents: list ident) (arg_ty par_routine_data_name par_routine_data_type_name: ident): (statement * list ident * list ident) :=
     let (par_routine_name, idents) := (gen_ident idents) in
     let (shared_and_reduction_vars_setup_code, idents) := (shared_and_reduction_vars_setup_in_spawn_thread p n arg_ty idents) in
     match spawn_thread n idents par_routine_data_name par_routine_data_type_name with (*spawn thread needs to use generated data name and maybe generated type name*)
-      | (spawn_thread_code, all_idents, thread_ids) => (SsequenceT (SsequenceT (
-                    SsequenceT 
-                      spawn_thread_code shared_and_reduction_vars_setup_code) (ScallT None
+      | (spawn_thread_code, all_idents, thread_ids) => (Ssequence (Ssequence (
+                    Ssequence 
+                      spawn_thread_code shared_and_reduction_vars_setup_code) (Scall None
                           (Evar par_routine_name (Tfunction
                                                  (Tcons (tptr tvoid) Tnil)
                                                  (tptr tvoid) cc_default))
@@ -115,13 +115,13 @@ Section ParallelPragmaPass.
   (* set up shared vars
      corresponds to C code: int *_i = b->i;
      where b is the input to par_routine *)
-  Fixpoint set_up_shared_vars (shared_vars: list (ident * type)) (o_ids : list ident) (g_id_tys: list (ident * type)) (arg_id: ident) (arg_ty: ident) (sv_id_map: list (ident * ident * type)): (statementT * list (ident * ident * type) * list (ident * type)) :=
+  Fixpoint set_up_shared_vars (shared_vars: list (ident * type)) (o_ids : list ident) (g_id_tys: list (ident * type)) (arg_id: ident) (arg_ty: ident) (sv_id_map: list (ident * ident * type)): (statement * list (ident * ident * type) * list (ident * type)) :=
   match shared_vars with 
-   | [] => (SskipT, sv_id_map, [])
+   | [] => (Sskip, sv_id_map, [])
    | (sv_id, sv_ty)::svs =>
    let '(stmt, sv_id_map, g_ids) := (set_up_shared_vars svs o_ids g_id_tys arg_id arg_ty sv_id_map) in
    let sv_id' := gen_ident' (o_ids ++ map fst g_ids) in
-    (((SsequenceT (SsetT sv_id'
+    (((Ssequence (Sset sv_id'
       (Efield
         (Ederef
           (Etempvar arg_id (tptr (Tstruct arg_ty noattr)))
@@ -154,42 +154,42 @@ Section ParallelPragmaPass.
 
   (* `i` is name of a variable of type `ty`.
      replace usage of `i` to `i'`, where `i'` holds the address of `i`. *)
-  Fixpoint mk_ref_stmt i i' ty (s: statementT) : statementT :=
+  Fixpoint mk_ref_stmt i i' ty (s: statement) : statement :=
     match s with
-    | SassignT e1 e2 => SassignT (mk_ref_expr i i' e1) (mk_ref_expr i i' e2) 
-    | SsetT j e =>
+    | Sassign e1 e2 => Sassign (mk_ref_expr i i' e1) (mk_ref_expr i i' e2) 
+    | Sset j e =>
       if ident_eq i j
-      then SassignT (Ederef (Etempvar i' (tptr ty)) ty) (mk_ref_expr i i' e) 
-      else SsetT j (mk_ref_expr i i' e)
+      then Sassign (Ederef (Etempvar i' (tptr ty)) ty) (mk_ref_expr i i' e) 
+      else Sset j (mk_ref_expr i i' e)
     (* simple cases *)
-    | ScallT j e_f e_args =>
+    | Scall j e_f e_args =>
       (* it seems that we can assume i!=j because Clight uses an ident
         different from the user specified ones for return value. *)
-      ScallT j (mk_ref_expr i i' e_f) (mk_ref_exprs i i' e_args)
-    | SbuiltinT j ef tys e_args =>
+      Scall j (mk_ref_expr i i' e_f) (mk_ref_exprs i i' e_args)
+    | Sbuiltin j ef tys e_args =>
       (* it seems that we can assume i!=j because Clight uses an ident
         different from the user specified ones for return value. *)
-      SbuiltinT j ef tys (mk_ref_exprs i i' e_args)
-    | SsequenceT s1 s2 => SsequenceT (mk_ref_stmt i i' ty s1) (mk_ref_stmt i i' ty s2)
-    | SifthenelseT e s1 s2 =>
-      SifthenelseT (mk_ref_expr i i' e) (mk_ref_stmt i i' ty s1) (mk_ref_stmt i i' ty s2)
-    | SloopT s1 s2 =>
-      SloopT (mk_ref_stmt i i' ty s1) (mk_ref_stmt i i' ty s2)
-    | SreturnT maybe_e => 
+      Sbuiltin j ef tys (mk_ref_exprs i i' e_args)
+    | Ssequence s1 s2 => Ssequence (mk_ref_stmt i i' ty s1) (mk_ref_stmt i i' ty s2)
+    | Sifthenelse e s1 s2 =>
+      Sifthenelse (mk_ref_expr i i' e) (mk_ref_stmt i i' ty s1) (mk_ref_stmt i i' ty s2)
+    | Sloop s1 s2 =>
+      Sloop (mk_ref_stmt i i' ty s1) (mk_ref_stmt i i' ty s2)
+    | Sreturn maybe_e => 
       match maybe_e with 
-      | Some e => SreturnT (Some (mk_ref_expr i i' e))
-      | None => SreturnT None
+      | Some e => Sreturn (Some (mk_ref_expr i i' e))
+      | None => Sreturn None
       end
-    | SswitchT e ls => SswitchT (mk_ref_expr i i' e) ls
-    | SlabelT l s => SlabelT l (mk_ref_stmt i i' ty s)
-    | SpragmaT pi n pl s => SpragmaT pi n pl (mk_ref_stmt i i' ty s)
+    | Sswitch e ls => Sswitch (mk_ref_expr i i' e) ls
+    | Slabel l s => Slabel l (mk_ref_stmt i i' ty s)
+    | Spragma n pl s => Spragma n pl (mk_ref_stmt i i' ty s)
     | _ => s
     end
   with
-  mk_ref_lb_stmt i i' ty (ls: labeled_statementsT) : labeled_statementsT :=
+  mk_ref_lb_stmt i i' ty (ls: labeled_statements) : labeled_statements :=
     match ls with
-    | LSnilT => LSnilT
-    | LSconsT l s ls' => LSconsT l (mk_ref_stmt i i' ty s) (mk_ref_lb_stmt i i' ty ls')
+    | LSnil => LSnil
+    | LScons l s ls' => LScons l (mk_ref_stmt i i' ty s) (mk_ref_lb_stmt i i' ty ls')
     end
   .
 
@@ -197,8 +197,8 @@ Section ParallelPragmaPass.
   (* s_1 := mk_ref_stmt s ids[0];
      s_2 := mk_ref_stmt s_1 ids[1];
      ... *)
-  Definition mk_refs (s: statementT) (ids: list (ident * ident * type)) :
-    statementT :=
+  Definition mk_refs (s: statement) (ids: list (ident * ident * type)) :
+    statement :=
     foldr (fun i_i'_ty s =>
       let '(i, i', ty) := i_i'_ty in
       mk_ref_stmt i i' ty s) s ids.
@@ -216,8 +216,8 @@ Section ParallelPragmaPass.
   (cd, ty_id, idents).
 
   Definition gen_par_routine (p: pragma_info) (idents: list ident) 
-    (s_body:statementT) (arg_ty:ident) (temp_vars:list (ident * type)) :
-    functionT * list ident * ident * ident :=
+    (s_body:statement) (arg_ty:ident) (temp_vars:list (ident * type)) :
+    function * list ident * ident * ident :=
     let (par_routine_data_name, idents) := gen_ident idents in
     let (par_routine_data_ty_name, idents) := gen_ident idents in
     let (params_variable, idents) := gen_ident idents in
@@ -226,7 +226,7 @@ Section ParallelPragmaPass.
     let (temps_variable, idents) := gen_ident idents in
     let '(init_shared_vars_stmt, sv_id_map, g_ids) := (set_up_shared_vars (shared_vars p) idents [] params_variable arg_ty []) in
     let f_body_post_idents_replacement := mk_refs f_body sv_id_map in
-    (makeFunctionT
+    (mkfunction
       (tptr tvoid)
       cc_default
       (params)
@@ -243,13 +243,13 @@ Section ParallelPragmaPass.
         (*use pragma info to determine type of variable*)
         5. generate definition of par_routine_1_data_ty
       *)
-   (SsequenceT (SsequenceT (SsequenceT (SsetT temps_variable
+   (Ssequence (Ssequence (Ssequence (Sset temps_variable
     (Ecast (Etempvar params_variable (tptr tvoid))
-      (tptr (Tstruct arg_ty noattr)))) f_body_post_idents_replacement) init_shared_vars_stmt) SskipT), idents++map fst g_ids, par_routine_data_name, par_routine_data_ty_name).
+      (tptr (Tstruct arg_ty noattr)))) f_body_post_idents_replacement) init_shared_vars_stmt) Sskip), idents++map fst g_ids, par_routine_data_name, par_routine_data_ty_name).
 
   (** a pass that turns a parallel pragma into pthread code.
 
-     s : a parallel pragma given by fst_spragma_progT.
+     s : a parallel pragma given by fst_spragma.
      idents : a list of current identifiers.
      turn s (but not its body) into:
         [arg_ty a1 = ...;
@@ -270,13 +270,13 @@ Section ParallelPragmaPass.
       f *
       arg_ty )
     *)
-  Definition par_pass (s: statementT) (idents: list ident) temp_vars : option (statementT * (list ident) * functionT * composite_definition) :=
+  Definition par_pass (s: statement) (idents: list ident) temp_vars : option (statement * (list ident) * function * composite_definition) :=
     match s with
-    | SpragmaT a b (OMPParallel nt pc pc_f rc) s_body =>
-        let '(cd, ty_id, idents) := gen_par_routine_input_ty a idents in
-        let '(annotatedParRoutineFunc, idents, par_routine_data_name, par_routine_data_type_name):= (gen_par_routine a idents s_body ty_id temp_vars) in
+    | Spragma n (OMPParallel nt pc pc_f rc pi) s_body =>
+        let '(cd, ty_id, idents) := gen_par_routine_input_ty pi idents in
+        let '(annotatedParRoutineFunc, idents, par_routine_data_name, par_routine_data_type_name):= (gen_par_routine pi idents s_body ty_id temp_vars) in
         (* FIXME [thread_ids] is currently not used, is this correct? *)
-        let '(body', idents, thread_ids) := spawn_threads_pass a (nt - 1) idents ty_id par_routine_data_name par_routine_data_type_name in
+        let '(body', idents, thread_ids) := spawn_threads_pass pi (nt - 1) idents ty_id par_routine_data_name par_routine_data_type_name in
         Some (body', idents, annotatedParRoutineFunc, cd)
     |_ => None
     end.
@@ -290,7 +290,7 @@ Section ParallelPragmaPassTest.
   Context (_spawn _join_thread: ident).
 
   Definition first_pass_eg :=
-    par_pass _spawn _join_thread (fn_bodyT f_main_clightT) [] (fn_tempsT f_main_clightT).
+    par_pass _spawn _join_thread (fn_body f_main_clight) [] (fn_temps f_main_clight).
 
   #[local] Transparent peq.
 
@@ -341,7 +341,7 @@ Section ParallelPragmaPassTest.
 
   (* Eval compute in first_pass (fn_body_annot f_main_omp_annot) [] (fn_temps_annot f_main_omp_annot). *)
   
-  (* Definition test: (statementT * (option pragma_info) * (option statementT)). 
+  (* Definition test: (statement * (option pragma_info) * (option statement)). 
   let x := eval cbn in ((first_pass (fn_body_annot f_main_omp_annot)[])) in refine x. Defined. *)
   (* Print test. *)
   (*instead of compute try simpl or cbn (call by name)*)
@@ -365,7 +365,7 @@ Section ParallelPragmaPassTest.
   TODO:
   Plan for compiler passes:
   First pass cannot lose information in pragma_info and pragma_label
-  First pass: maybe it maintains the parallel pragma, maybe statementT to statementT
+  First pass: maybe it maintains the parallel pragma, maybe statement to statement
   (just about parallel pragma; translate SParallel to c code)
 
   When we are sure we don't need any pragma information then we can compile to statement
