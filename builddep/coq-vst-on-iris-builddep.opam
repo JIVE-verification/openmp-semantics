@@ -33,6 +33,7 @@ depends: [
   "coq-compcert" {>= "3.11"}
   "coq-vst-zlist" {>= "2.11"}
   "coq-flocq" {>= "4.1.0"}
+  "coq-mathcomp-ssreflect"
   "coq-equations"
   "coq-record-update"
 ]
