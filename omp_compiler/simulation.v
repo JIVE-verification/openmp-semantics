@@ -4,14 +4,6 @@ From compcert.cfrontend Require Import Clight.
 Import finThreadPool.ThreadPool.
 
 Section BackSimulation.
-  
-  (** * Relation on source [s_st] and target [t_st] program states.
-
-  It seems tricky to define this as an equivalence relation. Since the implicit arguments of Ostate (the global environment and ThreadPool) depend on [genv] the global environment, s_st and t_st have different state types because they can't have the same genv (for instance, their function definitions, which is part of genv, must be different). This makes it difficult to write it as
-  [Equiv (@Ostate _ _)]. *)
-  (* FIXME this should be an argument to PassSimulation
-     FIXME the definition is wrong *)
-
   (* BackSimulation: any behavior of the compiled program is a behavior of the
   source program.
   More specifically, if the compiled program starts in a state [t] that is
@@ -20,6 +12,13 @@ Section BackSimulation.
   (* NOTE this might not rule out the case where src is terminating but
   tgt is not, but we don't care about this for now *)
   Class BackSimulation (pass : program -> option program) := {
+    (* Relation on source [s_st] and target [t_st] program states.
+    It seems tricky to define this as an equivalence relation. Since the
+    implicit arguments of Ostate (the global environment and ThreadPool) depend
+    on [genv] the global environment, s_st and t_st have different state types
+    because they can't have the same genv (for instance, their function
+    definitions, which is part of genv, must be different). This makes it
+    difficult to instantiate it as [Equiv (@Ostate _ _)]. *)
     sim_rel : 
       forall (sp tp: program) (Hsptp: pass sp = Some tp),
       @Ostate (Clight.globalenv sp) _ -> @Ostate (Clight.globalenv tp) _ -> Prop;
