@@ -1081,7 +1081,7 @@ Module DryHybridMachine.
 
     Definition Ostep (os os': Ostate) := @HybridMachineSig.MachStep _ _ _ HybridMachineSig.HybridCoarseMachine.DilMem DryHybridMachineSig
                                           HybridMachineSig.HybridCoarseMachine.scheduler os.1 os.2 os'.1 os'.2.
-    Definition Ostep_refl_trans_closure := @clos_refl_trans_1n Ostate Ostep.
+    Definition Osteps := @clos_refl_trans_1n Ostate Ostep.
 
   End DryHybridMachine.
   

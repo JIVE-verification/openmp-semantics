@@ -1,7 +1,7 @@
 From omp_compiler Require Import common.
+From compcert Require Import SimplExpr Ctypes Clight.
 
 Section ParallelPragmaPass.
-  Context (_spawn _join_thread : ident).
 
   Fixpoint spawn_thread (n: nat) (idents: list ident) (rou_id rou_arg_type_id: ident):
     (statement *
@@ -270,15 +270,88 @@ Section ParallelPragmaPass.
       f *
       arg_ty )
     *)
-  Definition par_pass (s: statement) (idents: list ident) temp_vars : option (statement * (list ident) * function * composite_definition) :=
+
+  (* Input are arguments to some Spar, i.e. there is some s:statement s.t.
+    s = Spragma _ (OMPParallel nt pc pc_f rc pi) s_body *)
+  (* FIXME should generate a fundef for the par_routine instead of a function *)
+  Definition par_pass_s nt (pc pc_f: privatization_clause_type)
+    (rc: list reduction_clause_type) pi s_body (idents: list ident) temp_vars :
+    statement * (list ident) * (ident * globdef (Ctypes.fundef function) type) * composite_definition :=
+    let '(cd, ty_id, idents) := gen_par_routine_input_ty pi idents in
+    let '(annotatedParRoutineFunc, idents, par_routine_data_name, par_routine_data_type_name):= (gen_par_routine pi idents s_body ty_id temp_vars) in
+    (* FIXME [thread_ids] is currently not used, is this correct? *)
+    let '(body', idents, thread_ids) := spawn_threads_pass pi (nt - 1) idents ty_id par_routine_data_name par_routine_data_type_name in
+    let gd := Gfun (Ctypes.Internal annotatedParRoutineFunc) in
+    let '(gd_id, idents) := gen_ident idents in
+    (body', idents, (gd_id, gd), cd)
+  .
+
+  (* TODO maybe put [(list ident) * list function * list composite_definition]
+  in a state monad, similar to SimplExpr. *)
+  Fixpoint transl_Spragma tvs (s: statement) ids fs cds :
+    statement * list ident * list (ident * globdef (Ctypes.fundef function) type) * list composite_definition :=
     match s with
-    | Spragma n (OMPParallel nt pc pc_f rc pi) s_body =>
-        let '(cd, ty_id, idents) := gen_par_routine_input_ty pi idents in
-        let '(annotatedParRoutineFunc, idents, par_routine_data_name, par_routine_data_type_name):= (gen_par_routine pi idents s_body ty_id temp_vars) in
-        (* FIXME [thread_ids] is currently not used, is this correct? *)
-        let '(body', idents, thread_ids) := spawn_threads_pass pi (nt - 1) idents ty_id par_routine_data_name par_routine_data_type_name in
-        Some (body', idents, annotatedParRoutineFunc, cd)
-    |_ => None
+    | Ssequence s1 s2 =>
+      let '(s1', ids', fs', cds') := transl_Spragma tvs s1 ids fs cds in
+      let '(s2', ids'', fs'', cds'') := transl_Spragma tvs s2 ids' fs' cds in
+      let s' := Ssequence s1' s2' in
+      (s', ids'', fs'' , cds'')
+    | Sifthenelse e s1 s2 =>
+      let '(s1', ids', fs', cds') := transl_Spragma tvs s1 ids fs cds in
+      let '(s2', ids'', fs'', cds'') := transl_Spragma tvs s2 ids' fs' cds' in
+      let s' := Sifthenelse e s1' s2' in
+      (s', ids'', fs'' , cds'')
+    | Sloop s1 s2 =>
+      let '(s1', ids', fs', cds') := transl_Spragma tvs s1 ids fs cds in
+      let '(s2', ids'', fs'', cds'') := transl_Spragma tvs s2 ids' fs' cds' in
+      let s' := Sloop s1' s2' in
+      (s', ids'', fs'' , cds'')
+    | Slabel lb s =>
+      let '(s', ids', fs', cds') := transl_Spragma tvs s ids fs cds in
+      let s' := Slabel lb s' in
+      (s', ids', fs' , cds')
+    | Spragma _ (OMPParallel nt pc pc_f rc pi) s_body =>
+      (* NOTE if we want to handle nested parallel
+      pragmas, either recurse into s_body or call transl_Spragma
+      repeatedly; the latter is probably easier for proofs. *)
+      let '(s', ids', f, cd) := par_pass_s nt pc pc_f rc pi s_body ids tvs in
+      (s', ids', f::fs, cd::cds)
+    | _ => (s, ids, fs, cds)
+    end.
+
+  (* TODO following compcert style, see e.g. [transl_fundef] in SimplExpr.v *)
+  Definition transl_globdef (gd: globdef (Ctypes.fundef function) type) (ids : list ident) : (globdef (Ctypes.fundef function) type * list ident * list (ident * globdef (Ctypes.fundef function) type) * list composite_definition) :=
+    match gd with
+    | Gfun (Ctypes.Internal f) =>
+      let '(s, ids', fs', cds') := transl_Spragma f.(fn_temps) f.(fn_body) ids [] [] in
+       (Gfun (Ctypes.Internal (f <| fn_body := s |>)), ids', fs', cds')
+    | _ =>
+      (gd, [], [], [])
+    end.
+
+  (* TODO *)
+  Definition erase_prog_defs (p: program): Errors.res Clight.program :=
+    make_program (prog_types p) [] (prog_public p) (prog_main p).
+(* globdef (Ctypes.fundef function) type *)
+
+  Definition transl_program (p: program) : option program :=
+    match erase_prog_defs p with
+    | Errors.Error _ => None
+    | Errors.OK p' =>
+      foldr (fun name_fd opt_p =>
+        let '(f_id, gd) := name_fd in
+        p ← opt_p;
+        let '(gd', ids', gds, cds) := transl_globdef gd (prog_public p) in
+        let r := (make_program (cds ++ prog_types p)
+                    (((f_id ,gd') :: gds) ++ prog_defs p)
+                    (* FIXME what should public be? *)
+                    (prog_public p)
+                    (prog_main p)) in
+        match r with
+        | Errors.Error _ => None
+        | Errors.OK p' => Some p'
+        end
+      ) (Some p') p.(prog_defs) 
     end.
 
 End ParallelPragmaPass.
@@ -288,8 +361,8 @@ From omp_compiler Require Import sample.src1_tweak.
 Section ParallelPragmaPassTest.
 
   Context (_spawn _join_thread: ident).
-
-  Definition first_pass_eg :=
+  (* FIXME use transl_program instead *)
+  (* Definition first_pass_eg :=
     par_pass _spawn _join_thread (fn_body f_main_clight) [] (fn_temps f_main_clight).
 
   #[local] Transparent peq.
@@ -337,7 +410,7 @@ Section ParallelPragmaPassTest.
   Example pp_program_eg: False.
   Proof.
     pp_program first_pass_eg.
-  Abort.
+  Abort. *)
 
   (* Eval compute in first_pass (fn_body_annot f_main_omp_annot) [] (fn_temps_annot f_main_omp_annot). *)
   

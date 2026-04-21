@@ -23,7 +23,7 @@ Section DryHybridMachineInst.
 
   #[global] Instance OpenMP_semantics : MachineSig := @DryHybridMachineSig _ _.
 
-  Definition OpenMP_steps := @Ostep_refl_trans_closure ge _.
+  Definition Osteps := @Osteps ge _.
 
   Definition init_mem : option mem := Genv.init_mem prog.
 
