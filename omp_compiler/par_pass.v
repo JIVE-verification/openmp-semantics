@@ -334,6 +334,8 @@ Section ParallelPragmaPass.
     make_program (prog_types p) [] (prog_public p) (prog_main p).
 (* globdef (Ctypes.fundef function) type *)
 
+(* Goal is to take a program with OMP pragmas and output a program
+  that uses c's parallel instructions as defined in threads.h *)
   Definition transl_program (p: program) : option program :=
     match erase_prog_defs p with
     | Errors.Error _ => None
@@ -367,14 +369,6 @@ Section ParallelPragmaPassTest.
 
   #[local] Transparent peq.
 
-  (* simplify Clight, but keep the sugars *)
-  Declare Reduction simpl_clight := cbv -[
-      (* C type shorthand *)
-      tvoid tschar tuchar tshort tushort tint tuint tbool
-      tlong tulong tfloat tdouble tptr tarray
-      (* other shorthand *)
-      noattr cc_default
-    ].
 
   (* fold Clight sugars back *)
   Declare Reduction fold_names := fold
