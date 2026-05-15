@@ -369,6 +369,14 @@ Section ParallelPragmaPassTest.
 
   #[local] Transparent peq.
 
+  (* simplify Clight, but keep the sugars *)
+  Declare Reduction simpl_clight := cbv -[
+      (* C type shorthand *)
+      tvoid tschar tuchar tshort tushort tint tuint tbool
+      tlong tulong tfloat tdouble tptr tarray
+      (* other shorthand *)
+      noattr cc_default
+    ].
 
   (* fold Clight sugars back *)
   Declare Reduction fold_names := fold
