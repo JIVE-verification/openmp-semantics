@@ -32,8 +32,9 @@ Section BackSimulation.
   Context (init_state : forall (p: program), @Ostate (Clight.globalenv p) _ -> Prop).
 
   (* probably useful for proving the back simulation property for one step  *)
-  Definition back_simu_one_step (sp tp: program)
-      (s : @Ostate (Clight.globalenv sp) _) (t t' : @Ostate (Clight.globalenv tp) _) (Hsptp: pass sp = Some tp) : Prop :=
+  Definition back_simu_one_step (sp tp: program) : Prop :=
+    forall (s : @Ostate (Clight.globalenv sp) _) (t t' : @Ostate (Clight.globalenv tp) _)
+      (Hsptp: pass sp = Some tp),
     rel s t ->
     (* t0 takes one steps to some t' *)
     Ostep t t' ->
@@ -43,8 +44,9 @@ Section BackSimulation.
         rel s' t'.
 
   (* Top level refinement theorem. **)
-  Definition back_simu (sp tp: program)
-      (s0 : @Ostate (Clight.globalenv sp) _) (t0 t' : @Ostate (Clight.globalenv tp) _) (Hsptp: pass sp = Some tp) : Prop :=
+  Definition back_simu (sp tp: program) : Prop :=
+    forall (s0 : @Ostate (Clight.globalenv sp) _) 
+      (t0 t' : @Ostate (Clight.globalenv tp) _) (Hsptp: pass sp = Some tp),
     init_state sp s0 ->
     init_state tp t0 ->
     (* s0, t0 are some initial state *)
@@ -57,9 +59,9 @@ Section BackSimulation.
         rel s' t'.
 
   Lemma back_simu_one_step_implies_back_simu:
-    forall sp tp s t t' Hsptp,
-      back_simu_one_step sp tp s t t' Hsptp ->
-      back_simu sp tp s t t' Hsptp.
+    forall sp tp,
+      back_simu_one_step sp tp ->
+      back_simu sp tp.
   Admitted.
 
 End BackSimulation.
