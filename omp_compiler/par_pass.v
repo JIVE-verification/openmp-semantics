@@ -278,10 +278,10 @@ Section ParallelPragmaPass.
     (rc: list reduction_clause_type) pi s_body (idents: list ident) temp_vars :
     statement * (list ident) * (ident * globdef (Ctypes.fundef function) type) * composite_definition :=
     let '(cd, ty_id, idents) := gen_par_routine_input_ty pi idents in
-    let '(annotatedParRoutineFunc, idents, par_routine_data_name, par_routine_data_type_name):= (gen_par_routine pi idents s_body ty_id temp_vars) in
+    let '(fn, idents, par_routine_data_name, par_routine_data_type_name):= (gen_par_routine pi idents s_body ty_id temp_vars) in
     (* FIXME [thread_ids] is currently not used, is this correct? *)
     let '(body', idents, thread_ids) := spawn_threads_pass pi (nt - 1) idents ty_id par_routine_data_name par_routine_data_type_name in
-    let gd := Gfun (Ctypes.Internal annotatedParRoutineFunc) in
+    let gd := Gfun (Ctypes.Internal fn) in
     let '(gd_id, idents) := gen_ident idents in
     (body', idents, (gd_id, gd), cd)
   .
