@@ -1,7 +1,3 @@
-From omp_compiler Require Import par_pass.
-From omp_compiler Require Import simulation.
-From omp_compiler Require Import par_pass_simu.
-
 From omp_compiler Require Import common.
 From VST.concurrency.openmp_sem Require Import DryHybridMachineInst finThreadPool.
 From compcert.cfrontend Require Import Clight.
@@ -62,34 +58,66 @@ Section BackSimulation.
         Osteps(p:=Build_Prog sp) s0 s' ∧
         rel s' t'.
 
-  Lemma back_simu_one_step_implies_back_simu:
-    forall sp tp,
-      back_simu_one_step sp tp ->
-      back_simu sp tp.
-  Proof.
-    intros sp tp Hone.
-    assert (Osteps_trans:
-      forall (s1 s2 s3 : @Ostate (Clight.globalenv sp) _),
-        Osteps (p := Build_Prog sp) s1 s2 ->
-        Osteps (p := Build_Prog sp) s2 s3 ->
-        Osteps (p := Build_Prog sp) s1 s3).
-    { intros s1 s2 s3 H12 H23.
-      induction H12 as [| s1 s2 s4 H12 H24 IH].
-      - exact H23.
-      - eapply Relation_Operators.rt1n_trans.
-        + exact H12.
-        + apply IH; exact H23. }
-    unfold back_simu.
-    intros s0 t0 t' Hsptp _ _ Hrel Hsteps.
-    revert s0 Hrel.
-    induction Hsteps as [t | t t1 t' Hstep Hsteps IH];
-      intros s0 Hrel.
-    - exists s0; split; [constructor | exact Hrel].
-    - destruct (Hone s0 t t1 Hsptp Hrel Hstep)
-        as (s1 & Hs0s1 & Hrels1).
-      destruct (IH s1 Hrels1) as (s' & Hs1s' & Hrels').
-      exists s'; split; [| exact Hrels'].
-      eapply Osteps_trans; eauto.
-  Qed.
+
+
+Lemma back_simu_one_step_implies_back_simu :
+  forall sp tp,
+    back_simu_one_step sp tp ->
+    back_simu sp tp.
+Proof.
+  intros sp tp Hone.
+  unfold back_simu_one_step in Hone.
+
+  assert
+    (Osteps_trans :
+       forall
+         (s1 s2 s3 : @Ostate (Clight.globalenv sp) _),
+         Osteps (p := Build_Prog sp) s1 s2 ->
+         Osteps (p := Build_Prog sp) s2 s3 ->
+         Osteps (p := Build_Prog sp) s1 s3).
+  {
+    intros s1 s2 s3 H12 H23.
+    induction H12 as
+        [s1
+        | s1 s2 s4 H12 H24 IH].
+
+    - exact H23.
+
+    - eapply Relation_Operators.rt1n_trans.
+      + exact H12.
+      + apply IH.
+        exact H23.
+  }
+
+  unfold back_simu.
+  intros s0 t0 t' Hsptp _ _ Hrel Hsteps.
+
+  revert s0 Hrel.
+
+  induction Hsteps as
+      [t
+      | t t1 t' Hstep Hsteps IH];
+    intros s0 Hrel.
+
+  - exists s0.
+    split.
+    + constructor.
+    + exact Hrel.
+
+  - destruct (Hone s0 t t1 Hsptp Hrel Hstep)
+      as (s1 & Hs0s1 & Hrels1).
+
+    destruct (IH s1 Hrels1)
+      as (s' & Hs1s' & Hrels').
+
+    exists s'.
+    split.
+    + eapply Osteps_trans.
+      * exact Hs0s1.
+      * exact Hs1s'.
+    + exact Hrels'.
+Qed.
+
 
 End BackSimulation.
+
