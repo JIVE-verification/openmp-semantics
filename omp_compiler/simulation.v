@@ -1,3 +1,7 @@
+From omp_compiler Require Import par_pass.
+From omp_compiler Require Import simulation.
+From omp_compiler Require Import par_pass_simu.
+
 From omp_compiler Require Import common.
 From VST.concurrency.openmp_sem Require Import DryHybridMachineInst finThreadPool.
 From compcert.cfrontend Require Import Clight.
