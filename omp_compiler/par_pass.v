@@ -3,6 +3,7 @@ From compcert Require Import SimplExpr Ctypes Clight.
 
 Section ParallelPragmaPass.
 
+  (* this function is designed to spawn one thread*)
   Fixpoint spawn_thread (n: nat) (idents: list ident) (rou_id rou_arg_type_id: ident):
     (statement *
       list ident * (* all identifiers in the program, including the type name for par routine argument *)
@@ -37,11 +38,14 @@ Section ParallelPragmaPass.
       (code, idents, thread_id::thread_ids)
     end.
 
+  (*this proof is optional but may help to make sure gen_ident is working properly but may become unnecessary if we use monads
+  for generating idents*)
   Lemma spawn_thread_idents_increasing:
     forall (idents: list ident)n a b , let '(stmt, idents', idents2) := spawn_thread n idents a b in
     ~(Nat.ltb (length idents') (length idents)).
   Proof. Admitted.
 
+  (* code that executes after thread is spawned, e.g. join_thread*)
   Fixpoint post_spawn_thread_code (thread_ids: list ident): statement := 
     match thread_ids with 
     | [] => Sskip
@@ -53,6 +57,7 @@ Section ParallelPragmaPass.
           ((Etempvar thread_id tint) :: nil)) (post_spawn_thread_code rest_of_ids)
     end. (* FIXME remove this hardcoded variable*)
 
+  (*variables like i in src1.c *)
   Fixpoint shared_vars_setup_in_spawn_thread (list_of_shared_vars : list (ident * type)) (par_data_name arg_ty: ident): statement :=
     match list_of_shared_vars with 
     | shared_var::rest_of_list => (Ssequence ((Sassign
@@ -63,6 +68,7 @@ Section ParallelPragmaPass.
     | [] => Sskip
     end.
 
+  (*variables like k in src1.c *)
   Fixpoint reduction_vars_setup_in_spawn_thread (list_of_reduction_vars : list (ident * type)) (par_data_name arg_ty: ident): statement :=
   match list_of_reduction_vars with 
   | shared_var::rest_of_list => (Ssequence (Sassign
@@ -84,6 +90,7 @@ Section ParallelPragmaPass.
     (reduction_vars_setup_in_spawn_thread (reduction_vars p) par_data_name arg_ty)) return_stmt), return_idents)
   end.
 
+(*pass to spawn all threads*)
   Definition spawn_threads_pass (p: pragma_info) (n: nat) (idents: list ident) (arg_ty par_routine_data_name par_routine_data_type_name: ident): (statement * list ident * list ident) :=
     let (par_routine_name, idents) := (gen_ident idents) in
     let (shared_and_reduction_vars_setup_code, idents) := (shared_and_reduction_vars_setup_in_spawn_thread p n arg_ty idents) in
@@ -206,6 +213,7 @@ Section ParallelPragmaPass.
   Definition ident_ty_to_member_plain (ident_ty: ident * type): member :=
   let(ident, ty) := ident_ty in Member_plain ident (tptr ty).
   
+  (* generating type of parallel routine (in tgt1.c, _par_routine1_data_ty)*)
   Definition gen_par_routine_input_ty (p: pragma_info) (idents: list ident) :
    (composite_definition * ident * list ident) :=
   let '(ty_id, idents) := gen_ident idents in
@@ -215,6 +223,7 @@ Section ParallelPragmaPass.
               noattr in
   (cd, ty_id, idents).
 
+  (* generating parallel routine (in tgt1.c, _par_routine1)*)
   Definition gen_par_routine (p: pragma_info) (idents: list ident) 
     (s_body:statement) (arg_ty:ident) (temp_vars:list (ident * type)) :
     function * list ident * ident * ident :=
